@@ -12,7 +12,7 @@ use serde_json::Value;
 use tower_service::Service;
 
 use crate::discovery::{ContextRef, KubeContext};
-use crate::manager::{ClusterHandle, ClusterManager, lock};
+use crate::manager::{ClusterEvent, ClusterHandle, ClusterManager, lock};
 use crate::provider::{AuthKind, Provider};
 use crate::settings::KubeSettings;
 use crate::shell_env::ShellEnv;
@@ -120,9 +120,20 @@ pub fn client_reading_bodies(
 }
 
 pub fn handle(client: &Client) -> (ClusterManager, ClusterHandle) {
+    let (manager, handle, _) = supervised(client);
+    (manager, handle)
+}
+
+pub fn supervised(
+    client: &Client,
+) -> (
+    ClusterManager,
+    ClusterHandle,
+    async_channel::Receiver<ClusterEvent>,
+) {
     let settings = KubeSettings::default();
     let env = Arc::new(ShellEnv::from_process(String::new()));
-    let (manager, _) = ClusterManager::new(tokio::runtime::Handle::current(), settings, env);
+    let (manager, events) = ClusterManager::new(tokio::runtime::Handle::current(), settings, env);
     let context = KubeContext {
         trust: crate::discovery::Fingerprint::default(),
         credentials: crate::discovery::Fingerprint::default(),
@@ -140,5 +151,5 @@ pub fn handle(client: &Client) -> (ClusterManager, ClusterHandle) {
     };
     let handle = manager.connect(context);
     handle.shared.set_client(Some(client));
-    (manager, handle)
+    (manager, handle, events)
 }

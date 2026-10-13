@@ -1,13 +1,13 @@
-use fleet_core::{ClusterSummary, Command, Counts, Page};
+use fleet_core::{Command, Counts, Page};
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    MouseButton, ParentElement, StatefulInteractiveElement, Styled, Window, div,
 };
 
 use fleet_core::AddClusterStep;
 
 use super::Shell;
-use crate::kit::status_symbols;
+use crate::kit::{Skeleton, status_symbols};
 use crate::screens::add_cluster::empty_fleet;
 use crate::screens::workload::WorkloadScreen;
 use crate::theme::{
@@ -53,7 +53,16 @@ impl Shell {
         if self.state.flux_object.is_some() {
             return self.flux_object.clone().into_any_element();
         }
-        let body = if self.state.page == Page::Pods && self.has_detail() {
+        let loading = self.load_view(cx);
+        let body = if let Some(view) = loading {
+            div()
+                .id("page-content")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .child(view)
+                .into_any_element()
+        } else if self.state.page == Page::Pods && self.has_detail() {
             div()
                 .flex_1()
                 .min_h_0()
@@ -178,7 +187,7 @@ impl Shell {
             page => self
                 .pages
                 .render(page, self.has_detail())
-                .unwrap_or_else(|| self.placeholder(palette).into_any_element()),
+                .unwrap_or_else(|| self.placeholder(palette)),
         }
     }
 
@@ -187,11 +196,11 @@ impl Shell {
             .is_some_and(|c| self.state.snapshot.detail(&c.id).is_some())
     }
 
-    fn placeholder(&self, palette: &Palette) -> impl IntoElement {
-        let scope: SharedString = match self.selected_cluster() {
-            Some(cluster) => missing_detail(cluster).into(),
-            None => format!("{} clusters", self.state.snapshot.clusters.len()).into(),
-        };
+    fn placeholder(&self, palette: &Palette) -> AnyElement {
+        if self.selected_cluster().is_some() {
+            return Skeleton::rows().into_any_element();
+        }
+        let scope = format!("{} clusters", self.state.snapshot.clusters.len());
         div()
             .flex()
             .flex_col()
@@ -206,6 +215,7 @@ impl Shell {
                     .child(self.state.page.label().to_uppercase()),
             )
             .child(div().text_color(palette.fg2).child(scope))
+            .into_any_element()
     }
 }
 
@@ -224,14 +234,6 @@ fn note_parts(counts: &Counts, text: String, palette: &Palette) -> Vec<(String, 
     parts
 }
 
-fn missing_detail(cluster: &ClusterSummary) -> String {
-    if cluster.nodes.is_some() {
-        format!("Loading {}…", cluster.name)
-    } else {
-        format!("No data from {}: {}.", cluster.name, cluster.state)
-    }
-}
-
 fn more_button(palette: &Palette) -> impl IntoElement {
     let hover = palette.hover;
     div()
@@ -246,41 +248,4 @@ fn more_button(palette: &Palette) -> impl IntoElement {
         .hover(move |style| style.bg(hover))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .child(MORE)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-
-    use fleet_core::{ClusterId, Status};
-
-    use super::*;
-
-    fn summary(nodes: Option<u32>, state: &str) -> ClusterSummary {
-        ClusterSummary {
-            id: ClusterId::new("qa-gke"),
-            name: "qa-gke".into(),
-            status: Status::Err,
-            state: state.into(),
-            distro: "GKE".into(),
-            region: "us-central1".into(),
-            version: None,
-            nodes,
-            problems: Counts::default(),
-            nav: BTreeMap::new(),
-            metrics: None,
-        }
-    }
-
-    #[test]
-    fn unreachable_clusters_say_why_they_have_no_data() {
-        assert_eq!(
-            missing_detail(&summary(None, "Auth expired")),
-            "No data from qa-gke: Auth expired."
-        );
-        assert_eq!(
-            missing_detail(&summary(Some(3), "Healthy")),
-            "Loading qa-gke…"
-        );
-    }
 }

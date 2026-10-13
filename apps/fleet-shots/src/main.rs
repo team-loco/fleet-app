@@ -16,6 +16,8 @@ struct Args {
     appearance: AppearanceArg,
     #[arg(long, value_name = "PATH")]
     out: PathBuf,
+    #[arg(long, value_enum)]
+    state: Option<fleet_shots::StateFixture>,
     #[arg(long, value_name = "NAME")]
     cluster: Option<String>,
     #[arg(long, value_name = "NAMESPACE/NAME", value_parser = parse_object)]
@@ -28,7 +30,8 @@ fn main() -> anyhow::Result<()> {
         cluster: args.cluster.map(ClusterId::new),
         object: args.object,
     };
-    let image = fleet_shots::render(args.screen, &preset, args.appearance.into())?;
+    let appearance = args.appearance.into();
+    let image = fleet_shots::render_state(args.screen, &preset, appearance, args.state)?;
     fleet_shots::save(&image, &args.out)?;
     println!("{}", args.out.display());
     Ok(())

@@ -18,7 +18,8 @@ Every tool is pinned in `mise.toml`. `mise run <task>`:
 - `check` runs everything a PR needs: fmt, clippy (default and `--features loco`), nextest, typos, deny
 - `run` / `demo` / `run:loco` start the app (live / sample data / with Loco)
 - `shot -- <screen> [dark|light]` renders a demo screen headlessly to `target/shots/<screen>-<appearance>.png`
-  (1440×900 @2x; `FLEET_FEATURES=loco` for Loco screens). No window opens.
+  (1440×900 @2x; `FLEET_FEATURES=loco` for Loco screens; `--state loading|connecting|empty|error` for
+  page states). No window opens.
 - UI interaction tests live in `apps/fleet-shots/tests/ui.rs`: `fleet_shots::Ui::open(Screen::…)` builds the
   shell on demo data headlessly, then `press("cmd-k")`, `type_text(..)`, `click("<debug selector>")` (also `double_click`,
   `right_click`, `hover`, `drag(selector, offset)`),

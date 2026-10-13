@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
+use fleet_core::WatchState;
+use fleet_core::watch::NOT_STARTED;
 use k8s_openapi::apimachinery::pkg::version::Info;
 use kube::Client;
 use kube::api::DynamicObject;
@@ -27,6 +29,10 @@ use crate::task::TaskGuard;
 use crate::throttle::Throttle;
 
 pub const COALESCE_INTERVAL: Duration = Duration::from_millis(250);
+pub const STEP_CREDENTIALS: &str = "Reading kubeconfig and credentials";
+pub const STEP_API: &str = "Checking the API server and nodes";
+pub const STEP_IDENTITY: &str = "Checking the signed-in identity";
+const OFFLINE: &str = "cluster offline";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KindFailure {
@@ -81,6 +87,7 @@ struct WatchEntry {
     refs: usize,
     resource: Option<ApiResource>,
     running: Option<RunningWatch>,
+    state: WatchState,
 }
 
 pub(crate) struct Shared {
@@ -89,6 +96,7 @@ pub(crate) struct Shared {
     pub(crate) env: Arc<ShellEnv>,
     pub(crate) settings: KubeSettings,
     status: Mutex<ConnectionStatus>,
+    step: Mutex<&'static str>,
     info: Mutex<ClusterInfo>,
     client: Mutex<Option<Client>>,
     watches: Mutex<HashMap<WatchKey, WatchEntry>>,
@@ -112,6 +120,7 @@ impl Shared {
     }
 
     fn start(&self, key: &WatchKey, entry: &mut WatchEntry, client: &Client) {
+        entry.state = WatchState::pending(format!("Listing {}", key.kind.name()));
         let signals = self.signals.clone();
         let kind = &key.kind;
         entry.running = match (kind, &entry.resource) {
@@ -172,6 +181,7 @@ impl Shared {
             refs: 0,
             resource,
             running: None,
+            state: WatchState::pending(NOT_STARTED),
         });
         entry.refs += 1;
         if entry.running.is_none()
@@ -179,6 +189,18 @@ impl Shared {
         {
             self.start(key, entry, &client);
         }
+    }
+
+    fn record(&self, kind: &WatchKind, state: &WatchState) {
+        let mut watches = lock(&self.watches);
+        let entries = watches.iter_mut().filter(|(key, _)| &key.kind == kind);
+        for (_, entry) in entries {
+            entry.state = state.clone();
+        }
+    }
+
+    fn set_step(&self, step: &'static str) {
+        *lock(&self.step) = step;
     }
 
     fn unsubscribe(&self, key: &WatchKey) {
@@ -309,6 +331,31 @@ impl ClusterHandle {
             .unwrap_or_default()
     }
 
+    pub fn watch_state(&self, kind: &WatchKind) -> WatchState {
+        match self.status() {
+            ConnectionStatus::Connecting => WatchState::pending(*lock(&self.shared.step)),
+            ConnectionStatus::Offline(failure) => {
+                WatchState::Failed(format!("{OFFLINE}: {}", failure.detail))
+            }
+            ConnectionStatus::AuthExpired(failure) => WatchState::Failed(failure.detail),
+            ConnectionStatus::Connected => self.entry_state(kind),
+            ConnectionStatus::Degraded(_) => self.entry_state(kind),
+        }
+    }
+
+    fn entry_state(&self, kind: &WatchKind) -> WatchState {
+        let watches = lock(&self.shared.watches);
+        let states: Vec<WatchState> = watches
+            .iter()
+            .filter(|(key, _)| &key.kind == kind)
+            .map(|(_, entry)| entry.state.clone())
+            .collect();
+        if states.is_empty() {
+            return WatchState::pending(NOT_STARTED);
+        }
+        WatchState::combine(states)
+    }
+
     pub fn watched_kinds(&self) -> Vec<WatchKind> {
         let kinds: BTreeSet<WatchKind> = lock(&self.shared.watches)
             .keys()
@@ -364,12 +411,14 @@ impl Health {
 }
 
 async fn establish(shared: &Shared) -> Result<Client> {
+    shared.set_step(STEP_CREDENTIALS);
     let client = connect(
         &shared.context,
         &shared.env,
         shared.settings.connect_timeout,
     )
     .await?;
+    shared.set_step(STEP_API);
     let (version, provider_id) = identify(&client, shared.settings.check_timeout).await?;
     let provider = refine_provider(
         shared.context.provider,
@@ -406,6 +455,7 @@ async fn health_check(shared: &Shared) -> Result<(), Failure> {
         shared.set_client(Some(&client));
         client
     };
+    shared.set_step(STEP_IDENTITY);
     let timeout = shared.settings.check_timeout;
     let who = tokio::time::timeout(timeout, probe::whoami(&client))
         .await
@@ -464,11 +514,15 @@ async fn supervise(
                 let Some(signal) = received else { return };
                 match signal.event {
                     SignalEvent::Changed => {
+                        shared.record(&signal.kind, &WatchState::Synced);
                         health.kinds.remove(&signal.kind);
                         dirty.insert(signal.kind);
                     }
                     SignalEvent::Failed(err) => {
                         let failure = classify(&err, &shared.context);
+                        let failed = WatchState::Failed(failure.detail.clone());
+                        shared.record(&signal.kind, &failed);
+                        dirty.insert(signal.kind.clone());
                         health.kinds.insert(signal.kind, failure);
                     }
                 }
@@ -542,6 +596,7 @@ impl ClusterManager {
             env: self.env.clone(),
             settings: self.settings.clone(),
             status: Mutex::new(ConnectionStatus::Connecting),
+            step: Mutex::new(STEP_CREDENTIALS),
             info: Mutex::new(info),
             client: Mutex::new(None),
             watches: Mutex::new(HashMap::new()),
@@ -731,6 +786,79 @@ mod tests {
         assert!(retained.shared.signals.is_closed());
         retained.shared.set_client(Some(&client));
         assert!(matches!(retained.client(), Err(Error::NotConnected)));
+    }
+
+    const WATCH_ROUND_TRIP: Duration = Duration::from_millis(20);
+    const SYNC_PATIENCE: Duration = Duration::from_secs(10);
+    const EMPTY_DEPLOYMENTS: &str = r#"{"kind":"DeploymentList","apiVersion":"apps/v1","metadata":{"resourceVersion":"1"},"items":[]}"#;
+    const FORBIDDEN_SECRETS: &str = r#"{"kind":"Status","apiVersion":"v1","status":"Failure","message":"secrets is forbidden: User cannot list resource secrets","reason":"Forbidden","code":403}"#;
+
+    async fn settled(handle: &ClusterHandle, kind: &WatchKind) -> WatchState {
+        let deadline = Instant::now() + SYNC_PATIENCE;
+        loop {
+            let state = handle.watch_state(kind);
+            if !matches!(state, WatchState::Pending(_)) || Instant::now() > deadline {
+                return state;
+            }
+            tokio::time::sleep(WATCH_ROUND_TRIP).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn watch_states_tell_an_empty_list_from_a_forbidden_one_and_an_unstarted_one() {
+        let (client, _) = crate::fake::client(WATCH_ROUND_TRIP, |_, path| {
+            if path.contains("watch=true") {
+                return Some((http::StatusCode::OK, String::new()));
+            }
+            if path.starts_with("/apis/apps/v1/deployments") {
+                return Some((http::StatusCode::OK, EMPTY_DEPLOYMENTS.to_owned()));
+            }
+            if path.starts_with("/api/v1/secrets") {
+                return Some((http::StatusCode::FORBIDDEN, FORBIDDEN_SECRETS.to_owned()));
+            }
+            None
+        });
+        let (_manager, handle, _events) = crate::fake::supervised(&client);
+        let _deployments = handle.subscribe(WatchKind::Deployments);
+        let _secrets = handle.subscribe(WatchKind::Secrets);
+        assert_eq!(
+            settled(&handle, &WatchKind::Deployments).await,
+            WatchState::Synced
+        );
+        let secrets = settled(&handle, &WatchKind::Secrets).await;
+        assert!(
+            matches!(&secrets, WatchState::Failed(reason) if reason.contains("forbidden")),
+            "{secrets:?}"
+        );
+        assert_eq!(
+            handle.watch_state(&WatchKind::Jobs),
+            WatchState::pending(NOT_STARTED)
+        );
+    }
+
+    #[test]
+    fn an_unreachable_cluster_fails_every_watch_with_its_reason() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build();
+        let Ok(runtime) = runtime else {
+            panic!("runtime");
+        };
+        runtime.block_on(async {
+            let (client, _) = crate::fake::client(Duration::ZERO, |_, _| None);
+            let (_manager, handle) = crate::fake::handle(&client);
+            assert_eq!(
+                handle.watch_state(&WatchKind::Pods),
+                WatchState::pending(STEP_CREDENTIALS)
+            );
+            let mut offline = failure(FailureKind::Unreachable);
+            offline.detail = "Connection refused.".into();
+            *lock(&handle.shared.status) = ConnectionStatus::Offline(offline);
+            assert_eq!(
+                handle.watch_state(&WatchKind::Pods),
+                WatchState::Failed("cluster offline: Connection refused.".into())
+            );
+        });
     }
 
     const HANG_PATIENCE: Duration = Duration::from_secs(60);

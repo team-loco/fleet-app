@@ -199,6 +199,7 @@ pub fn snapshot() -> Snapshot {
         resources: resources::resources(),
         changes: changes::log(),
         details: BTreeMap::from([(ClusterId::new(PROD_US_EAST), detail::prod_us_east())]),
+        pages: BTreeMap::new(),
         gitops: gitops::gitops(),
         flux: flux::objects(),
         #[cfg(feature = "loco")]

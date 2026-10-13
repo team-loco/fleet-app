@@ -14,8 +14,8 @@ use fleet_core::stream::Sink;
 use fleet_core::{
     Backend, ChangesLog, CheckLine, ClusterCatalog, ClusterId, ClusterSummary, Command, Comparison,
     ContextChoice, Counts, FleetHome, GitOps, KubeconfigFile, NewCluster, Notice, Page,
-    Preferences, Receiver, ResourceRef, Sender, Snapshot, Status, Update, Verdict, Workload,
-    WorkloadKind,
+    Preferences, Receiver, ResourceRef, Sender, Snapshot, Status, Update, Verdict, WatchState,
+    Workload, WorkloadKind,
 };
 use jiff::Timestamp;
 use k8s_openapi::api::core::v1::Node;
@@ -973,6 +973,34 @@ impl Live {
         }
     }
 
+    fn page_states(&self) -> BTreeMap<ClusterId, BTreeMap<Page, WatchState>> {
+        let mut pages: BTreeMap<ClusterId, BTreeMap<Page, WatchState>> = BTreeMap::new();
+        for navigation in self.navigations() {
+            let Some(selected) = navigation.selected.as_ref() else {
+                continue;
+            };
+            let Some(cluster) = self.clusters.values().find(|c| &c.id == selected) else {
+                continue;
+            };
+            let page = navigation.page;
+            let state = self.gitops.page_state(selected, page).or_else(|| {
+                let kinds: Vec<_> = page_watches(page, None)
+                    .into_iter()
+                    .map(|(kind, _)| kind)
+                    .collect();
+                let states = kinds.iter().map(|kind| cluster.handle.watch_state(kind));
+                (!kinds.is_empty()).then(|| WatchState::combine(states))
+            });
+            if let Some(state) = state {
+                pages
+                    .entry(selected.clone())
+                    .or_default()
+                    .insert(page, state);
+            }
+        }
+        pages
+    }
+
     fn snapshot(&self) -> Snapshot {
         let now = Timestamp::now();
         let mut connected = Vec::new();
@@ -1056,6 +1084,7 @@ impl Live {
             resources: Vec::new(),
             changes: ChangesLog::default(),
             details,
+            pages: self.page_states(),
             gitops: GitOps::default(),
             flux: Vec::new(),
             #[cfg(feature = "loco")]
@@ -1538,6 +1567,56 @@ mod tests {
             assert_eq!(live.clusters.len(), 2);
             assert!(live.disconnected.is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn every_window_reports_the_watch_state_of_its_cluster_page() {
+        let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let mut live = test_live(dir.path());
+        let context = context("/missing-page-state-kubeconfig", "a");
+        let handle = live.manager.connect(context.clone());
+        let id = ClusterId::new("a");
+        live.gitops.sync([(&id, &handle)]);
+        let extras = Extras::new(live.settings.usage_samples());
+        live.clusters.insert(
+            context.id,
+            Connected {
+                id: id.clone(),
+                handle,
+                extras,
+                _baseline: Vec::new(),
+                usage_task: None,
+                pod_usage_task: None,
+                prometheus_task: None,
+            },
+        );
+        let pages = [
+            (FIRST_WINDOW, Page::Deployments),
+            (SECOND_WINDOW, Page::HelmReleases),
+        ];
+        for (window, page) in pages {
+            let select = Command::SelectCluster(Some(id.clone()));
+            live.apply(&window_command(window, select));
+            live.apply(&window_command(window, Command::SelectPage(page)));
+        }
+        let states = live.page_states();
+        let Some(reported) = states.get(&id) else {
+            panic!("no page states for the selected cluster: {states:?}");
+        };
+        let shown: Vec<Page> = reported.keys().copied().collect();
+        assert_eq!(shown, vec![Page::Deployments, Page::HelmReleases]);
+        assert!(
+            reported.values().all(|state| *state != WatchState::Synced),
+            "{reported:?}"
+        );
+        let fleet = Command::SelectPage(Page::Settings);
+        live.apply(&window_command(SECOND_WINDOW, fleet));
+        let states = live.page_states();
+        let shown: Vec<Page> = states
+            .get(&id)
+            .map(|pages| pages.keys().copied().collect())
+            .unwrap_or_default();
+        assert_eq!(shown, vec![Page::Deployments]);
     }
 
     #[tokio::test]

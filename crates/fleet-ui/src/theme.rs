@@ -180,6 +180,17 @@ pub const PALETTE_IN: Duration = Duration::from_millis(140);
 pub const PALETTE_OUT: Duration = Duration::from_millis(90);
 pub const FLASH: Duration = Duration::from_millis(900);
 pub const TOAST_TIMEOUT: Duration = Duration::from_secs(4);
+pub const SKELETON_SHIMMER: Duration = Duration::from_millis(1200);
+pub const SKELETON_SHIMMER_OPACITY: f32 = 0.6;
+pub const SKELETON_SHIMMER_WIDTH: Pixels = px(80.);
+pub const SKELETON_ROWS: usize = 8;
+pub const SKELETON_NAME_WIDTH: Pixels = px(220.);
+pub const SKELETON_NAMESPACE_WIDTH: Pixels = px(130.);
+pub const SKELETON_STATUS_WIDTH: Pixels = px(300.);
+pub const SKELETON_TITLE_WIDTH: Pixels = px(240.);
+pub const SKELETON_METER_WIDTH: Pixels = px(260.);
+pub const SKELETON_METER_HEIGHT: Pixels = px(64.);
+pub const SKELETON_CHART_WIDTH: Pixels = px(640.);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Appearance {

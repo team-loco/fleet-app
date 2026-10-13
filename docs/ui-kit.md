@@ -464,3 +464,19 @@ motion drops the exit at once.
 
 Text columns may use `.tooltip(|row| row.message.clone().into())` to expose a full value on hover
 while keeping truncation, filtering highlights and automatic column sizing.
+
+## Loading, empty and error states
+
+Every cluster page ends in one of loaded, empty or error. The backend reports
+`Snapshot::pages[cluster][page]` as `WatchState::Pending(step)`, `Synced` or `Failed(reason)`; a
+completed initial list with no objects is `Synced`. The shell renders:
+
+- `Skeleton::rows()` for tables and `Skeleton::blocks()` for meters and charts, shimmering over
+  `theme::SKELETON_SHIMMER` (still under reduced motion)
+- `ConnectionProgress::new(cluster, step)` above the skeleton while the cluster is connecting
+- `EmptyState::new(sentence, action)`: no icon, one sentence and one `Button`
+- `ErrorState::new(reason, retry)`: status glyph, the backend reason on one line, Retry
+
+A page still pending after `fleet_core::watch::WATCH_SYNC_TIMEOUT` becomes an error naming the step
+it stalled on. Render the states headlessly with `mise run shot -- resources dark --state loading`
+(also `connecting`, `empty`, `error`); `Ui::with_state` drives them in interaction tests.

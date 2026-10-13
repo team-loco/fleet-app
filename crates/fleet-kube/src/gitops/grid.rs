@@ -262,6 +262,7 @@ mod tests {
     fn info() -> FluxInfo {
         FluxInfo {
             kinds: vec![ObjectKind::Kustomization],
+            unserved: BTreeMap::new(),
             version: Some("v2.9.6".to_owned()),
             controllers: Vec::new(),
         }
