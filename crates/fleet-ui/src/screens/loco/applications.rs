@@ -1,3 +1,4 @@
+use fleet_core::filter::TextFilter;
 use fleet_core::loco::{
     AppFilter, Application, Applications, ControllerObject, LocoCommand, Workspace, short_digest,
 };
@@ -10,8 +11,8 @@ use gpui::{
 };
 
 use crate::kit::{
-    ActionMenu, Button, Column, KeyValue, Link, MenuItem, PageTitle, SectionHeader, Segmented,
-    StatusGlyph, StatusText, Table, TableEvent,
+    ActionMenu, Button, Column, FilterBar, FilterEvent, KeyValue, Link, MenuItem, PageTitle,
+    SectionHeader, StatusGlyph, StatusText, Table, TableEvent, chip_label,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, LINE_PROSE, Palette, RADIUS, ROW_TABLE_MAX, ROW_TABLE_MIN, RULE,
@@ -54,18 +55,19 @@ impl AppRow {
 
 pub struct ApplicationsScreen {
     applications: Applications,
-    filter: AppFilter,
+    filter: Entity<FilterBar>,
     selected: Option<ResourceRef>,
     list: Entity<Table<AppRow>>,
     objects: Entity<Table<ControllerObject>>,
     menu: Entity<ActionMenu>,
-    _subscriptions: [Subscription; 2],
+    _subscriptions: [Subscription; 3],
 }
 
 impl EventEmitter<Command> for ApplicationsScreen {}
 
 impl ApplicationsScreen {
-    pub fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let filter = cx.new(|cx| FilterBar::new("loco-app-filter", window, cx));
         let list = cx.new(|cx| {
             Table::new("loco-apps", app_columns(), cx)
                 .headerless()
@@ -114,10 +116,15 @@ impl ApplicationsScreen {
                     cx.emit(Command::OpenResource(target));
                 }
             }),
+            cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
+                this.refresh_list(cx);
+                let selected = this.selected.clone();
+                this.select(selected, cx);
+            }),
         ];
         Self {
             applications: Applications::default(),
-            filter: AppFilter::All,
+            filter,
             selected: None,
             list,
             objects,
@@ -177,16 +184,37 @@ impl ApplicationsScreen {
             .and_then(|selected| self.applications.find(selected))
     }
 
-    fn set_filter(&mut self, filter: AppFilter, cx: &mut Context<Self>) {
-        self.filter = filter;
-        self.refresh_list(cx);
-        let selected = self.selected.clone();
-        self.select(selected, cx);
+    pub fn filter_bar(&self) -> &Entity<FilterBar> {
+        &self.filter
     }
 
     fn refresh_list(&mut self, cx: &mut Context<Self>) {
-        let rows = app_rows(&self.applications, self.filter);
-        self.list.update(cx, |table, cx| table.set_rows(rows, cx));
+        let (query, chip) = {
+            let bar = self.filter.read(cx);
+            (bar.query().clone(), bar.chip())
+        };
+        let chips = self
+            .applications
+            .filter_counts(&query)
+            .into_iter()
+            .map(|(filter, n)| chip_label(filter.label(), n))
+            .collect();
+        let filter = AppFilter::ALL.get(chip).copied().unwrap_or_default();
+        let rows = app_rows(&self.applications, filter, &query);
+        let shown = rows
+            .iter()
+            .filter(|row| matches!(row, AppRow::App(_)))
+            .count();
+        let total = self.applications.iter().count();
+        self.filter.update(cx, |bar, cx| {
+            bar.set_chips(chips, cx);
+            bar.set_matches(shown, total, cx);
+        });
+        let words = query.words;
+        self.list.update(cx, |table, cx| {
+            table.set_highlight(words, cx);
+            table.set_rows(rows, cx);
+        });
     }
 
     fn menu_items(app: &Application, cx: &mut Context<Self>) -> Vec<MenuItem> {
@@ -219,24 +247,8 @@ impl ApplicationsScreen {
         items
     }
 
-    fn header(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let selected = AppFilter::ALL
-            .iter()
-            .position(|filter| *filter == self.filter)
-            .unwrap_or_default();
-        let filter = AppFilter::ALL
-            .iter()
-            .fold(Segmented::new("loco-app-filter"), |seg, filter| {
-                seg.option(filter.label())
-            })
-            .selected(selected)
-            .on_select(cx.listener(|this, ix: &usize, _, cx| {
-                let filter = AppFilter::ALL.get(*ix).copied().unwrap_or_default();
-                this.set_filter(filter, cx);
-            }));
-        PageTitle::new(TITLE)
-            .detail(self.applications.total.to_string())
-            .end(filter)
+    fn header(&self) -> impl IntoElement {
+        PageTitle::new(TITLE).detail(self.applications.total.to_string())
     }
 
     fn detail(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
@@ -390,7 +402,8 @@ impl Render for ApplicationsScreen {
             .h_full()
             .border_r(RULE)
             .border_color(palette.line)
-            .child(self.header(cx))
+            .child(self.header())
+            .child(self.filter.clone())
             .child(div().flex_1().min_h_0().child(self.list.clone()));
         let detail = div()
             .flex_none()
@@ -451,9 +464,9 @@ fn deployment_section(app: &Application, palette: &Palette) -> impl IntoElement 
         )
 }
 
-fn app_rows(applications: &Applications, filter: AppFilter) -> Vec<AppRow> {
+fn app_rows(applications: &Applications, filter: AppFilter, query: &TextFilter) -> Vec<AppRow> {
     applications
-        .filtered(filter)
+        .filtered(filter, query)
         .into_iter()
         .flat_map(|group| {
             let head = AppRow::Group(group.workspace);
@@ -622,10 +635,11 @@ mod tests {
                 applications: vec![app("web", AppPhase::Ready), app("docs", AppPhase::Failed)],
             }],
         };
-        let shape: Vec<String> = app_rows(&applications, AppFilter::NotReady)
-            .iter()
-            .map(|row| row.key().to_string())
-            .collect();
+        let shape: Vec<String> =
+            app_rows(&applications, AppFilter::NotReady, &TextFilter::default())
+                .iter()
+                .map(|row| row.key().to_string())
+                .collect();
         assert_eq!(shape, ["ws-1", "loco-system/docs"]);
         let first = applications.iter().next().map(|(w, a)| location(w, a));
         assert_eq!(

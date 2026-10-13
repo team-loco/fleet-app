@@ -10,7 +10,7 @@ use fleet_ui::theme::Appearance;
 use fleet_ui::{NewWindowRequest, Root, Shell, Store, assets::Assets};
 use gpui::{
     AnyView, AnyWindowHandle, App, AppContext, Bounds, Entity, HeadlessAppContext, Keystroke,
-    Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, PlatformInput,
+    Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput,
     PlatformTextSystem, Point, Size, TestAppContext, TestDispatcher, VisualTestContext, Window, px,
     size,
 };
@@ -21,6 +21,8 @@ const QUIET: Duration = Duration::from_millis(300);
 const POLL: Duration = Duration::from_millis(5);
 const SEED: u64 = 0;
 const SPACE: &str = "space";
+const SINGLE: usize = 1;
+const DOUBLE: usize = 2;
 
 fn text_system() -> Arc<dyn PlatformTextSystem> {
     Arc::new(gpui_apple::AppleTextSystem::new())
@@ -88,7 +90,43 @@ fn settle<C: AppContext>(
 enum Step {
     Keys(String),
     Text(String),
-    Click(Point<Pixels>),
+    Click {
+        at: Point<Pixels>,
+        button: MouseButton,
+        count: usize,
+    },
+    Hover(Point<Pixels>),
+    Drag {
+        from: Point<Pixels>,
+        to: Point<Pixels>,
+    },
+}
+
+fn mouse_down(position: Point<Pixels>, button: MouseButton, count: usize) -> PlatformInput {
+    PlatformInput::MouseDown(MouseDownEvent {
+        button,
+        position,
+        modifiers: Modifiers::none(),
+        click_count: count,
+        first_mouse: false,
+    })
+}
+
+fn mouse_up(position: Point<Pixels>, button: MouseButton, count: usize) -> PlatformInput {
+    PlatformInput::MouseUp(MouseUpEvent {
+        button,
+        position,
+        modifiers: Modifiers::none(),
+        click_count: count,
+    })
+}
+
+fn mouse_move(position: Point<Pixels>, pressed: Option<MouseButton>) -> PlatformInput {
+    PlatformInput::MouseMove(MouseMoveEvent {
+        position,
+        pressed_button: pressed,
+        modifiers: Modifiers::none(),
+    })
 }
 
 fn parse(keystroke: &str) -> anyhow::Result<Keystroke> {
@@ -109,22 +147,20 @@ fn apply(step: &Step, window: &mut Window, cx: &mut App) -> anyhow::Result<()> {
                 window.dispatch_keystroke(parse(&key)?, cx);
             }
         }
-        Step::Click(position) => {
-            let down = MouseDownEvent {
-                button: MouseButton::Left,
-                position: *position,
-                modifiers: Modifiers::none(),
-                click_count: 1,
-                first_mouse: false,
-            };
-            let up = MouseUpEvent {
-                button: MouseButton::Left,
-                position: *position,
-                modifiers: Modifiers::none(),
-                click_count: 1,
-            };
-            window.dispatch_event(PlatformInput::MouseDown(down), cx);
-            window.dispatch_event(PlatformInput::MouseUp(up), cx);
+        Step::Click { at, button, count } => {
+            for count in 1..=*count {
+                window.dispatch_event(mouse_down(*at, *button, count), cx);
+                window.dispatch_event(mouse_up(*at, *button, count), cx);
+            }
+        }
+        Step::Hover(position) => {
+            window.dispatch_event(mouse_move(*position, None), cx);
+        }
+        Step::Drag { from, to } => {
+            window.dispatch_event(mouse_move(*from, None), cx);
+            window.dispatch_event(mouse_down(*from, MouseButton::Left, SINGLE), cx);
+            window.dispatch_event(mouse_move(*to, Some(MouseButton::Left)), cx);
+            window.dispatch_event(mouse_up(*to, MouseButton::Left, SINGLE), cx);
         }
     }
     Ok(())
@@ -267,11 +303,49 @@ impl Ui {
         self.run(Step::Text(text.to_owned()))
     }
 
+    pub fn read_app<R>(&self, read: impl FnOnce(&App) -> R) -> R {
+        self.cx.read(read)
+    }
+
+    fn center(&mut self, selector: &'static str) -> anyhow::Result<Point<Pixels>> {
+        self.bounds(selector)
+            .map(|bounds| bounds.center())
+            .ok_or_else(|| anyhow!("no element with debug selector {selector:?} was painted"))
+    }
+
     pub fn click(&mut self, selector: &'static str) -> anyhow::Result<()> {
-        let bounds = self
-            .bounds(selector)
-            .ok_or_else(|| anyhow!("no element with debug selector {selector:?} was painted"))?;
-        self.run(Step::Click(bounds.center()))
+        self.click_with(selector, MouseButton::Left, SINGLE)
+    }
+
+    pub fn double_click(&mut self, selector: &'static str) -> anyhow::Result<()> {
+        self.click_with(selector, MouseButton::Left, DOUBLE)
+    }
+
+    pub fn right_click(&mut self, selector: &'static str) -> anyhow::Result<()> {
+        self.click_with(selector, MouseButton::Right, SINGLE)
+    }
+
+    fn click_with(
+        &mut self,
+        selector: &'static str,
+        button: MouseButton,
+        count: usize,
+    ) -> anyhow::Result<()> {
+        let at = self.center(selector)?;
+        self.run(Step::Click { at, button, count })
+    }
+
+    pub fn hover(&mut self, selector: &'static str) -> anyhow::Result<()> {
+        let at = self.center(selector)?;
+        self.run(Step::Hover(at))
+    }
+
+    pub fn drag(&mut self, selector: &'static str, by: Point<Pixels>) -> anyhow::Result<()> {
+        let from = self.center(selector)?;
+        self.run(Step::Drag {
+            from,
+            to: from + by,
+        })
     }
 
     pub fn save_png(&self, path: &Path) -> anyhow::Result<()> {

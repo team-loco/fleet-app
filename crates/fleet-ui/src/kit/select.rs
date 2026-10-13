@@ -173,6 +173,7 @@ impl Select {
                 .text_color(palette.mute)
         });
         div()
+            .debug_selector(|| self.id.to_string())
             .id(ElementId::Name(self.id.clone()))
             .flex()
             .items_center()
@@ -219,6 +220,7 @@ impl Render for Select {
                     let selected = ix == self.selected;
                     let highlighted = self.highlighted == Some(ix);
                     div()
+                        .debug_selector(|| format!("{}-option-{ix}", self.id))
                         .id(ix)
                         .flex()
                         .flex_none()
@@ -244,8 +246,7 @@ impl Render for Select {
                         .into_any_element()
                 })
                 .collect();
-            let surface = popover::surface(&palette)
-                .id("options")
+            let surface = popover::surface("options", &palette)
                 .w(self.width)
                 .max_h(MENU_MAX_HEIGHT)
                 .overflow_y_scroll()

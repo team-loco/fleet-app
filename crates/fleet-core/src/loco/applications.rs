@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use super::Workspace;
+use crate::filter::TextFilter;
 use crate::time::age;
 use crate::{ClusterId, ResourceRef, Status};
 
@@ -286,15 +287,45 @@ pub struct Applications {
     pub workspaces: Vec<WorkspaceApps>,
 }
 
+impl Application {
+    pub fn matches(&self, workspace: &Workspace, query: &TextFilter) -> bool {
+        let fields = [
+            self.name.as_str(),
+            self.environment.as_str(),
+            workspace.label(),
+            workspace.namespace.as_str(),
+            self.image.as_deref().unwrap_or_default(),
+            self.hostname.as_deref().unwrap_or_default(),
+        ];
+        query.matches(Some(&workspace.namespace), &fields)
+    }
+}
+
 impl Applications {
-    pub fn filtered(&self, filter: AppFilter) -> Vec<WorkspaceApps> {
+    pub fn filter_counts(&self, query: &TextFilter) -> Vec<(AppFilter, usize)> {
+        AppFilter::ALL
+            .iter()
+            .map(|filter| {
+                let apps = self
+                    .filtered(*filter, query)
+                    .iter()
+                    .map(|group| group.applications.len())
+                    .sum();
+                (*filter, apps)
+            })
+            .collect()
+    }
+
+    pub fn filtered(&self, filter: AppFilter, query: &TextFilter) -> Vec<WorkspaceApps> {
         self.workspaces
             .iter()
             .filter_map(|group| {
                 let applications: Vec<Application> = group
                     .applications
                     .iter()
-                    .filter(|application| filter.keeps(application))
+                    .filter(|application| {
+                        filter.keeps(application) && application.matches(&group.workspace, query)
+                    })
                     .cloned()
                     .collect();
                 (!applications.is_empty()).then(|| WorkspaceApps {
@@ -471,8 +502,21 @@ pub(crate) mod tests {
                 },
             ],
         };
-        assert_eq!(applications.filtered(AppFilter::All).len(), 2);
-        let not_ready = applications.filtered(AppFilter::NotReady);
+        let everything = TextFilter::default();
+        assert_eq!(applications.filtered(AppFilter::All, &everything).len(), 2);
+        assert_eq!(
+            applications
+                .filtered(AppFilter::All, &TextFilter::parse("drift"))
+                .len(),
+            1
+        );
+        let counts: Vec<usize> = applications
+            .filter_counts(&everything)
+            .into_iter()
+            .map(|(_, n)| n)
+            .collect();
+        assert_eq!(counts.get(1), Some(&1));
+        let not_ready = applications.filtered(AppFilter::NotReady, &everything);
         let names: Vec<_> = not_ready
             .iter()
             .flat_map(|g| g.applications.iter().map(|a| a.name.as_str()))

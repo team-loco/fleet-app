@@ -13,14 +13,14 @@ mod streams;
 use streams::{LogSession, SEARCH_PLACEHOLDER, ShellSession, TERMINAL_ID, crash_looping};
 
 use crate::kit::{
-    ActionMenu, Button, Column, ConfirmDialog, DockState, InputEvent, KeyValue, Link, LogView,
-    MenuItem, SectionLabel, Segmented, Select, SelectEvent, Split, StatusGlyph, StatusText, Table,
-    TableEvent, Terminal, TextField, TextFieldState, confirm, swap_in,
+    ActionMenu, Button, Column, ConfirmDialog, DockState, FilterBar, FilterEvent, InputEvent,
+    KeyValue, Link, LogView, MenuItem, SectionLabel, Select, SelectEvent, Split, StatusGlyph,
+    StatusText, Table, TableEvent, Terminal, TextFieldState, chip_label, confirm, swap_in,
 };
 use crate::theme::{
     ActiveTheme, CONTAINER_SQUARE, CONTAINER_SQUARE_GAP, FONT_MONO, LINE_PROSE, Palette,
-    RADIUS_SMALL, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8,
-    TEXT_BODY, TEXT_MONO, TEXT_SMALL, TEXT_UI,
+    RADIUS_SMALL, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, TEXT_BODY,
+    TEXT_MONO, TEXT_SMALL, TEXT_UI,
 };
 
 const INSPECTOR_ID: &str = "pod-inspector";
@@ -31,14 +31,12 @@ const CONTAINERS: Pixels = px(72.);
 const RESTARTS: Pixels = px(64.);
 const AGE: Pixels = px(48.);
 const STATUS: Pixels = px(150.);
-const FILTER_WIDTH: Pixels = px(260.);
 const NAMESPACE_SELECT: Pixels = px(180.);
 const CONTAINER_SELECT: Pixels = px(160.);
 const INSPECTOR_LABEL: Pixels = px(96.);
 const TABLE_SHARE: f32 = 0.7;
 
 const ALL_NAMESPACES: &str = "All namespaces";
-const FILTER_PLACEHOLDER: &str = "Filter by name, label, node…";
 const MISSING: &str = "—";
 const TRUE: &str = "True";
 const FALSE: &str = "False";
@@ -55,7 +53,7 @@ pub struct PodsScreen {
     log: Option<LogSession>,
     shell: Option<ShellSession>,
     table: Entity<Table<Pod>>,
-    filter: Entity<TextFieldState>,
+    filter: Entity<FilterBar>,
     namespace: Entity<Select>,
     containers: Entity<Select>,
     search: Entity<TextFieldState>,
@@ -76,11 +74,13 @@ impl PodsScreen {
                 .column_gap(SPACE_7)
                 .empty(NO_PODS)
         });
-        let filter = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER_PLACEHOLDER));
         let search = cx.new(|cx| TextFieldState::new(window, cx).placeholder(SEARCH_PLACEHOLDER));
         let namespace = cx.new(|cx| {
-            Select::new("pod-namespace", vec![ALL_NAMESPACES.into()], cx).width(NAMESPACE_SELECT)
+            Select::new("pod-namespace", vec![ALL_NAMESPACES.into()], cx)
+                .mono()
+                .width(NAMESPACE_SELECT)
         });
+        let filter = cx.new(|cx| FilterBar::new("pod-filter", window, cx).scope(namespace.clone()));
         let containers = cx.new(|cx| {
             Select::new("pod-container", Vec::new(), cx)
                 .mono()
@@ -101,11 +101,14 @@ impl PodsScreen {
                     this.select(Some(pod), cx);
                 }
             }),
-            cx.subscribe(&filter, |this, state, event: &InputEvent, cx| {
-                if let InputEvent::Change = event {
-                    this.query.text = state.read(cx).value().to_string();
-                    this.refresh(cx);
-                }
+            cx.subscribe(&filter, |this, bar, FilterEvent::Changed, cx| {
+                let (text, chip) = {
+                    let bar = bar.read(cx);
+                    (bar.query().clone(), bar.chip())
+                };
+                this.query.text = text;
+                this.query.filter = PodFilter::ALL.get(chip).copied().unwrap_or_default();
+                this.refresh(cx);
             }),
             cx.subscribe(&search, |this, state, event: &InputEvent, cx| {
                 if let InputEvent::Change = event {
@@ -180,6 +183,10 @@ impl PodsScreen {
         self.refresh(cx);
     }
 
+    pub fn filter_bar(&self) -> &Entity<FilterBar> {
+        &self.filter
+    }
+
     pub fn header_note(&self) -> (Counts, String) {
         let total = self
             .cluster
@@ -230,6 +237,16 @@ impl PodsScreen {
         options.extend(self.namespaces().into_iter().map(SharedString::from));
         self.namespace
             .update(cx, |select, cx| select.set_options(options, cx));
+        let chips = filter_counts(&self.cluster_pods())
+            .into_iter()
+            .map(|(filter, n)| chip_label(filter.label(), n))
+            .collect();
+        let shown = rows.len();
+        let total = self.cluster_total();
+        self.filter.update(cx, |bar, cx| {
+            bar.set_chips(chips, cx);
+            bar.set_matches(shown, total, cx);
+        });
         let still_there = self
             .selected
             .as_ref()
@@ -242,11 +259,26 @@ impl PodsScreen {
             .selected
             .as_ref()
             .and_then(|selected| rows.iter().position(|pod| pod.is(selected)));
+        let scope = self.cluster.as_ref().map(|c| c.as_str().to_owned());
+        let words = self.query.text.words.clone();
         self.table.update(cx, |table, cx| {
+            if let Some(scope) = scope {
+                table.set_scope(scope, cx);
+            }
+            table.set_highlight(words, cx);
             table.set_rows(rows, cx);
             table.select(position, cx);
         });
         self.sync_selection(cx);
+    }
+
+    fn cluster_total(&self) -> usize {
+        self.cluster.as_ref().map_or(0, |cluster| {
+            self.pods
+                .iter()
+                .filter(|pod| &pod.cluster == cluster)
+                .count()
+        })
     }
 
     fn select(&mut self, pod: Option<ResourceRef>, cx: &mut Context<Self>) {
@@ -292,39 +324,6 @@ impl PodsScreen {
         let items = self.selected_pod().map(|pod| menu_items(pod, cx));
         self.menu
             .update(cx, |menu, cx| menu.set_items(items.unwrap_or_default(), cx));
-    }
-
-    fn toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = *cx.palette();
-        let base = self.cluster_pods();
-        let counts = filter_counts(&base);
-        let selected = PodFilter::ALL
-            .iter()
-            .position(|f| *f == self.query.filter)
-            .unwrap_or_default();
-        let status = counts
-            .iter()
-            .fold(Segmented::new("pod-status"), |seg, (filter, n)| {
-                seg.option(format!("{} {n}", filter.label()))
-            })
-            .selected(selected)
-            .on_select(cx.listener(|this, ix: &usize, _, cx| {
-                this.query.filter = PodFilter::ALL.get(*ix).copied().unwrap_or_default();
-                this.refresh(cx);
-            }));
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(SPACE_4)
-            .px(SPACE_8)
-            .py(SPACE_4)
-            .border_b(RULE)
-            .border_color(palette.line)
-            .child(TextField::new(&self.filter).width(FILTER_WIDTH))
-            .child(self.namespace.clone())
-            .child(div().flex_1())
-            .child(status)
     }
 
     fn inspector(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -738,12 +737,16 @@ fn container_squares(pod: &Pod, palette: &Palette) -> AnyElement {
 fn columns() -> Vec<Column<Pod>> {
     vec![
         Column::text("Name", |p: &Pod| p.name.clone().into())
+            .highlight()
             .mono()
             .flex(NAME_WEIGHT, NAME_MIN)
             .sort_by_key(|p: &Pod| p.name.clone()),
-        Column::new("Namespace", |p: &Pod, palette| {
-            text(p.namespace.clone(), palette.fg2)
-        })
+        Column::colored_text(
+            "Namespace",
+            |p: &Pod| p.namespace.clone().into(),
+            |_, palette| palette.fg2,
+        )
+        .highlight()
         .fixed(NAMESPACE)
         .sort_by_key(|p: &Pod| p.namespace.clone()),
         Column::new("Ctrs", container_squares).fixed(CONTAINERS),
@@ -773,7 +776,6 @@ fn columns() -> Vec<Column<Pod>> {
 
 impl Render for PodsScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let toolbar = self.toolbar(cx).into_any_element();
         let inspector = self.inspector(cx);
         let dock = self.dock_view(cx).into_any_element();
         let table = div().size_full().child(self.table.clone());
@@ -781,7 +783,7 @@ impl Render for PodsScreen {
             .size_full()
             .flex()
             .flex_col()
-            .child(toolbar)
+            .child(self.filter.clone())
             .child(
                 div()
                     .flex_1()

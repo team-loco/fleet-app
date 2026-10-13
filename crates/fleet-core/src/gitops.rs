@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::filter::TextFilter;
 use crate::{ClusterId, ClusterSummary, ResourceRef, Status};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -63,6 +64,13 @@ pub struct SyncRow {
 impl SyncRow {
     pub fn out_of_sync(&self) -> bool {
         self.cells.iter().any(SyncCell::out_of_sync)
+    }
+
+    pub fn matches(&self, query: &TextFilter) -> bool {
+        query.matches(
+            Some(&self.namespace),
+            &[self.name.as_str(), self.namespace.as_str()],
+        )
     }
 
     pub fn target(&self, cluster: &ClusterId) -> ResourceRef {
@@ -135,16 +143,37 @@ impl VisibleGroup<'_> {
     }
 }
 
-pub fn visible_groups(groups: &[SyncGroup], filter: SyncFilter) -> Vec<VisibleGroup<'_>> {
+pub fn visible_groups<'a>(
+    groups: &'a [SyncGroup],
+    filter: SyncFilter,
+    query: &TextFilter,
+) -> Vec<VisibleGroup<'a>> {
     groups
         .iter()
         .filter(|group| filter.keeps_kind(group.kind))
         .map(|group| VisibleGroup {
             kind: group.kind,
             total: group.total,
-            rows: group.rows.iter().filter(|r| filter.keeps_row(r)).collect(),
+            rows: group
+                .rows
+                .iter()
+                .filter(|r| filter.keeps_row(r) && r.matches(query))
+                .collect(),
         })
         .filter(|group| !group.rows.is_empty())
+        .collect()
+}
+
+pub fn filter_counts(groups: &[SyncGroup], query: &TextFilter) -> Vec<(SyncFilter, usize)> {
+    SyncFilter::ALL
+        .iter()
+        .map(|filter| {
+            let rows = visible_groups(groups, *filter, query)
+                .iter()
+                .map(|group| group.rows.len())
+                .sum();
+            (*filter, rows)
+        })
         .collect()
 }
 
@@ -162,6 +191,15 @@ pub struct Source {
 }
 
 impl Source {
+    pub fn matches(&self, query: &TextFilter) -> bool {
+        let fields = [
+            self.name.as_str(),
+            self.namespace.as_str(),
+            self.url.as_str(),
+        ];
+        query.matches(Some(&self.namespace), &fields)
+    }
+
     pub fn status(&self) -> Status {
         if self.ready >= self.clusters {
             Status::Ok
@@ -315,7 +353,7 @@ mod tests {
     #[test]
     fn all_keeps_every_group_and_row() {
         let groups = groups();
-        let visible = visible_groups(&groups, SyncFilter::All);
+        let visible = visible_groups(&groups, SyncFilter::All, &TextFilter::default());
         assert_eq!(
             shape(&visible),
             [
@@ -327,11 +365,27 @@ mod tests {
     }
 
     #[test]
+    fn text_filters_narrow_rows_and_counts() {
+        let groups = groups();
+        let query = TextFilter::parse("fail");
+        let visible = visible_groups(&groups, SyncFilter::All, &query);
+        assert_eq!(
+            shape(&visible),
+            [(FluxKind::Kustomization, vec!["failing"])]
+        );
+        let counts: Vec<usize> = filter_counts(&groups, &query)
+            .into_iter()
+            .map(|(_, n)| n)
+            .collect();
+        assert_eq!(counts, [1, 1, 0, 1]);
+    }
+
+    #[test]
     fn kind_filters_keep_one_group() {
         let groups = groups();
-        let helm = visible_groups(&groups, SyncFilter::HelmReleases);
+        let helm = visible_groups(&groups, SyncFilter::HelmReleases, &TextFilter::default());
         assert_eq!(shape(&helm), [(FluxKind::HelmRelease, vec!["behind"])]);
-        let ks = visible_groups(&groups, SyncFilter::Kustomizations);
+        let ks = visible_groups(&groups, SyncFilter::Kustomizations, &TextFilter::default());
         assert_eq!(ks.len(), 1);
         assert_eq!(ks[0].kind, FluxKind::Kustomization);
     }
@@ -339,7 +393,7 @@ mod tests {
     #[test]
     fn out_of_sync_drops_clean_rows_and_empty_groups() {
         let groups = groups();
-        let visible = visible_groups(&groups, SyncFilter::OutOfSync);
+        let visible = visible_groups(&groups, SyncFilter::OutOfSync, &TextFilter::default());
         assert_eq!(
             shape(&visible),
             [
@@ -357,7 +411,18 @@ mod tests {
                 vec![cell(Status::Ok, false)],
             )],
         }];
-        assert_eq!(visible_groups(&clean, SyncFilter::OutOfSync).len(), 0);
+        assert_eq!(
+            visible_groups(&clean, SyncFilter::OutOfSync, &TextFilter::default()).len(),
+            0
+        );
+        let counts: Vec<usize> = filter_counts(&groups, &TextFilter::default())
+            .into_iter()
+            .map(|(_, n)| n)
+            .collect();
+        assert_eq!(
+            counts.first(),
+            Some(&groups.iter().map(|g| g.rows.len()).sum())
+        );
     }
 
     #[test]

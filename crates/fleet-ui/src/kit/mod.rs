@@ -3,6 +3,7 @@ mod chart;
 mod code;
 mod diff;
 mod dock;
+mod filter;
 mod header;
 mod input;
 mod inspector;
@@ -27,6 +28,7 @@ pub use chart::{LineChart, Meter, MiniMeter, Series, StackedBar};
 pub use code::CodeView;
 pub use diff::{DiffFile, DiffLine, DiffView, LineKind, parse_unified};
 pub use dock::{Dock, DockState, DockTab};
+pub use filter::{FilterBar, FilterEvent, chip_label, match_note};
 pub use header::{Lede, PageHeader, PageTitle};
 pub use input::{
     InputEvent, TextArea, TextAreaState, TextField, TextFieldDown, TextFieldEscape, TextFieldState,
@@ -47,8 +49,10 @@ pub use split::Split;
 pub(crate) use status::STATUSES;
 pub(crate) use status::status_symbols;
 pub use status::{StatusGlyph, StatusText};
-pub use table::{Align, Column, SortDirection, Table, TableEvent, Width, min_row_width};
-pub use terminal::{Terminal, TerminalEvent};
+pub use table::{
+    Align, Column, RowActions, SortDirection, Table, TableEvent, Width, min_row_width, resized,
+};
+pub use terminal::{TERMINAL_CONTEXT, Terminal, TerminalEvent};
 pub use text::{
     BreakAnywhere, Highlighted, Kbd, KeyValue, Link, Rule, SectionHeader, SectionLabel,
 };

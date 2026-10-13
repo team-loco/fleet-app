@@ -1,7 +1,8 @@
 use fleet_core::cluster::{CPU_UNIT, MEMORY_UNIT, Namespace, namespace_sentence};
+use fleet_core::filter::StatusFilter;
 use fleet_core::overview::fixed;
 use fleet_core::time::age;
-use fleet_core::{ClusterDetail, Counts, Status};
+use fleet_core::{ClusterDetail, ClusterId, Counts, Status};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
     Render, Styled, Window, div, px,
@@ -9,8 +10,8 @@ use gpui::{
 
 use super::ScreenEvent;
 use crate::kit::status_symbols;
-use crate::kit::{Column, Lede, StatusGlyph, Table};
-use crate::theme::{ActiveTheme, FONT_MONO, Palette, SPACE_4};
+use crate::kit::{Column, FilterBar, FilterEvent, Lede, StatusGlyph, Table, chip_label};
+use crate::theme::{ActiveTheme, FONT_MONO, GLYPH_SLOT, Palette, SPACE_4};
 
 const NAME_WEIGHT: f32 = 1.4;
 const NAME_MIN: Pixels = px(200.);
@@ -25,33 +26,79 @@ pub struct NamespacesScreen {
     namespaces: Vec<Namespace>,
     sentence: String,
     table: Entity<Table<Namespace>>,
+    filter: Entity<FilterBar>,
 }
 
 impl EventEmitter<ScreenEvent> for NamespacesScreen {}
 
 impl NamespacesScreen {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let table = cx.new(|cx| {
             Table::new("namespaces", columns(), cx)
                 .row_key(|n: &Namespace| n.name.clone().into())
                 .empty("No namespaces.")
         });
+        let filter = cx.new(|cx| FilterBar::new("namespace-filter", window, cx));
+        cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
+            this.refresh(cx);
+        })
+        .detach();
         Self {
             namespaces: Vec::new(),
             sentence: String::new(),
             table,
+            filter,
         }
     }
 
-    pub fn set(&mut self, detail: &ClusterDetail, cx: &mut Context<Self>) {
+    pub fn filter_bar(&self) -> &Entity<FilterBar> {
+        &self.filter
+    }
+
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        let (query, chip) = {
+            let bar = self.filter.read(cx);
+            (bar.query().clone(), bar.chip())
+        };
+        let base: Vec<&Namespace> = self
+            .namespaces
+            .iter()
+            .filter(|n| n.matches(&query))
+            .collect();
+        let chips = StatusFilter::counts(base.iter().map(|n| n.status))
+            .into_iter()
+            .map(|(filter, n)| chip_label(filter.label(), n))
+            .collect();
+        let chip = StatusFilter::at(chip);
+        let rows: Vec<Namespace> = base
+            .into_iter()
+            .filter(|n| chip.keeps(n.status))
+            .cloned()
+            .collect();
+        let shown = rows.len();
+        let total = self.namespaces.len();
+        self.filter.update(cx, |bar, cx| {
+            bar.set_chips(chips, cx);
+            bar.set_matches(shown, total, cx);
+        });
+        let words = query.words;
+        self.table.update(cx, |table, cx| {
+            table.set_highlight(words, cx);
+            table.set_rows(rows, cx);
+        });
+        cx.notify();
+    }
+
+    pub fn set(&mut self, cluster: &ClusterId, detail: &ClusterDetail, cx: &mut Context<Self>) {
+        let scope = cluster.as_str().to_owned();
+        self.table
+            .update(cx, |table, cx| table.set_scope(scope, cx));
         if self.namespaces == detail.namespaces {
             return;
         }
         self.namespaces.clone_from(&detail.namespaces);
         self.sentence = namespace_sentence(&self.namespaces);
-        let rows = self.namespaces.clone();
-        self.table.update(cx, |table, cx| table.set_rows(rows, cx));
-        cx.notify();
+        self.refresh(cx);
     }
 
     pub fn header_note(&self) -> (Counts, String) {
@@ -70,6 +117,7 @@ impl Render for NamespacesScreen {
             .flex()
             .flex_col()
             .child(Lede::new(self.sentence.clone()).meta(meta))
+            .child(self.filter.clone())
             .child(div().flex_1().min_h_0().child(self.table.clone()))
     }
 }
@@ -128,6 +176,7 @@ fn name_cell(namespace: &Namespace, palette: &Palette) -> AnyElement {
 fn columns() -> Vec<Column<Namespace>> {
     vec![
         Column::new("Name", name_cell)
+            .fit_by(|n: &Namespace| n.name.clone().into(), GLYPH_SLOT + SPACE_4)
             .mono()
             .flex(NAME_WEIGHT, NAME_MIN)
             .sort_by_key(|n: &Namespace| n.name.clone()),

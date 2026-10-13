@@ -1,3 +1,4 @@
+use fleet_core::filter::StatusFilter;
 use fleet_core::nodes::{Node, NodeSummary, Usage, sentence};
 use fleet_core::overview::{number, percent};
 use fleet_core::time::age;
@@ -9,9 +10,9 @@ use gpui::{
 
 use super::{NODE_KIND, ScreenEvent};
 use crate::kit::{
-    ActionMenu, Button, Column, ConfirmDialog, IconButton, Inspector, KeyValue, Lede, MenuItem,
-    Meter, MiniMeter, Presence, SectionLabel, StatusGlyph, StatusText, Table, TableEvent, confirm,
-    slide_in, slide_out,
+    ActionMenu, Button, Column, ConfirmDialog, FilterBar, FilterEvent, IconButton, Inspector,
+    KeyValue, Lede, MenuItem, Meter, MiniMeter, Presence, SectionLabel, StatusGlyph, StatusText,
+    Table, TableEvent, chip_label, confirm, slide_in, slide_out,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, INSPECTOR, Palette, SPACE_2, SPACE_3, SPACE_4, SPACE_5, TEXT_MONO,
@@ -43,6 +44,7 @@ pub struct NodesScreen {
     confirm_destructive: bool,
     selected: Option<String>,
     table: Entity<Table<Node>>,
+    filter: Entity<FilterBar>,
     menu: Entity<ActionMenu>,
     presence: Presence<Node>,
 }
@@ -54,7 +56,7 @@ fn presence(screen: &mut NodesScreen) -> &mut Presence<Node> {
 impl EventEmitter<ScreenEvent> for NodesScreen {}
 
 impl NodesScreen {
-    pub fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let table = cx.new(|cx| {
             Table::new("nodes", columns(), cx)
                 .row_key(|n: &Node| n.name.clone().into())
@@ -70,6 +72,11 @@ impl NodesScreen {
         })
         .detach();
         let menu = cx.new(|cx| ActionMenu::new("node-actions", cx));
+        let filter = cx.new(|cx| FilterBar::new("node-filter", window, cx));
+        cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
+            this.refresh(cx);
+        })
+        .detach();
         Self {
             cluster: None,
             summary: NodeSummary::default(),
@@ -78,6 +85,7 @@ impl NodesScreen {
             confirm_destructive: true,
             selected: None,
             table,
+            filter,
             menu,
             presence: Presence::default(),
         }
@@ -109,8 +117,44 @@ impl NodesScreen {
         {
             self.selected = None;
         }
-        let rows = self.nodes.clone();
-        self.table.update(cx, |table, cx| table.set_rows(rows, cx));
+        self.refresh(cx);
+    }
+
+    pub fn filter_bar(&self) -> &Entity<FilterBar> {
+        &self.filter
+    }
+
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        let (query, chip) = {
+            let bar = self.filter.read(cx);
+            (bar.query().clone(), bar.chip())
+        };
+        let base: Vec<&Node> = self.nodes.iter().filter(|n| n.matches(&query)).collect();
+        let chips = StatusFilter::counts(base.iter().map(|n| n.status))
+            .into_iter()
+            .map(|(filter, n)| chip_label(filter.label(), n))
+            .collect();
+        let chip = StatusFilter::at(chip);
+        let rows: Vec<Node> = base
+            .into_iter()
+            .filter(|n| chip.keeps(n.status))
+            .cloned()
+            .collect();
+        let shown = rows.len();
+        let total = self.nodes.len();
+        self.filter.update(cx, |bar, cx| {
+            bar.set_chips(chips, cx);
+            bar.set_matches(shown, total, cx);
+        });
+        let scope = self.cluster.as_ref().map(|c| c.as_str().to_owned());
+        let words = query.words;
+        self.table.update(cx, |table, cx| {
+            if let Some(scope) = scope {
+                table.set_scope(scope, cx);
+            }
+            table.set_highlight(words, cx);
+            table.set_rows(rows, cx);
+        });
         self.select_in_table(cx);
         self.refresh_menu(cx);
         cx.notify();
@@ -128,11 +172,15 @@ impl NodesScreen {
         let Some(name) = self.selected.as_ref() else {
             return;
         };
-        let position = self.nodes.iter().position(|n| &n.name == name);
-        if position.is_some() {
-            self.table
-                .update(cx, |table, cx| table.select(position, cx));
-        }
+        let name = name.clone();
+        self.table.update(cx, |table, cx| {
+            let position = (0..)
+                .map_while(|ix| table.row(ix))
+                .position(|n| n.name == name);
+            if position.is_some() {
+                table.select(position, cx);
+            }
+        });
     }
 
     pub fn header_note(&self) -> (Counts, String) {
@@ -306,6 +354,7 @@ impl Render for NodesScreen {
                     .flex()
                     .flex_col()
                     .child(Lede::new(self.sentence.clone()).meta(meta))
+                    .child(self.filter.clone())
                     .child(div().flex_1().min_h_0().child(self.table.clone())),
             )
             .children(inspector)
@@ -416,16 +465,12 @@ fn usage_cell(usage: Usage, color: Hsla) -> AnyElement {
 
 fn columns() -> Vec<Column<Node>> {
     vec![
-        Column::new("Name", |n: &Node, _| {
-            div()
-                .flex()
-                .items_center()
-                .gap(SPACE_4)
-                .min_w_0()
-                .child(StatusGlyph::new(n.status))
-                .child(div().truncate().child(n.name.clone()))
-                .into_any_element()
-        })
+        Column::status_text(
+            "Name",
+            |n: &Node| n.status,
+            |n: &Node| n.name.clone().into(),
+        )
+        .highlight()
         .mono()
         .flex(NAME_WEIGHT, NAME_MIN)
         .sort_by_key(|n: &Node| n.name.clone()),

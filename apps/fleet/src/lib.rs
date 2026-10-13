@@ -57,6 +57,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("alt-enter", OpenSelectedNewWindow, Some("CommandPalette")),
     ]);
     cx.bind_keys(fleet_ui::screens::workload::key_bindings());
+    cx.bind_keys(fleet_ui::key_bindings());
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

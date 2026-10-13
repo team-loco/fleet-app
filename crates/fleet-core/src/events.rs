@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::filter::TextFilter;
 use crate::overview::{join_clauses, plural};
 use crate::time::age;
 use crate::{Counts, Status};
@@ -20,23 +21,14 @@ impl Event {
         self.status != Status::Ok
     }
 
-    fn matches(&self, filter: EventFilter, query: &str) -> bool {
-        let kept = match filter {
-            EventFilter::All => true,
-            EventFilter::Warnings => self.is_warning(),
-            EventFilter::Normal => !self.is_warning(),
-        };
-        let query = query.trim().to_lowercase();
-        let text_match = query.is_empty()
-            || [
-                self.reason.as_str(),
-                self.object.as_str(),
-                self.message.as_str(),
-                self.namespace.as_deref().unwrap_or_default(),
-            ]
-            .iter()
-            .any(|field| field.to_lowercase().contains(&query));
-        kept && text_match
+    fn matches(&self, filter: EventFilter, query: &TextFilter) -> bool {
+        let fields = [
+            self.reason.as_str(),
+            self.object.as_str(),
+            self.message.as_str(),
+            self.namespace.as_deref().unwrap_or_default(),
+        ];
+        filter.keeps(self) && query.matches(self.namespace.as_deref(), &fields)
     }
 }
 
@@ -58,6 +50,25 @@ impl EventFilter {
             Self::Normal => "Normal",
         }
     }
+
+    pub fn keeps(self, event: &Event) -> bool {
+        match self {
+            Self::All => true,
+            Self::Warnings => event.is_warning(),
+            Self::Normal => !event.is_warning(),
+        }
+    }
+}
+
+pub fn filter_counts(events: &[Event], query: &TextFilter) -> Vec<(EventFilter, usize)> {
+    let matching: Vec<&Event> = events
+        .iter()
+        .filter(|e| e.matches(EventFilter::All, query))
+        .collect();
+    EventFilter::ALL
+        .iter()
+        .map(|filter| (*filter, matching.iter().filter(|e| filter.keeps(e)).count()))
+        .collect()
 }
 
 pub fn warnings_first(events: &[Event]) -> Vec<Event> {
@@ -118,7 +129,7 @@ pub fn sentence(events: &[Event]) -> String {
     )
 }
 
-pub fn filter_events(events: &[Event], filter: EventFilter, query: &str) -> Vec<Event> {
+pub fn filter_events(events: &[Event], filter: EventFilter, query: &TextFilter) -> Vec<Event> {
     let kept: Vec<Event> = events
         .iter()
         .filter(|e| e.matches(filter, query))
@@ -221,19 +232,35 @@ mod tests {
             event(Status::Warn, "FailedMount", 6),
         ];
         assert_eq!(
-            reasons(&filter_events(&events, EventFilter::Warnings, "")),
+            reasons(&filter_events(
+                &events,
+                EventFilter::Warnings,
+                &TextFilter::default()
+            )),
             ["BackOff", "FailedMount"]
         );
         assert_eq!(
-            reasons(&filter_events(&events, EventFilter::Normal, "")),
+            reasons(&filter_events(
+                &events,
+                EventFilter::Normal,
+                &TextFilter::default()
+            )),
             ["Scheduled"]
         );
         assert_eq!(
-            reasons(&filter_events(&events, EventFilter::All, "mount")),
+            reasons(&filter_events(
+                &events,
+                EventFilter::All,
+                &TextFilter::parse("mount")
+            )),
             ["FailedMount"]
         );
         assert_eq!(
-            reasons(&filter_events(&events, EventFilter::Normal, "backoff")),
+            reasons(&filter_events(
+                &events,
+                EventFilter::Normal,
+                &TextFilter::parse("backoff")
+            )),
             [""; 0]
         );
     }

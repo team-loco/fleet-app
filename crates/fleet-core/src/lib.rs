@@ -5,6 +5,7 @@ pub mod changes;
 pub mod cluster;
 pub mod compare;
 pub mod events;
+pub mod filter;
 pub mod fleet;
 pub mod flux;
 pub mod fuzzy;

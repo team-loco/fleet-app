@@ -65,3 +65,4 @@ Spec column points at `design/`.
 | SHELL2 | single sidebar, cluster switcher in the status bar, Loco nav only where installed, animated inspectors (#110, #111, #121) | claude | shell-single-sidebar | done |
 | PIO | Independent network calls run concurrently (git mirrors, checks, Flux/Loco probes, workload page, drain, Prometheus); bounded git output (#107, #109) | claude | parallel-io | done |
 | SET1 | app settings ⌘, : theme, data refresh, notifications (#112) | claude | settings-and-keys | done |
+| TBL1 | resizable table columns remembered per cluster, one FilterBar on every list, popovers occlude hover (#115, #116, #118) | claude | tables-and-filters | done |

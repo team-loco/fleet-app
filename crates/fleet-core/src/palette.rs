@@ -1,6 +1,7 @@
 use std::cmp::Reverse;
 use std::ops::Range;
 
+use crate::filter::{LabelMatch, label_matches, label_token, namespace_token};
 use crate::fuzzy::fuzzy;
 use crate::resource::{kind_info, kind_matches, kind_rank, short_kind};
 use crate::{
@@ -12,9 +13,7 @@ const MAX_RESOURCES: usize = 50;
 const PRIVILEGED_PORTS: u16 = 1024;
 const LOCAL_PORT_OFFSET: u16 = 8000;
 const CLUSTER_PREFIX: &str = "@";
-const NAMESPACE_PREFIX: &str = "ns:";
 const KIND_PREFIX: &str = "k:";
-const LABEL_PREFIX: &str = "l:";
 pub const COMMAND_PREFIX: &str = ">";
 const FLEET: &str = "Fleet";
 const CLUSTER_KIND: &str = "cluster";
@@ -35,7 +34,7 @@ pub struct Query {
     pub cluster: Option<String>,
     pub namespace: Option<String>,
     pub kind: Option<String>,
-    pub label: Option<(String, Option<String>)>,
+    pub label: Option<LabelMatch>,
     pub commands_only: bool,
 }
 
@@ -54,15 +53,12 @@ impl Query {
         for token in rest.split_whitespace() {
             if let Some(cluster) = token.strip_prefix(CLUSTER_PREFIX) {
                 query.cluster = Some(cluster.to_lowercase());
-            } else if let Some(namespace) = token.strip_prefix(NAMESPACE_PREFIX) {
-                query.namespace = Some(namespace.to_lowercase());
+            } else if let Some(namespace) = namespace_token(token) {
+                query.namespace = Some(namespace);
             } else if let Some(kind) = token.strip_prefix(KIND_PREFIX) {
                 query.kind = Some(kind.to_owned());
-            } else if let Some(label) = token.strip_prefix(LABEL_PREFIX) {
-                query.label = Some(match label.split_once('=') {
-                    Some((key, value)) => (key.to_owned(), Some(value.to_owned())),
-                    None => (label.to_owned(), None),
-                });
+            } else if let Some(label) = label_token(token) {
+                query.label = Some(label);
             } else {
                 words.push(token);
             }
@@ -93,14 +89,10 @@ impl Query {
             .kind
             .as_ref()
             .is_none_or(|wanted| kind_matches(&resource.kind, wanted));
-        let label_ok =
-            self.label
-                .as_ref()
-                .is_none_or(|(key, value)| match (summary.labels.get(key), value) {
-                    (Some(actual), Some(wanted)) => actual == wanted,
-                    (Some(_), None) => true,
-                    (None, _) => false,
-                });
+        let label_ok = self
+            .label
+            .as_ref()
+            .is_none_or(|wanted| label_matches(wanted, &summary.labels));
         namespace_ok && kind_ok && label_ok
     }
 }

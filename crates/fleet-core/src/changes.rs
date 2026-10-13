@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::filter::TextFilter;
 use crate::time::age;
 use crate::{ClusterId, Status};
 
@@ -42,11 +43,10 @@ impl ChangesLog {
         self.commits.iter().find(|c| c.sha.starts_with(sha))
     }
 
-    pub fn visible(&self, path: &str, cluster: Option<&ClusterId>) -> Vec<&Commit> {
-        let path = path.trim();
+    pub fn visible(&self, query: &TextFilter, cluster: Option<&ClusterId>) -> Vec<&Commit> {
         self.commits
             .iter()
-            .filter(|commit| commit.touches(path))
+            .filter(|commit| commit.matches(query))
             .filter(|commit| cluster.is_none_or(|id| commit.rollout_on(id).is_some()))
             .collect()
     }
@@ -221,15 +221,19 @@ impl Commit {
             .or_else(|| self.views.first())
     }
 
-    fn touches(&self, path: &str) -> bool {
-        if path.is_empty() {
-            return true;
-        }
+    pub fn matches(&self, query: &TextFilter) -> bool {
         let files = self
             .source()
             .map(|s| s.files.as_slice())
             .unwrap_or_default();
-        files.iter().any(|f| f.path.starts_with(path))
+        let mut fields = vec![
+            self.sha.as_str(),
+            self.message.as_str(),
+            self.author.as_str(),
+            self.target.name.as_str(),
+        ];
+        fields.extend(files.iter().map(|f| f.path.as_str()));
+        query.matches(None, &fields)
     }
 }
 
@@ -399,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn visible_filters_by_path_prefix_and_cluster() {
+    fn visible_filters_by_path_text_and_cluster() {
         let log = ChangesLog {
             commits: vec![payments(), monitoring()],
             ..ChangesLog::default()
@@ -407,11 +411,16 @@ mod tests {
         let shas = |commits: Vec<&Commit>| -> Vec<String> {
             commits.iter().map(|c| c.short_sha().to_owned()).collect()
         };
-        assert_eq!(shas(log.visible("", None)), ["a41e07c", "3be91f2"]);
-        assert_eq!(shas(log.visible(" apps/payments ", None)), ["a41e07c"]);
-        assert_eq!(shas(log.visible("payments", None)), Vec::<String>::new());
+        let visible = |text: &str, cluster: Option<&ClusterId>| {
+            shas(log.visible(&TextFilter::parse(text), cluster))
+        };
+        assert_eq!(visible("", None), ["a41e07c", "3be91f2"]);
+        assert_eq!(visible(" apps/payments ", None), ["a41e07c"]);
+        assert_eq!(visible("monitoring", None), ["3be91f2"]);
+        assert_eq!(visible("3be91", None), ["3be91f2"]);
+        assert_eq!(visible("nothing-here", None), Vec::<String>::new());
         let east = ClusterId::new("prod-us-east");
-        assert_eq!(shas(log.visible("", Some(&east))), ["a41e07c"]);
+        assert_eq!(visible("", Some(&east)), ["a41e07c"]);
     }
 
     #[test]

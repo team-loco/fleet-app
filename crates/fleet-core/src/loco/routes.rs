@@ -1,3 +1,4 @@
+use crate::filter::TextFilter;
 use crate::{ResourceRef, Status};
 
 const MISSING: &str = "—";
@@ -40,6 +41,20 @@ pub struct Route {
 }
 
 impl Route {
+    pub fn matches(&self, query: &TextFilter) -> bool {
+        let fields = [
+            self.name.as_str(),
+            self.host.as_deref().unwrap_or_default(),
+            self.backend.as_str(),
+            self.detail.as_str(),
+        ];
+        let namespace = self
+            .application
+            .as_ref()
+            .and_then(|a| a.namespace.as_deref());
+        query.matches(namespace, &fields)
+    }
+
     pub fn host_label(&self) -> &str {
         self.host.as_deref().unwrap_or(&self.name)
     }
@@ -111,11 +126,18 @@ impl Routes {
             .count()
     }
 
-    pub fn ranked(&self, filter: RouteFilter) -> Vec<Route> {
+    pub fn filter_counts(&self, query: &TextFilter) -> Vec<(RouteFilter, usize)> {
+        RouteFilter::ALL
+            .iter()
+            .map(|filter| (*filter, self.ranked(*filter, query).len()))
+            .collect()
+    }
+
+    pub fn ranked(&self, filter: RouteFilter, query: &TextFilter) -> Vec<Route> {
         let mut routes: Vec<Route> = self
             .routes
             .iter()
-            .filter(|route| filter.keeps(route))
+            .filter(|route| filter.keeps(route) && route.matches(query))
             .cloned()
             .collect();
         routes.sort_by_key(|route| std::cmp::Reverse(route.status));
@@ -150,10 +172,16 @@ mod tests {
             ],
             ..Routes::default()
         };
-        let names =
-            |filter| -> Vec<String> { routes.ranked(filter).into_iter().map(|r| r.name).collect() };
-        assert_eq!(names(RouteFilter::All), ["d", "b", "a", "c"]);
-        assert_eq!(names(RouteFilter::Problems), ["d", "b"]);
+        let names = |filter, text: &str| -> Vec<String> {
+            routes
+                .ranked(filter, &TextFilter::parse(text))
+                .into_iter()
+                .map(|r| r.name)
+                .collect()
+        };
+        assert_eq!(names(RouteFilter::All, ""), ["d", "b", "a", "c"]);
+        assert_eq!(names(RouteFilter::Problems, ""), ["d", "b"]);
+        assert_eq!(names(RouteFilter::All, "b"), ["b"]);
         assert_eq!(routes.problems(), 2);
     }
 

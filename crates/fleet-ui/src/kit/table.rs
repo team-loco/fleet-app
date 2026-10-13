@@ -1,32 +1,88 @@
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
 
 use fleet_core::Status;
+use fleet_core::filter::highlights;
 use gpui::{
-    Animation, AnimationExt, AnyElement, App, ClickEvent, Context, Div, ElementId, EventEmitter,
-    FocusHandle, Focusable, Hsla, InteractiveElement, IntoElement, KeyDownEvent,
-    ListSizingBehavior, ParentElement, Pixels, Render, ScrollStrategy, SharedString,
-    StatefulInteractiveElement, Styled, UniformListScrollHandle, Window, div, ease_in_out,
-    prelude::FluentBuilder, uniform_list,
+    Animation, AnimationExt, AnyElement, App, AppContext as _, ClickEvent, Context, CursorStyle,
+    Div, ElementId, Entity, EventEmitter, FocusHandle, Focusable, Hsla, InteractiveElement,
+    IntoElement, KeyDownEvent, ListSizingBehavior, MouseButton, MouseDownEvent, MouseMoveEvent,
+    ParentElement, Pixels, Point, Render, ScrollStrategy, SharedString, StatefulInteractiveElement,
+    Styled, TextRun, UniformListScrollHandle, Window, div, ease_in_out, prelude::FluentBuilder,
+    uniform_list,
 };
 
+use super::button::IconButton;
+use super::menu::{ActionMenu, MenuItem};
+use super::status::StatusGlyph;
+use super::text::Highlighted;
+use crate::prefs::{self, ColumnWidths, FLEET_SCOPE};
 use crate::theme::{
-    ActiveTheme, FLASH, FONT_MONO, Palette, ROW_TABLE, ROW_TABLE_MIN, RULE, SPACE_6, SPACE_8,
-    TEXT_AXIS, TEXT_BODY, TEXT_MONO, TEXT_SMALL,
+    ActiveTheme, COLUMN_HANDLE, COLUMN_MIN, FLASH, FONT_MONO, FONT_SANS, GLYPH_SLOT, Palette,
+    ROW_TABLE, ROW_TABLE_MIN, RULE, SPACE_4, SPACE_6, SPACE_8, TEXT_AXIS, TEXT_BODY, TEXT_MONO,
+    TEXT_SMALL,
 };
 
 const SORT_ASCENDING: &str = "↑";
 const SORT_DESCENDING: &str = "↓";
+const MORE: &str = "⋯";
+const MORE_TOOLTIP: &str = "Actions";
 const FLASH_STRENGTH: f32 = 0.35;
 const TRAILING: Pixels = SPACE_8;
+const DOUBLE_CLICK: usize = 2;
 
 pub type CellRenderer<R> = Rc<dyn Fn(&R, &Palette) -> AnyElement>;
 pub type Comparator<R> = Rc<dyn Fn(&R, &R) -> Ordering>;
+pub type RowActions<R> = Rc<dyn Fn(&R) -> Vec<MenuItem>>;
 type RowStatus<R> = Rc<dyn Fn(&R) -> Option<Status>>;
 type RowKey<R> = Rc<dyn Fn(&R) -> SharedString>;
 type SpanRow<R> = Rc<dyn Fn(&R, &Palette) -> Option<AnyElement>>;
+type TextFn<R> = Rc<dyn Fn(&R) -> SharedString>;
+type ColorFn<R> = Rc<dyn Fn(&R, &Palette) -> Hsla>;
+type GlyphFn<R> = Rc<dyn Fn(&R) -> Status>;
+
+struct TextCell<R> {
+    text: TextFn<R>,
+    color: Option<ColorFn<R>>,
+    glyph: Option<GlyphFn<R>>,
+}
+
+impl<R> TextCell<R> {
+    fn render(&self, row: &R, palette: &Palette, words: &[String]) -> AnyElement {
+        let text = (self.text)(row);
+        let ranges = highlights(words, &text);
+        let content = if ranges.is_empty() {
+            text.into_any_element()
+        } else {
+            Highlighted::new(text, ranges).into_any_element()
+        };
+        let label = div()
+            .truncate()
+            .when_some(self.color.as_ref(), |label, color| {
+                label.text_color(color(row, palette))
+            })
+            .child(content);
+        match &self.glyph {
+            Some(glyph) => div()
+                .flex()
+                .items_center()
+                .gap(SPACE_4)
+                .min_w_0()
+                .child(StatusGlyph::new(glyph(row)))
+                .child(label)
+                .into_any_element(),
+            None => label.into_any_element(),
+        }
+    }
+}
+
+enum Cell<R> {
+    Custom(CellRenderer<R>),
+    Text(TextCell<R>),
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Width {
@@ -53,14 +109,14 @@ pub struct Column<R> {
     align: Align,
     mono: bool,
     sort: Option<Comparator<R>>,
-    cell: CellRenderer<R>,
+    cell: Cell<R>,
+    fit: Option<TextFn<R>>,
+    fit_extra: Pixels,
+    highlight: bool,
 }
 
 impl<R: 'static> Column<R> {
-    pub fn new(
-        title: impl Into<SharedString>,
-        cell: impl Fn(&R, &Palette) -> AnyElement + 'static,
-    ) -> Self {
+    fn build(title: impl Into<SharedString>, cell: Cell<R>) -> Self {
         Self {
             title: title.into(),
             width: Width::Flex {
@@ -70,7 +126,40 @@ impl<R: 'static> Column<R> {
             align: Align::Start,
             mono: false,
             sort: None,
-            cell: Rc::new(cell),
+            cell,
+            fit: None,
+            fit_extra: Pixels::ZERO,
+            highlight: false,
+        }
+    }
+
+    pub fn new(
+        title: impl Into<SharedString>,
+        cell: impl Fn(&R, &Palette) -> AnyElement + 'static,
+    ) -> Self {
+        Self::build(title, Cell::Custom(Rc::new(cell)))
+    }
+
+    fn text_cell(
+        title: impl Into<SharedString>,
+        text: TextFn<R>,
+        color: Option<ColorFn<R>>,
+        glyph: Option<GlyphFn<R>>,
+    ) -> Self {
+        let fit_extra = if glyph.is_some() {
+            GLYPH_SLOT + SPACE_4
+        } else {
+            Pixels::ZERO
+        };
+        let cell = Cell::Text(TextCell {
+            text: text.clone(),
+            color,
+            glyph,
+        });
+        Self {
+            fit: Some(text),
+            fit_extra,
+            ..Self::build(title, cell)
         }
     }
 
@@ -78,9 +167,7 @@ impl<R: 'static> Column<R> {
         title: impl Into<SharedString>,
         text: impl Fn(&R) -> SharedString + 'static,
     ) -> Self {
-        Self::new(title, move |row, _| {
-            div().truncate().child(text(row)).into_any_element()
-        })
+        Self::text_cell(title, Rc::new(text), None, None)
     }
 
     pub fn colored_text(
@@ -88,13 +175,41 @@ impl<R: 'static> Column<R> {
         text: impl Fn(&R) -> SharedString + 'static,
         color: impl Fn(&R, &Palette) -> Hsla + 'static,
     ) -> Self {
-        Self::new(title, move |row, palette| {
-            div()
-                .truncate()
-                .text_color(color(row, palette))
-                .child(text(row))
-                .into_any_element()
-        })
+        Self::text_cell(title, Rc::new(text), Some(Rc::new(color)), None)
+    }
+
+    pub fn status_text(
+        title: impl Into<SharedString>,
+        status: impl Fn(&R) -> Status + 'static,
+        text: impl Fn(&R) -> SharedString + 'static,
+    ) -> Self {
+        Self::text_cell(title, Rc::new(text), None, Some(Rc::new(status)))
+    }
+
+    pub fn highlight(mut self) -> Self {
+        self.highlight = true;
+        self
+    }
+
+    pub fn fit_by(mut self, text: impl Fn(&R) -> SharedString + 'static, extra: Pixels) -> Self {
+        self.fit = Some(Rc::new(text));
+        self.fit_extra = extra;
+        self
+    }
+
+    fn render_cell(&self, row: &R, palette: &Palette, words: &[String]) -> AnyElement {
+        match &self.cell {
+            Cell::Custom(cell) => cell(row, palette),
+            Cell::Text(cell) if self.highlight => cell.render(row, palette, words),
+            Cell::Text(cell) => cell.render(row, palette, &[]),
+        }
+    }
+
+    fn min(&self) -> Pixels {
+        match self.width {
+            Width::Fixed(_) => COLUMN_MIN,
+            Width::Flex { min, .. } => min.max(COLUMN_MIN),
+        }
     }
 
     pub fn fixed(mut self, width: Pixels) -> Self {
@@ -163,6 +278,28 @@ pub fn min_row_width(widths: impl Iterator<Item = Width>, gap: Pixels, padding: 
     total
 }
 
+pub fn resized(start: Pixels, delta: Pixels, min: Pixels) -> Pixels {
+    (start + delta).max(min)
+}
+
+fn text_width(window: &Window, text: &str, family: &'static str, size: Pixels) -> Pixels {
+    if text.is_empty() {
+        return Pixels::ZERO;
+    }
+    let run = TextRun {
+        len: text.len(),
+        font: gpui::font(family),
+        color: Hsla::default(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    window
+        .text_system()
+        .layout_line(text, size, &[run], None)
+        .width
+}
+
 pub fn sort_order<R>(
     rows: &[R],
     compare: &dyn Fn(&R, &R) -> Ordering,
@@ -210,6 +347,13 @@ pub enum TableEvent {
     Opened(usize),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Drag {
+    column: usize,
+    origin: Pixels,
+    start: Pixels,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Header {
     Hidden,
@@ -239,6 +383,14 @@ pub struct Table<R: 'static> {
     empty: SharedString,
     scroll: UniformListScrollHandle,
     focus: FocusHandle,
+    scope: SharedString,
+    widths: HashMap<SharedString, Pixels>,
+    measured: Rc<RefCell<Vec<Pixels>>>,
+    drag: Option<Drag>,
+    words: Vec<String>,
+    hovered: Option<usize>,
+    actions: Option<RowActions<R>>,
+    menu: Entity<ActionMenu>,
 }
 
 impl<R: 'static> EventEmitter<TableEvent> for Table<R> {}
@@ -249,8 +401,11 @@ impl<R: 'static> Table<R> {
         columns: Vec<Column<R>>,
         cx: &mut Context<Self>,
     ) -> Self {
+        let id: SharedString = id.into();
+        let menu = cx.new(|cx| ActionMenu::context(format!("{id}-row-menu"), cx));
+        let widths = stored_widths(FLEET_SCOPE, &id, cx);
         Self {
-            id: id.into(),
+            id,
             columns: Rc::new(columns),
             rows: Rc::new(Vec::new()),
             order: Vec::new(),
@@ -271,6 +426,189 @@ impl<R: 'static> Table<R> {
             empty: SharedString::default(),
             scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle(),
+            scope: FLEET_SCOPE.into(),
+            widths,
+            measured: Rc::default(),
+            drag: None,
+            words: Vec::new(),
+            hovered: None,
+            actions: None,
+            menu,
+        }
+    }
+
+    pub fn row_actions(mut self, actions: impl Fn(&R) -> Vec<MenuItem> + 'static) -> Self {
+        self.actions = Some(Rc::new(actions));
+        self
+    }
+
+    pub fn set_row_actions(
+        &mut self,
+        actions: impl Fn(&R) -> Vec<MenuItem> + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        self.actions = Some(Rc::new(actions));
+        cx.notify();
+    }
+
+    pub fn set_scope(&mut self, scope: impl Into<SharedString>, cx: &mut Context<Self>) {
+        let scope = scope.into();
+        if scope == self.scope {
+            return;
+        }
+        self.widths = stored_widths(&scope, &self.id, cx);
+        self.scope = scope;
+        cx.notify();
+    }
+
+    pub fn set_highlight(&mut self, words: Vec<String>, cx: &mut Context<Self>) {
+        if self.words != words {
+            self.words = words;
+            cx.notify();
+        }
+    }
+
+    pub fn hovered_row(&self) -> Option<&R> {
+        self.hovered.and_then(|ix| self.rows.get(ix))
+    }
+
+    pub fn column_width(&self, title: &str) -> Option<Pixels> {
+        self.widths.get(title).copied()
+    }
+
+    fn width_of(&self, column: &Column<R>) -> Width {
+        self.widths
+            .get(&column.title)
+            .map_or(column.width, |width| Width::Fixed(*width))
+    }
+
+    fn start_resize(
+        &mut self,
+        column: usize,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.stop_propagation();
+        if event.click_count >= DOUBLE_CLICK {
+            self.drag = None;
+            self.fit_column(column, window, cx);
+            return;
+        }
+        let measured = self.measured.borrow().get(column).copied();
+        let Some(start) = measured.or_else(|| {
+            self.columns.get(column).map(|c| match self.width_of(c) {
+                Width::Fixed(width) => width,
+                Width::Flex { min, .. } => min,
+            })
+        }) else {
+            return;
+        };
+        self.drag = Some(Drag {
+            column,
+            origin: event.position.x,
+            start,
+        });
+    }
+
+    fn drag_to(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let Some(drag) = self.drag else {
+            return;
+        };
+        if !event.dragging() {
+            self.finish_resize(cx);
+            return;
+        }
+        let Some(column) = self.columns.get(drag.column) else {
+            return;
+        };
+        let width = resized(drag.start, event.position.x - drag.origin, column.min());
+        let title = column.title.clone();
+        if self.widths.get(&title) != Some(&width) {
+            self.widths.insert(title, width);
+            cx.notify();
+        }
+    }
+
+    fn finish_resize(&mut self, cx: &mut Context<Self>) {
+        if self.drag.take().is_some() {
+            self.save_widths(cx);
+        }
+    }
+
+    fn fit_column(&mut self, ix: usize, window: &Window, cx: &mut Context<Self>) {
+        let Some(column) = self.columns.get(ix) else {
+            return;
+        };
+        let title = column.title.clone();
+        match &column.fit {
+            Some(text) => {
+                let (family, size) = if column.mono {
+                    (FONT_MONO, TEXT_MONO)
+                } else {
+                    (FONT_SANS, TEXT_BODY)
+                };
+                let widest = self
+                    .rows
+                    .iter()
+                    .map(|row| text_width(window, &text(row), family, size))
+                    .fold(Pixels::ZERO, Pixels::max);
+                let (header_family, header_size) = match self.header {
+                    Header::Mono => (FONT_MONO, TEXT_AXIS),
+                    Header::Sans => (FONT_SANS, TEXT_SMALL),
+                    Header::Hidden => (FONT_SANS, TEXT_SMALL),
+                };
+                let heading = text_width(window, &title, header_family, header_size)
+                    + text_width(window, SORT_ASCENDING, header_family, header_size);
+                let width = (widest + column.fit_extra).max(heading).max(column.min());
+                self.widths.insert(title, width.ceil());
+            }
+            None => {
+                self.widths.remove(&title);
+            }
+        }
+        self.save_widths(cx);
+        cx.notify();
+    }
+
+    fn save_widths(&self, cx: &mut App) {
+        let widths: ColumnWidths = self
+            .widths
+            .iter()
+            .map(|(title, width)| (title.to_string(), f32::from(*width)))
+            .collect();
+        prefs::set_column_widths(&self.scope, &self.id, widths, cx);
+    }
+
+    fn open_menu(
+        &mut self,
+        ix: usize,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let items = match (self.rows.get(ix), &self.actions) {
+            (Some(row), Some(actions)) => actions(row),
+            _ => Vec::new(),
+        };
+        if items.is_empty() {
+            return;
+        }
+        self.menu
+            .update(cx, |menu, cx| menu.show_at(position, items, window, cx));
+    }
+
+    fn hover_row(&mut self, ix: usize, hovered: bool, cx: &mut Context<Self>) {
+        let next = if hovered {
+            Some(ix)
+        } else if self.hovered == Some(ix) {
+            None
+        } else {
+            self.hovered
+        };
+        if next != self.hovered {
+            self.hovered = next;
+            cx.notify();
         }
     }
 
@@ -350,7 +688,7 @@ impl<R: 'static> Table<R> {
     }
 
     pub fn min_width(&self) -> Pixels {
-        let widths = self.columns.iter().map(|c| c.width);
+        let widths = self.columns.iter().map(|c| self.width_of(c));
         min_row_width(widths, self.column_gap, self.inset + TRAILING)
     }
 
@@ -381,6 +719,7 @@ impl<R: 'static> Table<R> {
         let selected_key = self.selected_key();
         self.record_flashes(&rows);
         self.rows = Rc::new(rows);
+        self.hovered = self.hovered.filter(|&ix| ix < self.rows.len());
         self.selected = match (selected_key, &self.key) {
             (Some(wanted), Some(key)) => self.rows.iter().position(|row| key(row) == wanted),
             _ => self.selected.filter(|&ix| ix < self.rows.len()),
@@ -493,10 +832,26 @@ impl<R: 'static> Table<R> {
                     Some(_) => None,
                     None => None,
                 };
-                let frame = cell_frame(column.width, column.align)
+                let handle = div()
+                    .debug_selector(|| format!("{}-resize-{ix}", self.id))
+                    .absolute()
+                    .top_0()
+                    .right_0()
+                    .h_full()
+                    .w(COLUMN_HANDLE)
+                    .cursor(CursorStyle::ResizeLeftRight)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                            this.start_resize(ix, event, window, cx);
+                        }),
+                    );
+                let frame = cell_frame(self.width_of(column), column.align)
                     .id(ix)
+                    .relative()
                     .child(column.title.clone())
-                    .children(arrow);
+                    .children(arrow)
+                    .child(handle);
                 if column.sort.is_some() {
                     let fg = palette.fg;
                     frame
@@ -509,6 +864,7 @@ impl<R: 'static> Table<R> {
                 }
             })
             .collect();
+        let measured = self.measured.clone();
         div()
             .flex()
             .flex_none()
@@ -523,6 +879,9 @@ impl<R: 'static> Table<R> {
             .text_color(palette.mute)
             .when(self.header == Header::Mono, |header| {
                 header.font_family(FONT_MONO).text_size(TEXT_AXIS)
+            })
+            .on_children_prepainted(move |bounds, _, _| {
+                *measured.borrow_mut() = bounds.iter().map(|b| b.size.width).collect();
             })
             .children(cells)
             .into_any_element()
@@ -569,13 +928,19 @@ impl<R: 'static> Table<R> {
         let status = self.status.as_ref().and_then(|status| status(row));
         let tint = status.and_then(|status| palette.tint(status));
         let hover = palette.hover;
-        let cells = columns.iter().map(|column| {
-            cell_frame(column.width, column.align)
-                .when(column.mono, |cell| {
-                    cell.font_family(FONT_MONO).text_size(TEXT_MONO)
-                })
-                .child((column.cell)(row, palette))
-        });
+        let cells: Vec<Div> = columns
+            .iter()
+            .map(|column| {
+                cell_frame(self.width_of(column), column.align)
+                    .when(column.mono, |cell| {
+                        cell.font_family(FONT_MONO).text_size(TEXT_MONO)
+                    })
+                    .child(column.render_cell(row, palette, &self.words))
+            })
+            .collect();
+        let more = (self.hovered == Some(ix))
+            .then(|| self.row_more(ix, row, cx))
+            .flatten();
         let element = div()
             .debug_selector(|| format!("{}-row-{ix}", self.id))
             .id(ix)
@@ -609,7 +974,17 @@ impl<R: 'static> Table<R> {
             .on_click(cx.listener(move |this, event, window, cx| {
                 this.click_row(ix, event, window, cx);
             }))
-            .children(cells);
+            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                this.hover_row(ix, *hovered, cx);
+            }))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.open_menu(ix, event.position, window, cx);
+                }),
+            )
+            .children(cells)
+            .children(more);
         let flash = self
             .key
             .as_ref()
@@ -631,6 +1006,41 @@ impl<R: 'static> Table<R> {
             None => element.into_any_element(),
         }
     }
+}
+
+impl<R: 'static> Table<R> {
+    fn row_more(&self, ix: usize, row: &R, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let actions = self.actions.as_ref()?;
+        if actions(row).is_empty() {
+            return None;
+        }
+        let id = format!("{}-row-{ix}-more", self.id);
+        let button = IconButton::glyph(ElementId::Name(id.clone().into()), MORE, MORE_TOOLTIP)
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                this.open_menu(ix, event.position(), window, cx);
+            }));
+        Some(
+            div()
+                .debug_selector(|| id)
+                .absolute()
+                .top_0()
+                .right(SPACE_4)
+                .h_full()
+                .flex()
+                .items_center()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(button)
+                .into_any_element(),
+        )
+    }
+}
+
+fn stored_widths(scope: &str, table: &str, cx: &App) -> HashMap<SharedString, Pixels> {
+    prefs::column_widths(scope, table, cx)
+        .into_iter()
+        .filter(|(_, width)| width.is_finite())
+        .map(|(title, width)| (SharedString::from(title), gpui::px(width).max(COLUMN_MIN)))
+        .collect()
 }
 
 fn mix(from: Hsla, to: Hsla, delta: f32) -> Hsla {
@@ -695,11 +1105,28 @@ impl<R: 'static> Render for Table<R> {
             .id(ElementId::NamedInteger(self.id.clone(), 0))
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                this.drag_to(event, cx);
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| this.finish_resize(cx)),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| this.finish_resize(cx)),
+            )
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if !*hovered && this.hovered.take().is_some() {
+                    cx.notify();
+                }
+            }))
             .overflow_x_scroll()
             .restrict_scroll_to_axis()
             .when(!self.fit, Styled::size_full)
             .when(self.fit, Styled::w_full)
             .child(content)
+            .child(self.menu.clone())
     }
 }
 
@@ -738,6 +1165,12 @@ mod tests {
             px(140. + 128. + 76. + 2. * 14. + 32.)
         );
         assert_eq!(min_row_width(std::iter::empty(), px(14.), px(32.)), px(32.));
+    }
+
+    #[test]
+    fn resizing_never_goes_below_the_minimum() {
+        assert_eq!(resized(px(120.), px(40.), px(32.)), px(160.));
+        assert_eq!(resized(px(120.), px(-200.), px(32.)), px(32.));
     }
 
     #[test]

@@ -673,12 +673,10 @@ impl Render for ClusterSwitcher {
                 Some((id, actions)) => self.render_actions(&id, actions, &palette, cx),
                 None => self.render_rows(&palette, cx),
             };
-            let panel = surface(&palette)
-                .id("switcher")
+            let panel = surface("switcher", &palette)
                 .p_0()
                 .w(SWITCHER_WIDTH)
                 .overflow_hidden()
-                .occlude()
                 .font_family(crate::theme::FONT_SANS)
                 .capture_action(cx.listener(|this, _: &TextFieldUp, _, cx| {
                     this.move_highlight(Step::Previous, cx);

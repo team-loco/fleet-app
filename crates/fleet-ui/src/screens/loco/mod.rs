@@ -14,7 +14,7 @@ use self::applications::ApplicationsScreen;
 use self::builds::BuildsScreen;
 use self::platform::PlatformScreen;
 use self::routes::RoutesScreen;
-use crate::kit::PageTitle;
+use crate::kit::{FilterBar, PageTitle};
 use crate::theme::{ActiveTheme, SPACE_7, SPACE_8};
 
 const NOT_INSTALLED: &str = "Loco is not installed on this cluster.";
@@ -47,9 +47,9 @@ impl EventEmitter<Command> for LocoScreens {}
 impl LocoScreens {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let applications = cx.new(|cx| ApplicationsScreen::new(window, cx));
-        let builds = cx.new(BuildsScreen::new);
+        let builds = cx.new(|cx| BuildsScreen::new(window, cx));
         let platform = cx.new(PlatformScreen::new);
-        let routes = cx.new(RoutesScreen::new);
+        let routes = cx.new(|cx| RoutesScreen::new(window, cx));
         let subscriptions = [
             cx.subscribe(&applications, |_, _, command: &Command, cx| {
                 cx.emit(command.clone());
@@ -111,6 +111,16 @@ impl LocoScreens {
             }
         }
         cx.notify();
+    }
+
+    pub fn filter_bar(&self, page: Page, cx: &gpui::App) -> Option<Entity<FilterBar>> {
+        self.loco.as_ref()?;
+        match page {
+            Page::LocoApplications => Some(self.applications.read(cx).filter_bar().clone()),
+            Page::LocoBuilds => Some(self.builds.read(cx).filter_bar().clone()),
+            Page::LocoRoutes => Some(self.routes.read(cx).filter_bar().clone()),
+            _ => None,
+        }
     }
 
     fn not_installed(&self, cx: &Context<Self>) -> AnyElement {

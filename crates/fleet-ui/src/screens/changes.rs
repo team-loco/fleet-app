@@ -10,8 +10,8 @@ use gpui::{
 
 use crate::kit::status_symbols;
 use crate::kit::{
-    Column, DiffFile, DiffLine, DiffView, InputEvent, LineKind, SectionHeader, Segmented, Select,
-    SelectEvent, Table, TableEvent, TextField, TextFieldState, Tooltip,
+    Column, DiffFile, DiffLine, DiffView, FilterBar, FilterEvent, LineKind, SectionHeader,
+    Segmented, Select, SelectEvent, Table, TableEvent, Tooltip,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, PAGE_HEADER, Palette, ROW_COMMIT, ROW_ROLLOUT, RULE, SPACE_1, SPACE_2,
@@ -23,14 +23,11 @@ const COMMIT_LIST: Pixels = px(360.);
 const DETAIL_MIN: Pixels = px(560.);
 const DETAIL_GROW: f32 = 999.;
 const LANE: Pixels = px(30.);
-const PATH_FIELD: Pixels = px(220.);
 const CLUSTER_MENU: Pixels = px(180.);
 const ROLLOUT_GLYPH: Pixels = px(14.);
 const ROLLOUT_CLUSTER: Pixels = px(110.);
 const ROLLOUT_OBJECT: Pixels = px(140.);
 
-const PATH_PREFIX: &str = "path:";
-const PATH_PLACEHOLDER: &str = "apps/payments";
 const ALL_CLUSTERS: &str = "All clusters";
 const COMMIT: &str = "commit";
 const NO_COMMITS: &str = "No commits match the filter.";
@@ -42,7 +39,7 @@ pub struct ChangesScreen {
     selected: Option<String>,
     view: Option<ViewKind>,
     cluster: Option<ClusterId>,
-    path: Entity<TextFieldState>,
+    filter: Entity<FilterBar>,
     clusters: Entity<Select>,
     commits: Entity<Table<Commit>>,
     _subscriptions: [Subscription; 3],
@@ -50,12 +47,13 @@ pub struct ChangesScreen {
 
 impl ChangesScreen {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let path = cx.new(|cx| TextFieldState::new(window, cx).placeholder(PATH_PLACEHOLDER));
         let clusters = cx.new(|cx| {
             Select::new("changes-cluster", vec![ALL_CLUSTERS.into()], cx)
+                .mono()
                 .width(CLUSTER_MENU)
-                .compact()
         });
+        let filter =
+            cx.new(|cx| FilterBar::new("changes-filter", window, cx).scope(clusters.clone()));
         let commits = cx.new(|cx| {
             Table::new("changes-commits", commit_columns(&[]), cx)
                 .row_height(ROW_COMMIT)
@@ -65,10 +63,8 @@ impl ChangesScreen {
                 .empty(NO_COMMITS)
         });
         let subscriptions = [
-            cx.subscribe(&path, |this, _, event: &InputEvent, cx| {
-                if let InputEvent::Change = event {
-                    this.refresh(cx);
-                }
+            cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
+                this.refresh(cx);
             }),
             cx.subscribe(&clusters, |this, _, SelectEvent::Changed(ix), cx| {
                 this.cluster = ix
@@ -90,7 +86,7 @@ impl ChangesScreen {
             selected: None,
             view: None,
             cluster: None,
-            path,
+            filter,
             clusters,
             commits,
             _subscriptions: subscriptions,
@@ -115,14 +111,22 @@ impl ChangesScreen {
         self.refresh(cx);
     }
 
+    pub fn filter_bar(&self) -> &Entity<FilterBar> {
+        &self.filter
+    }
+
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let path = self.path.read(cx).value();
+        let query = self.filter.read(cx).query().clone();
         let visible: Vec<Commit> = self
             .log
-            .visible(&path, self.cluster.as_ref())
+            .visible(&query, self.cluster.as_ref())
             .into_iter()
             .cloned()
             .collect();
+        let shown = visible.len();
+        let total = self.log.commits.len();
+        self.filter
+            .update(cx, |bar, cx| bar.set_matches(shown, total, cx));
         let kept = visible
             .iter()
             .position(|c| Some(&c.sha) == self.selected.as_ref());
@@ -174,18 +178,6 @@ impl ChangesScreen {
                     .text_color(palette.warn)
                     .child(self.log.fetched_label())
             }))
-            .child(div().flex_1())
-            .child(
-                div()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(
-                        TextField::new(&self.path)
-                            .prefix(PATH_PREFIX)
-                            .width(PATH_FIELD)
-                            .compact(),
-                    ),
-            )
-            .child(self.clusters.clone())
     }
 
     fn detail(&self, commit: &Commit, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
@@ -225,6 +217,7 @@ impl Render for ChangesScreen {
             .flex_col()
             .size_full()
             .child(self.header(&palette))
+            .child(self.filter.clone())
             .child(
                 div()
                     .flex()

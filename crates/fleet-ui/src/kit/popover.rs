@@ -1,6 +1,7 @@
 use gpui::{
-    Anchor, Animation, AnimationExt, AnyElement, BoxShadow, Div, ElementId, IntoElement,
-    ParentElement, Pixels, Styled, anchored, deferred, div, ease_out_quint, point,
+    Anchor, Animation, AnimationExt, AnyElement, BoxShadow, ElementId, InteractiveElement,
+    IntoElement, ParentElement, Pixels, Point, Stateful, Styled, anchored, deferred, div,
+    ease_out_quint, point,
 };
 
 use crate::theme::{
@@ -69,8 +70,10 @@ pub fn shadow(palette: &Palette) -> Vec<BoxShadow> {
     }]
 }
 
-pub fn surface(palette: &Palette) -> Div {
+pub fn surface(id: impl Into<ElementId>, palette: &Palette) -> Stateful<gpui::Div> {
     div()
+        .id(id)
+        .occlude()
         .flex()
         .flex_col()
         .p(SPACE_2)
@@ -120,6 +123,16 @@ pub fn below_left(trigger_height: Pixels, popover: AnyElement) -> impl IntoEleme
             )
             .priority(1),
         )
+}
+
+pub fn at(position: Point<Pixels>, popover: AnyElement) -> impl IntoElement {
+    deferred(
+        anchored()
+            .position(position)
+            .snap_to_window_with_margin(SPACE_4)
+            .child(popover),
+    )
+    .priority(1)
 }
 
 pub fn above_left(popover: AnyElement) -> impl IntoElement {

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use fleet_core::resources::{Resource, filter_resources, namespaces_of, sentence};
+use fleet_core::filter::StatusFilter;
+use fleet_core::resources::{Resource, filter_counts, filter_resources, namespaces_of, sentence};
 use fleet_core::time::age;
 use fleet_core::{
     ClusterDetail, ClusterId, ClusterSummary, Command, Counts, ResourceKind, ResourceRef, Status,
@@ -12,20 +13,18 @@ use gpui::{
 
 use super::ScreenEvent;
 use crate::kit::{
-    ActionMenu, CodeView, Column, ConfirmDialog, IconButton, InputEvent, Inspector, Lede, MenuItem,
-    Presence, Select, SelectEvent, StatusGlyph, Table, TableEvent, TextField, TextFieldState,
-    confirm, slide_in, slide_out,
+    ActionMenu, CodeView, Column, ConfirmDialog, FilterBar, FilterEvent, IconButton, Inspector,
+    Lede, MenuItem, Presence, Select, SelectEvent, Table, TableEvent, chip_label, confirm,
+    slide_in, slide_out,
 };
-use crate::theme::{SPACE_3, SPACE_4};
+use crate::theme::SPACE_3;
 
 const ALL_NAMESPACES: &str = "All namespaces";
-const PLACEHOLDER: &str = "filter by name or namespace";
 const NAME_WEIGHT: f32 = 1.4;
 const NAME_MIN: Pixels = px(200.);
 const NAMESPACE_WIDTH: Pixels = px(130.);
 const AGE_WIDTH: Pixels = px(44.);
 const SELECT_WIDTH: Pixels = px(180.);
-const SEARCH_WIDE: Pixels = px(220.);
 const YAML_INSPECTOR: Pixels = px(480.);
 const INSPECTOR_ID: &str = "resource-inspector";
 const STATUS_COLUMNS: [&str; 2] = ["Ready", "Status"];
@@ -103,12 +102,11 @@ pub struct ResourcesScreen {
     sentence: String,
     confirm_destructive: bool,
     namespace: Option<String>,
-    query: String,
     selected: Option<(String, String)>,
     revealed: Option<(ResourceKind, String, String)>,
     tables: HashMap<ResourceKind, Entity<Table<Resource>>>,
     namespaces: Entity<Select>,
-    search: Entity<TextFieldState>,
+    filter: Entity<FilterBar>,
     menu: Entity<ActionMenu>,
     subscriptions: Vec<Subscription>,
     presence: Presence<Resource>,
@@ -127,7 +125,8 @@ impl ResourcesScreen {
                 .mono()
                 .width(SELECT_WIDTH)
         });
-        let search = cx.new(|cx| TextFieldState::new(window, cx).placeholder(PLACEHOLDER));
+        let filter =
+            cx.new(|cx| FilterBar::new("resource-filter", window, cx).scope(namespaces.clone()));
         let subscriptions = vec![
             cx.subscribe(&namespaces, |this, select, _: &SelectEvent, cx| {
                 let label = select.read(cx).selected_label().cloned();
@@ -136,11 +135,8 @@ impl ResourcesScreen {
                     .map(|l| l.to_string());
                 this.refresh(cx);
             }),
-            cx.subscribe(&search, |this, state, event: &InputEvent, cx| {
-                if let InputEvent::Change = event {
-                    this.query = state.read(cx).value().to_string();
-                    this.refresh(cx);
-                }
+            cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
+                this.refresh(cx);
             }),
         ];
         let menu = cx.new(|cx| ActionMenu::new("resource-actions", cx));
@@ -151,12 +147,11 @@ impl ResourcesScreen {
             sentence: String::new(),
             confirm_destructive: true,
             namespace: None,
-            query: String::new(),
             selected: None,
             revealed: None,
             tables: HashMap::new(),
             namespaces,
-            search,
+            filter,
             menu,
             subscriptions,
             presence: Presence::default(),
@@ -223,6 +218,10 @@ impl ResourcesScreen {
         }
     }
 
+    pub fn filter_bar(&self) -> &Entity<FilterBar> {
+        &self.filter
+    }
+
     pub fn header_note(&self) -> (Counts, String) {
         let counts = Counts::of(self.rows.iter().map(|r| r.status));
         let flagged = counts.flagged();
@@ -265,7 +264,23 @@ impl ResourcesScreen {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let rows = filter_resources(&self.rows, self.namespace.as_deref(), &self.query);
+        let (query, chip) = {
+            let bar = self.filter.read(cx);
+            (bar.query().clone(), bar.chip())
+        };
+        let base = filter_resources(&self.rows, self.namespace.as_deref(), &query);
+        let chips = filter_counts(&base)
+            .into_iter()
+            .map(|(filter, n)| chip_label(filter.label(), n))
+            .collect();
+        let chip = StatusFilter::at(chip);
+        let rows: Vec<Resource> = base.into_iter().filter(|r| chip.keeps(r.status)).collect();
+        let shown = rows.len();
+        let total = self.rows.len();
+        self.filter.update(cx, |bar, cx| {
+            bar.set_chips(chips, cx);
+            bar.set_matches(shown, total, cx);
+        });
         if self
             .selected
             .as_ref()
@@ -278,7 +293,15 @@ impl ResourcesScreen {
                 .position(|r| &r.namespace == ns && &r.name == name)
         });
         let table = self.table(cx);
+        let scope = self.cluster.as_ref().map(|c| c.as_str().to_owned());
+        let actions = self.row_actions(cx);
+        let words = query.words.clone();
         table.update(cx, |table, cx| {
+            if let Some(scope) = scope {
+                table.set_scope(scope, cx);
+            }
+            table.set_highlight(words, cx);
+            table.set_row_actions(actions, cx);
             table.set_rows(rows, cx);
             if position.is_some() {
                 table.select(position, cx);
@@ -327,6 +350,25 @@ impl ResourcesScreen {
         })
     }
 
+    fn row_actions(&self, cx: &mut Context<Self>) -> impl Fn(&Resource) -> Vec<MenuItem> + 'static {
+        let cluster = self.cluster.clone();
+        let kind = self.kind;
+        let confirm_destructive = self.confirm_destructive;
+        let screen = cx.weak_entity();
+        move |row: &Resource| {
+            let Some(cluster) = cluster.clone() else {
+                return Vec::new();
+            };
+            let target = ResourceRef {
+                cluster,
+                kind: kind.name().into(),
+                namespace: Some(row.namespace.clone()),
+                name: row.name.clone(),
+            };
+            delete_items(kind, target, confirm_destructive, screen.clone())
+        }
+    }
+
     fn refresh_menu(&mut self, cx: &mut Context<Self>) {
         let target = self.selected_row().and_then(|r| self.target(r));
         let items = target
@@ -366,12 +408,6 @@ impl ResourcesScreen {
 
 impl Render for ResourcesScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let controls = div()
-            .flex()
-            .items_center()
-            .gap(SPACE_4)
-            .child(self.namespaces.clone())
-            .child(TextField::search(&self.search).width(SEARCH_WIDE));
         let table = self.table(cx);
         let current = self.selected_row().cloned();
         self.presence.track(current.as_ref(), presence, cx);
@@ -395,7 +431,8 @@ impl Render for ResourcesScreen {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .child(Lede::new(self.sentence.clone()).end(controls))
+                    .child(Lede::new(self.sentence.clone()))
+                    .child(self.filter.clone())
                     .child(div().flex_1().min_h_0().child(table)),
             )
             .children(inspector)
@@ -437,16 +474,12 @@ fn delete_items(
 }
 
 fn columns(kind: ResourceKind) -> Vec<Column<Resource>> {
-    let name = Column::new("Name", |r: &Resource, _| {
-        div()
-            .flex()
-            .items_center()
-            .gap(SPACE_4)
-            .min_w_0()
-            .child(StatusGlyph::new(r.status))
-            .child(div().truncate().child(r.name.clone()))
-            .into_any_element()
-    })
+    let name = Column::status_text(
+        "Name",
+        |r: &Resource| r.status,
+        |r: &Resource| r.name.clone().into(),
+    )
+    .highlight()
     .mono()
     .flex(NAME_WEIGHT, NAME_MIN)
     .sort_by_key(|r: &Resource| r.name.clone());
@@ -455,6 +488,7 @@ fn columns(kind: ResourceKind) -> Vec<Column<Resource>> {
         |r: &Resource| r.namespace.clone().into(),
         |_, p| p.fg2,
     )
+    .highlight()
     .fixed(NAMESPACE_WIDTH)
     .sort_by_key(|r: &Resource| r.namespace.clone());
     let cells = kind

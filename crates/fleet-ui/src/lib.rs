@@ -1,6 +1,7 @@
 pub mod assets;
 mod gallery;
 pub mod kit;
+pub mod prefs;
 pub mod screens;
 pub mod settings;
 mod shell;
@@ -9,7 +10,7 @@ pub mod theme;
 
 pub use gallery::{Gallery, GalleryPage};
 pub use gpui_component::Root;
-pub use shell::{NewWindowRequest, Shell};
+pub use shell::{NewWindowRequest, Shell, key_bindings};
 pub use store::Store;
 
 pub mod actions {
@@ -24,7 +25,8 @@ pub mod actions {
             ShowFluxOwner,
             OpenSelectedNewWindow,
             CloseWindow,
-            OpenSettings
+            OpenSettings,
+            FocusFilter
         ]
     );
 }

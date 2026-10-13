@@ -1,4 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
+
+use crate::filter::TextFilter;
 use std::time::Duration;
 
 use crate::{ClusterId, Counts, ResourceRef, Status};
@@ -296,25 +298,27 @@ pub fn nav_counts(pods: &[Pod], cluster: &ClusterId) -> Counts {
     Counts::total(tally(PodFilter::All)).with_err(tally(PodFilter::Failing))
 }
 
-pub fn matches_query(pod: &Pod, query: &str) -> bool {
-    let query = query.trim().to_lowercase();
+pub fn matches_query(pod: &Pod, query: &TextFilter) -> bool {
     if query.is_empty() {
         return true;
     }
-    let contains = |text: &str| text.to_lowercase().contains(&query);
-    let label_hit = pod
+    let pairs: Vec<String> = pod
         .labels
         .iter()
-        .any(|(key, value)| contains(&format!("{key}={value}")));
-    contains(&pod.name)
-        || contains(&pod.namespace)
-        || pod.node.as_deref().is_some_and(contains)
-        || label_hit
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect();
+    let mut fields: Vec<&str> = vec![
+        pod.name.as_str(),
+        pod.namespace.as_str(),
+        pod.node.as_deref().unwrap_or_default(),
+    ];
+    fields.extend(pairs.iter().map(String::as_str));
+    query.matches_labeled(Some(&pod.namespace), &pod.labels, &fields)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PodQuery {
-    pub text: String,
+    pub text: TextFilter,
     pub namespace: Option<String>,
     pub filter: PodFilter,
 }
@@ -513,12 +517,17 @@ mod tests {
     #[test]
     fn query_matches_name_namespace_node_and_labels() {
         let pod = crashing();
-        assert!(matches_query(&pod, ""));
-        assert!(matches_query(&pod, "X2LQP"));
-        assert!(matches_query(&pod, "payments"));
-        assert!(matches_query(&pod, "10-4-12-87"));
-        assert!(matches_query(&pod, "app=checkout"));
-        assert!(!matches_query(&pod, "grafana"));
+        assert!(matches_query(&pod, &TextFilter::parse("")));
+        assert!(matches_query(&pod, &TextFilter::parse("X2LQP")));
+        assert!(matches_query(&pod, &TextFilter::parse("payments")));
+        assert!(matches_query(&pod, &TextFilter::parse("10-4-12-87")));
+        assert!(matches_query(&pod, &TextFilter::parse("app=checkout")));
+        assert!(!matches_query(&pod, &TextFilter::parse("grafana")));
+        assert!(matches_query(
+            &pod,
+            &TextFilter::parse("l:app=checkout-api ns:pay")
+        ));
+        assert!(!matches_query(&pod, &TextFilter::parse("l:app=web")));
     }
 
     #[test]

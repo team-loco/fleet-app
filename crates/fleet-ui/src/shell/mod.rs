@@ -8,15 +8,15 @@ use fleet_core::resource::short_kind;
 use fleet_core::{AddClusterStep, AppState, Command, Page, Sender, Status, Update};
 use gpui::{
     App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
-    ParentElement, Render, Styled, Subscription, Task, Window, div,
+    KeyBinding, ParentElement, Render, Styled, Subscription, Task, Window, div,
 };
 
 use crate::Store;
 use crate::actions::{
-    CloseWindow, CompareAcrossClusters, FollowLogs, OpenSettings, ShowFluxOwner,
+    CloseWindow, CompareAcrossClusters, FocusFilter, FollowLogs, OpenSettings, ShowFluxOwner,
     ToggleClusterSwitcher, ToggleCommandPalette, ToggleSidebar,
 };
-use crate::kit::{Toast, toast};
+use crate::kit::{FilterBar, TERMINAL_CONTEXT, Toast, toast};
 use crate::screens::add_cluster::{AddClusterDialog, AddClusterEvent};
 use crate::screens::app_settings::AppSettingsScreen;
 use crate::screens::changes::ChangesScreen;
@@ -31,6 +31,15 @@ use crate::screens::workload::WorkloadScreen;
 use crate::screens::{ClusterPages, ScreenEvent};
 use crate::theme::{self, ActiveTheme, TEXT_UI};
 use switcher::{ClusterSwitcher, SwitcherEvent};
+
+const KEY_CONTEXT: &str = "Shell";
+const INPUT_CONTEXT: &str = "Input";
+const FILTER_KEY: &str = "/";
+
+pub fn key_bindings() -> Vec<KeyBinding> {
+    let context = format!("{KEY_CONTEXT} && !{INPUT_CONTEXT} && !{TERMINAL_CONTEXT}");
+    vec![KeyBinding::new(FILTER_KEY, FocusFilter, Some(&context))]
+}
 
 pub struct NewWindowRequest(pub Vec<Command>);
 
@@ -105,7 +114,7 @@ impl Shell {
             this.dispatch(command.clone(), cx);
         });
         let changes = cx.new(|cx| ChangesScreen::new(window, cx));
-        let gitops = cx.new(GitOpsScreen::new);
+        let gitops = cx.new(|cx| GitOpsScreen::new(window, cx));
         let gitops_commands = cx.subscribe(&gitops, |this, _, command: &Command, cx| {
             this.dispatch(command.clone(), cx);
         });
@@ -491,6 +500,28 @@ impl Shell {
         screen.update(cx, |screen, cx| screen.set_yaml(yaml, cx));
     }
 
+    pub fn filter_bar(&self, cx: &App) -> Option<Entity<FilterBar>> {
+        if self.state.workload().is_some() || self.state.flux_object.is_some() {
+            return None;
+        }
+        #[cfg(feature = "loco")]
+        if crate::screens::loco::owns(self.state.page) {
+            return self.loco.read(cx).filter_bar(self.state.page, cx);
+        }
+        match self.state.page {
+            Page::Pods => Some(self.pods.read(cx).filter_bar().clone()),
+            Page::Changes => Some(self.changes.read(cx).filter_bar().clone()),
+            Page::GitOps => Some(self.gitops.read(cx).filter_bar().clone()),
+            page => self.pages.filter_bar(page, cx),
+        }
+    }
+
+    fn focus_filter(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(bar) = self.filter_bar(cx) {
+            bar.update(cx, |bar, cx| bar.focus(window, cx));
+        }
+    }
+
     pub fn show_pod_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.pods
             .update(cx, |pods, cx| pods.show_terminal(window, cx));
@@ -503,7 +534,11 @@ impl Render for Shell {
         let page = self.page(window, cx);
         div()
             .id("shell")
+            .key_context(KEY_CONTEXT)
             .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &FocusFilter, window, cx| {
+                this.focus_filter(window, cx);
+            }))
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
             .on_action(cx.listener(|this, _: &OpenSettings, _, cx| {
                 this.dispatch(Command::SelectPage(Page::Settings), cx);

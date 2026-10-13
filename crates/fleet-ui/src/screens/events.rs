@@ -1,6 +1,6 @@
-use fleet_core::events::{self, Event, EventFilter, filter_events};
+use fleet_core::events::{self, Event, EventFilter, filter_counts, filter_events};
 use fleet_core::time::age;
-use fleet_core::{ClusterDetail, Counts, Status};
+use fleet_core::{ClusterDetail, ClusterId, Counts, Status};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
     Render, Styled, Window, div, px,
@@ -8,9 +8,9 @@ use gpui::{
 
 use super::ScreenEvent;
 use crate::kit::{
-    Column, InputEvent, Lede, Segmented, StatusGlyph, StatusText, Table, TextField, TextFieldState,
+    Column, FilterBar, FilterEvent, Lede, StatusGlyph, StatusText, Table, chip_label,
 };
-use crate::theme::{SPACE_3, SPACE_4};
+use crate::theme::{GLYPH_SLOT, SPACE_3, SPACE_4};
 
 const REASON_WIDTH: Pixels = px(190.);
 const OBJECT_WEIGHT: f32 = 1.2;
@@ -21,14 +21,11 @@ const MESSAGE_MIN: Pixels = px(260.);
 const COUNT_WIDTH: Pixels = px(40.);
 const AGE_WIDTH: Pixels = px(44.);
 const NO_NAMESPACE: &str = "—";
-const PLACEHOLDER: &str = "filter events";
 
 pub struct EventsScreen {
     events: Vec<Event>,
     sentence: String,
-    filter: EventFilter,
-    query: String,
-    search: Entity<TextFieldState>,
+    filter: Entity<FilterBar>,
     table: Entity<Table<Event>>,
 }
 
@@ -41,25 +38,23 @@ impl EventsScreen {
                 .row_status(|e: &Event| (e.status == Status::Err).then_some(Status::Err))
                 .empty("No events match the filter.")
         });
-        let search = cx.new(|cx| TextFieldState::new(window, cx).placeholder(PLACEHOLDER));
-        cx.subscribe(&search, |this, state, event: &InputEvent, cx| {
-            if let InputEvent::Change = event {
-                this.query = state.read(cx).value().to_string();
-                this.refresh(cx);
-            }
+        let filter = cx.new(|cx| FilterBar::new("event-filter", window, cx));
+        cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
+            this.refresh(cx);
         })
         .detach();
         Self {
             events: Vec::new(),
             sentence: String::new(),
-            filter: EventFilter::default(),
-            query: String::new(),
-            search,
+            filter,
             table,
         }
     }
 
-    pub fn set(&mut self, detail: &ClusterDetail, cx: &mut Context<Self>) {
+    pub fn set(&mut self, cluster: &ClusterId, detail: &ClusterDetail, cx: &mut Context<Self>) {
+        let scope = cluster.as_str().to_owned();
+        self.table
+            .update(cx, |table, cx| table.set_scope(scope, cx));
         if self.events == detail.events {
             return;
         }
@@ -73,44 +68,44 @@ impl EventsScreen {
         (counts, format!("{} events", self.events.len()))
     }
 
-    fn refresh(&mut self, cx: &mut Context<Self>) {
-        let rows = filter_events(&self.events, self.filter, &self.query);
-        self.table.update(cx, |table, cx| table.set_rows(rows, cx));
-        cx.notify();
+    pub fn filter_bar(&self) -> &Entity<FilterBar> {
+        &self.filter
     }
 
-    fn select_filter(&mut self, ix: usize, cx: &mut Context<Self>) {
-        if let Some(filter) = EventFilter::ALL.get(ix) {
-            self.filter = *filter;
-            self.refresh(cx);
-        }
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        let (query, chip) = {
+            let bar = self.filter.read(cx);
+            (bar.query().clone(), bar.chip())
+        };
+        let chips = filter_counts(&self.events, &query)
+            .into_iter()
+            .map(|(filter, n)| chip_label(filter.label(), n))
+            .collect();
+        let filter = EventFilter::ALL.get(chip).copied().unwrap_or_default();
+        let rows = filter_events(&self.events, filter, &query);
+        let shown = rows.len();
+        let total = self.events.len();
+        self.filter.update(cx, |bar, cx| {
+            bar.set_chips(chips, cx);
+            bar.set_matches(shown, total, cx);
+        });
+        let words = query.words;
+        self.table.update(cx, |table, cx| {
+            table.set_highlight(words, cx);
+            table.set_rows(rows, cx);
+        });
+        cx.notify();
     }
 }
 
 impl Render for EventsScreen {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let selected = EventFilter::ALL
-            .iter()
-            .position(|f| *f == self.filter)
-            .unwrap_or_default();
-        let filters = EventFilter::ALL
-            .iter()
-            .fold(Segmented::new("event-filter").small(), |seg, f| {
-                seg.option(f.label())
-            })
-            .selected(selected)
-            .on_select(cx.listener(|this, ix: &usize, _, cx| this.select_filter(*ix, cx)));
-        let controls = div()
-            .flex()
-            .items_center()
-            .gap(SPACE_4)
-            .child(TextField::search(&self.search))
-            .child(filters);
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
             .flex()
             .flex_col()
-            .child(Lede::new(self.sentence.clone()).end(controls))
+            .child(Lede::new(self.sentence.clone()))
+            .child(self.filter.clone())
             .child(div().flex_1().min_h_0().child(self.table.clone()))
     }
 }
@@ -132,9 +127,11 @@ pub fn reason_cell(event: &Event) -> AnyElement {
 fn columns() -> Vec<Column<Event>> {
     vec![
         Column::new("Reason", |e: &Event, _| reason_cell(e))
+            .fit_by(|e: &Event| e.reason.clone().into(), GLYPH_SLOT + SPACE_4)
             .fixed(REASON_WIDTH)
             .sort_by_key(|e: &Event| e.reason.clone()),
         Column::text("Object", |e: &Event| e.object.clone().into())
+            .highlight()
             .mono()
             .flex(OBJECT_WEIGHT, OBJECT_MIN)
             .sort_by_key(|e: &Event| e.object.clone()),
@@ -155,6 +152,7 @@ fn columns() -> Vec<Column<Event>> {
             |e: &Event| e.message.clone().into(),
             |_, p| p.fg2,
         )
+        .highlight()
         .flex(MESSAGE_WEIGHT, MESSAGE_MIN),
         Column::colored_text("Age", |e: &Event| age(e.age).into(), |_, p| p.mute)
             .mono()
