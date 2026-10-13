@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+loco_core="${LOCO_CORE:-/Users/nikhil/Documents/loco/core}"
+mkdir -p crds/loco crates/fleet-loco/src/generated
+for resource in applications builds; do
+  source_crd="$loco_core/controller/config/crd/bases/infra.loco.io_${resource}.yaml"
+  target_crd="crds/loco/infra.loco.io_${resource}.yaml"
+  cp "$source_crd" "$target_crd"
+  if [[ "$resource" == applications ]]; then phase=ApplicationStatusPhase; else phase=BuildStatusPhase; fi
+  printf 'use super::%s;\n' "$phase" > "crates/fleet-loco/src/generated/${resource}.rs"
+  kopium --elide "$phase" --filename "$target_crd" --derive PartialEq | sed '/^[[:space:]]*\/\//d' >> "crates/fleet-loco/src/generated/${resource}.rs"
+done
+rustfmt --edition 2024 crates/fleet-loco/src/generated/*.rs

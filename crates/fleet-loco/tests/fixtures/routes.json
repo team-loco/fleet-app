@@ -1,0 +1,5 @@
+{
+  "metadata": {"name": "resource-app-route", "namespace": "ws-workspace", "generation": 2},
+  "spec": {"hostnames": ["app.onloco.app"], "rules": [{"backendRefs": [{"name": "resource-app", "port": 80}]}]},
+  "status": {"parents": [{"parentRef": {"name": "eg", "namespace": "loco-system"}, "controllerName": "gateway.envoyproxy.io/gatewayclass-controller", "conditions": [{"type": "Accepted", "status": "True", "observedGeneration": 2, "reason": "Accepted", "message": "Accepted", "lastTransitionTime": "2026-10-12T21:00:00Z"}]}]}
+}

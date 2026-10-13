@@ -1,0 +1,20 @@
+{
+  "deployment": {
+    "metadata": {"name": "loco-core-agent", "namespace": "loco-system", "generation": 2},
+    "spec": {"replicas": 1, "selector": {"matchLabels": {"app": "loco-core-agent"}}, "template": {"spec": {"containers": [{"name": "agent", "image": "agent:sha-abc"}]}}},
+    "status": {"observedGeneration": 2, "readyReplicas": 1, "updatedReplicas": 1, "replicas": 1}
+  },
+  "daemonset": {
+    "metadata": {"name": "cilium", "namespace": "kube-system", "generation": 1},
+    "status": {"observedGeneration": 1, "numberReady": 14, "updatedNumberScheduled": 14, "desiredNumberScheduled": 14, "currentNumberScheduled": 14, "numberMisscheduled": 0}
+  },
+  "statefulset": {
+    "metadata": {"name": "database", "namespace": "observability", "generation": 1},
+    "spec": {"replicas": 1, "selector": {}, "template": {}},
+    "status": {"observedGeneration": 1, "readyReplicas": 1, "replicas": 1}
+  },
+  "pod": {
+    "metadata": {"name": "chi-loco-obs-clickhouse-0-0-0", "namespace": "observability", "labels": {"app.kubernetes.io/name": "clickhouse", "app.kubernetes.io/instance": "loco-obs"}},
+    "status": {"phase": "Running", "conditions": [{"type": "Ready", "status": "True"}]}
+  }
+}

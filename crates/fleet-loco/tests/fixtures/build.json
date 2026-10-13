@@ -1,0 +1,6 @@
+{
+  "apiVersion": "infra.loco.io/v1alpha1", "kind": "Build",
+  "metadata": {"name": "build-id", "namespace": "loco-builds", "uid": "build-uid"},
+  "spec": {"buildId": "build-id", "workspaceId": "workspace", "resourceId": "app", "sourceURL": "https://source.invalid/build.tar.gz", "dockerfilePath": "Dockerfile", "context": ".", "imageRepository": "registry/app", "cacheRef": "registry/app@sha256:cache"},
+  "status": {"phase": "Succeeded", "startedAt": "2026-10-12T21:00:00Z", "finishedAt": "2026-10-12T21:02:11Z", "imageDigest": "sha256:image", "cacheDigest": "sha256:cache"}
+}

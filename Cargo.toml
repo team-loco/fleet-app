@@ -34,6 +34,9 @@ gpui-component = "0.7.3"
 gpui-platform = { package = "gpui-pre-platform", version = "=0.3.9", features = ["font-kit", "runtime_shaders"] }
 k8s-openapi = { version = "0.28.0", features = ["v1_36"] }
 kube = { version = "4.2.0", features = ["runtime", "derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+chrono = { version = "0.4.45", default-features = false, features = ["std", "serde"] }
 thiserror = "2.0.21"
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "sync", "time"] }
 tracing = "0.1.44"
