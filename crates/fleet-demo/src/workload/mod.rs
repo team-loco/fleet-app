@@ -9,11 +9,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
-use fleet_core::{Command, ExecRequest, LogRequest, ResourceRef, Sink, Status, Workload};
+use fleet_core::{
+    ClusterId, Command, ExecRequest, LogRequest, ResourceRef, Sink, Snapshot, Status, Workload,
+};
 
 use sim::{Action, Names};
 
-use data::checkout_api;
+use data::{checkout_api, healthy_checkout};
 
 const ACTION_DURATION: Duration = Duration::from_secs(2);
 const LOG_TICK: Duration = Duration::from_millis(700);
@@ -49,16 +51,17 @@ pub struct Workloads {
     shared: Arc<Mutex<Shared>>,
 }
 
-impl Default for Workloads {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Workloads {
-    pub fn new() -> Self {
+    pub fn new(snapshot: &Snapshot) -> Self {
+        let sample = data::target().cluster;
+        let peers: Vec<Workload> = snapshot
+            .clusters
+            .iter()
+            .filter(|c| c.id != sample)
+            .filter_map(|c| peer_checkout(snapshot, &c.id))
+            .collect();
         let shared = Shared {
-            workloads: sample_workloads(),
+            workloads: sample_workloads().into_iter().chain(peers).collect(),
             ..Shared::default()
         };
         Self {
@@ -152,6 +155,25 @@ fn sample_workloads() -> Vec<Workload> {
     workloads
 }
 
+fn peer_checkout(snapshot: &Snapshot, cluster: &ClusterId) -> Option<Workload> {
+    let checkout = crate::derive::checkout(&snapshot.resources, cluster)?;
+    let pods: Vec<(String, String)> = snapshot
+        .pods
+        .iter()
+        .filter(|p| &p.cluster == cluster && p.namespace == data::NAMESPACE)
+        .filter(|p| p.name.starts_with(crate::derive::CHECKOUT_REPLICA_SET))
+        .map(|p| (p.name.clone(), p.node.clone().unwrap_or_default()))
+        .collect();
+    if pods.is_empty() {
+        return None;
+    }
+    Some(healthy_checkout(
+        cluster,
+        &pods,
+        checkout.version.as_deref(),
+    ))
+}
+
 fn spawn_exec(request: ExecRequest) {
     spawn("fleet-demo-exec", move || exec::run(&request));
 }
@@ -179,7 +201,7 @@ mod tests {
 
     #[test]
     fn watching_sends_the_current_state_then_action_progress() {
-        let workloads = Workloads::new();
+        let workloads = Workloads::new(&crate::snapshot());
         let (sink, rx) = Sink::channel();
         workloads.handle(&Command::WatchWorkload {
             target: sample_target(),
@@ -199,7 +221,7 @@ mod tests {
     #[cfg(feature = "loco")]
     #[test]
     fn the_loco_checkout_deployment_has_a_workload_to_open() {
-        let workloads = Workloads::new();
+        let workloads = Workloads::new(&crate::snapshot());
         let (sink, rx) = Sink::channel();
         workloads.handle(&Command::WatchWorkload {
             target: loco::target(),
@@ -210,8 +232,36 @@ mod tests {
     }
 
     #[test]
+    fn peer_clusters_serve_a_healthy_checkout_matching_their_pods() {
+        let snapshot = crate::snapshot();
+        let workloads = Workloads::new(&snapshot);
+        let (sink, rx) = Sink::channel();
+        let target = ResourceRef {
+            cluster: ClusterId::new("prod-eu-west"),
+            ..sample_target()
+        };
+        workloads.handle(&Command::WatchWorkload {
+            target: target.clone(),
+            sink,
+        });
+        let workload = rx.recv_blocking().ok();
+        assert_eq!(workload.as_ref().map(Workload::status), Some(Status::Ok));
+        assert_eq!(workload.as_ref().map(|w| w.desired), Some(3));
+        assert_eq!(
+            workload.as_ref().and_then(Workload::image),
+            Some("checkout-api:2.13.4")
+        );
+        let pod = workload.and_then(|w| w.pods.first().map(|p| p.name.clone()));
+        let listed = snapshot
+            .pods
+            .iter()
+            .any(|p| p.cluster == target.cluster && Some(&p.name) == pod.as_ref());
+        assert!(listed);
+    }
+
+    #[test]
     fn watching_an_unknown_workload_closes_the_sink() {
-        let workloads = Workloads::new();
+        let workloads = Workloads::new(&crate::snapshot());
         let (sink, rx) = Sink::channel();
         let target = ResourceRef {
             name: "missing".into(),
@@ -223,7 +273,7 @@ mod tests {
 
     #[test]
     fn crashing_pod_previous_logs_end_with_the_exit_marker() {
-        let workloads = Workloads::new();
+        let workloads = Workloads::new(&crate::snapshot());
         let (sink, rx) = Sink::channel();
         workloads.handle(&Command::StreamLogs(LogRequest {
             pod: pod("checkout-api-7f9c6d-x2lqp"),
@@ -237,7 +287,7 @@ mod tests {
 
     #[test]
     fn healthy_pod_logs_keep_streaming_until_dropped() {
-        let workloads = Workloads::new();
+        let workloads = Workloads::new(&crate::snapshot());
         let (sink, rx) = Sink::channel();
         workloads.handle(&Command::StreamLogs(LogRequest {
             pod: pod("checkout-api-7f9c6d-m8vtn"),
@@ -256,7 +306,7 @@ mod tests {
     fn exec_session_replays_history_and_answers_input() {
         let (output, events) = Sink::channel();
         let (input, source) = Source::channel();
-        Workloads::new().handle(&Command::Exec(ExecRequest {
+        Workloads::new(&crate::snapshot()).handle(&Command::Exec(ExecRequest {
             target: ExecTarget {
                 pod: pod("checkout-api-7f9c6d-x2lqp"),
                 container: data::API.into(),

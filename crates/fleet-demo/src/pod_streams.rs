@@ -422,7 +422,7 @@ mod tests {
     #[test]
     fn workload_pods_are_left_to_the_workload_simulation() {
         let snapshot = crate::snapshot();
-        let workloads = Workloads::new();
+        let workloads = Workloads::new(&snapshot);
         let checkout = sample("checkout-api-7f9c6d-x2lqp");
         let db = sample("payments-db-0");
         let (input, source) = Source::channel();

@@ -103,7 +103,9 @@ impl ClusterPages {
     pub fn reveal(&self, target: &ResourceRef, cx: &mut App) {
         if target.kind == NODE_KIND {
             let name = target.name.clone();
-            self.nodes.update(cx, |screen, cx| screen.reveal(name, cx));
+            let cluster = target.cluster.clone();
+            self.nodes
+                .update(cx, |screen, cx| screen.reveal(cluster, name, cx));
             return;
         }
         let kind = ResourceKind::ALL

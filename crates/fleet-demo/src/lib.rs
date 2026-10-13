@@ -1,6 +1,7 @@
 mod add_cluster;
 mod changes;
 mod compare;
+mod derive;
 mod detail;
 mod flux;
 mod gitops;
@@ -27,6 +28,7 @@ use fleet_core::{
 };
 
 const PROD_US_EAST: &str = "prod-us-east";
+const OCTET_BASE: usize = 4;
 
 pub struct DemoBackend;
 
@@ -73,7 +75,7 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
         tracing::error!(%error, "demo command forwarder failed to start");
         return;
     }
-    let workloads = workload::Workloads::new();
+    let workloads = workload::Workloads::new(&state);
     while let Ok(input) = input_rx.recv() {
         let changed = match input {
             Input::Command(command) => {
@@ -202,7 +204,44 @@ pub fn snapshot() -> Snapshot {
         forwards: Vec::new(),
     };
     simulate::recount_pods(&mut snapshot, &ClusterId::new(PROD_US_EAST));
+    derive_clusters(&mut snapshot);
     snapshot
+}
+
+fn derive_clusters(snapshot: &mut Snapshot) {
+    let prod = ClusterId::new(PROD_US_EAST);
+    let Some(template_detail) = snapshot.details.get(&prod).cloned() else {
+        return;
+    };
+    let template_pods: Vec<fleet_core::pods::Pod> = snapshot
+        .pods
+        .iter()
+        .filter(|p| p.cluster == prod)
+        .cloned()
+        .collect();
+    let template = derive::Template {
+        detail: &template_detail,
+        pods: &template_pods,
+    };
+    for (ix, summary) in snapshot.clusters.iter_mut().enumerate() {
+        if summary.id == prod {
+            continue;
+        }
+        let checkout = derive::checkout(&snapshot.resources, &summary.id);
+        let derived = derive::cluster(
+            summary,
+            OCTET_BASE + ix,
+            &snapshot.home.problems,
+            checkout.as_ref(),
+            &template,
+        );
+        let Some(derived) = derived else {
+            continue;
+        };
+        summary.nav = derive::nav(summary, &derived.detail, &derived.pods, &snapshot.flux);
+        snapshot.pods.extend(derived.pods);
+        snapshot.details.insert(summary.id.clone(), derived.detail);
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -400,6 +439,91 @@ mod tests {
         );
         let badge = fleet.fleet_nav.get(&Page::Problems).copied();
         assert_eq!(badge, Some(Counts::default().with_err(1).with_warn(3)));
+    }
+
+    #[test]
+    fn prod_us_east_keeps_the_design_data() {
+        let snapshot = snapshot();
+        let prod = ClusterId::new(PROD_US_EAST);
+        assert_eq!(snapshot.detail(&prod), Some(&detail::prod_us_east()));
+        let mut summary = snapshot.cluster(&prod).cloned();
+        if let Some(summary) = summary.as_mut() {
+            summary.nav.remove(&Page::Pods);
+        }
+        assert_eq!(summary, Some(prod_us_east()));
+        let prod_pods: Vec<_> = snapshot
+            .pods
+            .iter()
+            .filter(|p| p.cluster == prod)
+            .cloned()
+            .collect();
+        assert_eq!(prod_pods, pods::pods());
+    }
+
+    #[test]
+    fn reachable_clusters_have_pages_derived_from_their_summary() {
+        let snapshot = snapshot();
+        for cluster in snapshot.clusters.iter().filter(|c| c.metrics.is_some()) {
+            let detail = snapshot.detail(&cluster.id);
+            let Some((detail, metrics)) = detail.zip(cluster.metrics.as_ref()) else {
+                panic!("{} has no detail", cluster.name);
+            };
+            assert_eq!(
+                u32::try_from(detail.nodes.len()).ok(),
+                cluster.nodes,
+                "{}",
+                cluster.name
+            );
+            assert_eq!(
+                Some(detail.overview.pods.total()),
+                metrics.pods.total,
+                "{}",
+                cluster.name
+            );
+            let listed_pods = fleet_core::pods::nav_counts(&snapshot.pods, &cluster.id);
+            assert_eq!(listed_pods.total, metrics.pods.total, "{}", cluster.name);
+            assert_eq!(
+                cluster.nav.get(&Page::Pods),
+                Some(&listed_pods),
+                "{}",
+                cluster.name
+            );
+            let deployments =
+                u32::try_from(detail.resources(fleet_core::ResourceKind::Deployment).len()).ok();
+            let listed = cluster.nav.get(&Page::Deployments).and_then(|c| c.total);
+            assert_eq!(listed, deployments, "{}", cluster.name);
+            let pods = snapshot.pods.iter().filter(|p| p.cluster == cluster.id);
+            assert!(pods.count() > 0, "{}", cluster.name);
+        }
+    }
+
+    #[test]
+    fn derived_cluster_lists_its_problems_and_checkout() {
+        let snapshot = snapshot();
+        let staging = ClusterId::new("staging");
+        let detail = snapshot.detail(&staging);
+        let warnings = detail.map(fleet_core::ClusterDetail::warnings);
+        assert_eq!(warnings, Some(2));
+        let flagged = snapshot
+            .pods
+            .iter()
+            .find(|p| p.cluster == staging && p.name == "search-indexer-0")
+            .map(|p| p.status);
+        assert_eq!(flagged, Some(Status::Warn));
+        let checkout = detail
+            .and_then(|d| d.resources(fleet_core::ResourceKind::Deployment).first())
+            .map(|r| (r.name.as_str(), r.cells.first().map(String::as_str)));
+        assert_eq!(checkout, Some(("checkout-api", Some("2/2"))));
+    }
+
+    #[test]
+    fn unreachable_clusters_have_no_pages() {
+        let snapshot = snapshot();
+        for name in ["qa-gke", "edge-k3s"] {
+            let id = ClusterId::new(name);
+            assert!(snapshot.detail(&id).is_none(), "{name}");
+            assert!(snapshot.pods.iter().all(|p| p.cluster != id), "{name}");
+        }
     }
 
     #[test]
