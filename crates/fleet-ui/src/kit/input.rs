@@ -2,7 +2,7 @@ use gpui::{
     App, Entity, Focusable, IntoElement, ParentElement, Pixels, RenderOnce, SharedString, Styled,
     Window, div, prelude::FluentBuilder,
 };
-use gpui_component::input::{Input, InputState};
+use gpui_component::input::{Input, InputState, Textarea};
 
 use crate::theme::{
     ActiveTheme, CONTROL, CONTROL_SMALL, FONT_MONO, RADIUS, RULE, SEARCH_WIDTH, SPACE_3, SPACE_4,
@@ -11,7 +11,7 @@ use crate::theme::{
 
 pub use gpui_component::input::{
     Escape as TextFieldEscape, InputEvent, InputState as TextFieldState, MoveDown as TextFieldDown,
-    MoveUp as TextFieldUp,
+    MoveUp as TextFieldUp, TextareaState as TextAreaState,
 };
 
 #[derive(IntoElement)]
@@ -98,6 +98,7 @@ impl RenderOnce for TextField {
                 palette.line2
             })
             .bg(palette.editor)
+            .text_color(palette.fg)
             .overflow_hidden()
             .font_family(FONT_MONO)
             .text_size(text)
@@ -110,8 +111,56 @@ impl RenderOnce for TextField {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .child(Input::new(&self.state).appearance(false).h(height)),
+                    .child(Input::new(&self.state).appearance(false).px_0().h(height)),
             )
             .into_any_element()
+    }
+}
+
+#[derive(IntoElement)]
+pub struct TextArea {
+    state: Entity<TextAreaState>,
+    height: Pixels,
+}
+
+impl TextArea {
+    pub fn new(state: &Entity<TextAreaState>, height: Pixels) -> Self {
+        Self {
+            state: state.clone(),
+            height,
+        }
+    }
+}
+
+impl RenderOnce for TextArea {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let palette = *cx.palette();
+        let focused = self
+            .state
+            .read(cx)
+            .focus_handle(cx)
+            .contains_focused(window, cx);
+        div()
+            .h(self.height)
+            .px(SPACE_4)
+            .py(SPACE_3)
+            .rounded(RADIUS)
+            .border(RULE)
+            .border_color(if focused {
+                palette.selline
+            } else {
+                palette.line2
+            })
+            .bg(palette.editor)
+            .text_color(palette.fg)
+            .overflow_hidden()
+            .font_family(FONT_MONO)
+            .text_size(TEXT_MONO)
+            .child(
+                Textarea::new(&self.state)
+                    .appearance(false)
+                    .px_0()
+                    .h(self.height),
+            )
     }
 }

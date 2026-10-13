@@ -18,6 +18,7 @@ pub mod loco;
 pub mod manager;
 pub mod metrics;
 pub mod ops;
+pub mod paste;
 pub mod pods;
 pub mod probe;
 pub mod problems;

@@ -7,12 +7,13 @@ use fleet_core::{ClusterId, NewCluster, Preferences};
 use serde::{Deserialize, Serialize};
 
 use crate::discovery::ContextRef;
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 const APP_SUPPORT: &str = "Library/Application Support";
 const APP_ID: &str = "dev.fleet.app";
 const CLUSTERS_FILE: &str = "clusters.json";
 const TEMP_SUFFIX: &str = "json.tmp";
+const KUBECONFIGS_DIR: &str = "kubeconfigs";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedCluster {
@@ -95,12 +96,15 @@ impl SavedCluster {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct StoreFile {
     clusters: Vec<SavedCluster>,
+    #[serde(default)]
+    folders: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClusterStore {
     path: PathBuf,
     clusters: Vec<SavedCluster>,
+    folders: Vec<PathBuf>,
 }
 
 impl ClusterStore {
@@ -110,19 +114,45 @@ impl ClusterStore {
 
     pub fn open(dir: &Path) -> Result<Self> {
         let path = dir.join(CLUSTERS_FILE);
-        let clusters = match fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice::<StoreFile>(&bytes)?.clusters,
-            Err(error) if error.kind() == ErrorKind::NotFound => Vec::new(),
+        let file = match fs::read(&path) {
+            Ok(bytes) => serde_json::from_slice::<StoreFile>(&bytes)?,
+            Err(error) if error.kind() == ErrorKind::NotFound => StoreFile::default(),
             Err(error) => return Err(error.into()),
         };
-        Ok(Self { path, clusters })
+        Ok(Self {
+            path,
+            clusters: file.clusters,
+            folders: file.folders,
+        })
     }
 
     pub fn empty(dir: &Path) -> Self {
         Self {
             path: dir.join(CLUSTERS_FILE),
             clusters: Vec::new(),
+            folders: Vec::new(),
         }
+    }
+
+    pub fn kubeconfigs_dir(&self) -> PathBuf {
+        let dir = self.path.parent().unwrap_or(Path::new(""));
+        dir.join(KUBECONFIGS_DIR)
+    }
+
+    pub fn folders(&self) -> &[PathBuf] {
+        &self.folders
+    }
+
+    pub fn add_folder(&mut self, folder: &Path) -> Result<bool> {
+        if !folder.is_dir() {
+            return Err(Error::NotAFolder(folder.to_path_buf()));
+        }
+        if self.folders.iter().any(|known| known == folder) {
+            return Ok(false);
+        }
+        self.folders.push(folder.to_path_buf());
+        self.save()?;
+        Ok(true)
     }
 
     pub fn path(&self) -> &Path {
@@ -182,6 +212,7 @@ impl ClusterStore {
         }
         let body = StoreFile {
             clusters: self.clusters.clone(),
+            folders: self.folders.clone(),
         };
         let json = serde_json::to_vec_pretty(&body)?;
         let temp = self.path.with_extension(TEMP_SUFFIX);
@@ -303,5 +334,27 @@ mod tests {
         };
         assert!(fs::write(dir.path().join(CLUSTERS_FILE), "{not json").is_ok());
         assert!(ClusterStore::open(dir.path()).is_err());
+    }
+
+    #[test]
+    fn watched_folders_survive_a_reopen_and_must_exist() {
+        let Ok(dir) = tempfile::tempdir() else {
+            panic!("tempdir");
+        };
+        let folder = dir.path().join("team");
+        assert!(fs::create_dir_all(&folder).is_ok());
+        let support = dir.path().join("support");
+        let mut store = ClusterStore::empty(&support);
+
+        assert!(matches!(store.add_folder(&folder), Ok(true)));
+        assert!(matches!(store.add_folder(&folder), Ok(false)));
+        let missing = store.add_folder(&dir.path().join("nope"));
+        assert!(matches!(missing, Err(Error::NotAFolder(_))), "{missing:?}");
+
+        let Ok(reopened) = ClusterStore::open(&support) else {
+            panic!("reopen");
+        };
+        assert_eq!(reopened.folders(), [folder]);
+        assert_eq!(reopened.kubeconfigs_dir(), support.join(KUBECONFIGS_DIR));
     }
 }

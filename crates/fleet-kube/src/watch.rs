@@ -44,9 +44,15 @@ impl KubeconfigWatcher {
             watcher.watch(&dir, RecursiveMode::Recursive)?;
         }
         for root in sources.watch_roots() {
-            if Some(&root) != sources.kube_dir().as_ref() {
-                watcher.watch(&root, RecursiveMode::NonRecursive)?;
+            if Some(&root) == sources.kube_dir().as_ref() {
+                continue;
             }
+            let mode = if sources.folders.contains(&root) {
+                RecursiveMode::Recursive
+            } else {
+                RecursiveMode::NonRecursive
+            };
+            watcher.watch(&root, mode)?;
         }
         let (events_tx, events_rx) = async_channel::unbounded();
         let task = TaskGuard::spawn(async move {
@@ -102,6 +108,7 @@ mod tests {
         let sources = DiscoverySources {
             kubeconfig_env: None,
             home: Some(home.path().to_path_buf()),
+            folders: Vec::new(),
         };
         let initial = discover(&sources);
         let Ok((_watcher, events)) =
@@ -123,6 +130,35 @@ mod tests {
         assert!(
             matches!(removed, Ok(Ok(DiscoveryEvent::Removed(ref id))) if id.context == "kind-dev"),
             "{removed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn watches_added_folders() {
+        let Ok(home) = tempfile::tempdir() else {
+            panic!("tempdir");
+        };
+        let folder = home.path().join("team");
+        assert!(fs::create_dir_all(&folder).is_ok());
+        let sources = DiscoverySources {
+            kubeconfig_env: None,
+            home: Some(home.path().to_path_buf()),
+            folders: vec![folder.clone()],
+        };
+        let initial = discover(&sources);
+        let Ok((_watcher, events)) =
+            KubeconfigWatcher::start(sources, initial, Duration::from_millis(50))
+        else {
+            panic!("watcher starts");
+        };
+
+        let file = folder.join("sub/edge.yaml");
+        assert!(fs::create_dir_all(folder.join("sub")).is_ok());
+        assert!(fs::write(&file, kubeconfig("edge", "https://127.0.0.1:1")).is_ok());
+        let added = tokio::time::timeout(EVENT_WAIT, events.recv()).await;
+        assert!(
+            matches!(added, Ok(Ok(DiscoveryEvent::Added(ref c))) if c.id.context == "edge"),
+            "{added:?}"
         );
     }
 }

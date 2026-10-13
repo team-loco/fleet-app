@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::resource::page_for_kind;
 use crate::{
     AddClusterStep, CheckLine, ClusterId, ContextRef, ExecRequest, FluxAction, FluxKey, FluxKind,
@@ -31,6 +33,11 @@ pub enum Command {
     OpenAddCluster(AddClusterStep),
     CheckContexts(Vec<ContextRef>),
     AddClusters(Vec<NewCluster>),
+    SaveKubeconfig {
+        name: String,
+        yaml: String,
+    },
+    WatchFolder(PathBuf),
     RemoveCluster(ClusterId),
     WatchWorkload {
         target: ResourceRef,
@@ -67,6 +74,7 @@ pub enum Command {
 pub enum Update {
     Snapshot(Box<Snapshot>),
     Contexts(Vec<KubeconfigFile>),
+    KubeconfigRejected(String),
     Check(ContextRef, CheckLine),
     Checked(ContextRef, Verdict),
     Notice(Notice),
@@ -131,6 +139,8 @@ impl AppState {
             Command::OpenAddCluster(_) => {}
             Command::CheckContexts(_) => {}
             Command::AddClusters(_) => {}
+            Command::SaveKubeconfig { .. } => {}
+            Command::WatchFolder(_) => {}
             Command::RemoveCluster(_) => {}
             Command::WatchWorkload { .. } => {}
             Command::StreamLogs(_) => {}
@@ -171,6 +181,7 @@ impl AppState {
                 }
             }
             Update::Contexts(_) => {}
+            Update::KubeconfigRejected(_) => {}
             Update::Check(..) => {}
             Update::Checked(..) => {}
             Update::Notice(_) => {}

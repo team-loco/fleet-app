@@ -516,6 +516,7 @@ fn source_detail(parsed: &Parsed, reference: String, now: Timestamp) -> FluxDeta
 pub fn release_status(state: &str) -> Status {
     match state {
         "deployed" => Status::Ok,
+        "superseded" => Status::Ok,
         "failed" => Status::Err,
         "pending-install" => Status::Progress,
         "pending-upgrade" => Status::Progress,

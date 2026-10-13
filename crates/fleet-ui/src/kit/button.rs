@@ -7,15 +7,16 @@ use gpui::{
 };
 
 use super::tooltip::Tooltip;
+use crate::assets;
 use crate::theme::{
-    ActiveTheme, CHECKBOX, CONTROL, CONTROL_SMALL, FONT_MONO, ICON, ICON_BUTTON, MORE_BUTTON,
-    Palette, RADIUS, RADIUS_SMALL, RULE, SEGMENT, SPACE_3, SPACE_4, SPACE_5, TEXT_CONTROL,
-    TEXT_GLYPH, TEXT_LABEL, TEXT_SMALL, TEXT_UI, TOGGLE_HEIGHT, TOGGLE_KNOB, TOGGLE_WIDTH,
+    ActiveTheme, CHECKBOX, CHECKBOX_TICK, CONTROL, CONTROL_SMALL, FONT_MONO, ICON, ICON_BUTTON,
+    MORE_BUTTON, Palette, RADIUS, RADIUS_SMALL, RULE, SEGMENT, SPACE_3, SPACE_4, SPACE_5,
+    TEXT_CONTROL, TEXT_GLYPH, TEXT_LABEL, TEXT_SMALL, TEXT_UI, TOGGLE_HEIGHT, TOGGLE_KNOB,
+    TOGGLE_WIDTH,
 };
 
 const SHORTCUT_OPACITY: f32 = 0.75;
 const DISABLED_OPACITY: f32 = 0.5;
-const CHECK: &str = "✓";
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
@@ -564,7 +565,12 @@ impl RenderOnce for Checkbox {
                 b.bg(palette.acc)
                     .border_color(palette.acc)
                     .text_color(palette.onacc)
-                    .child(CHECK)
+                    .child(
+                        svg()
+                            .path(assets::CHECK)
+                            .size(CHECKBOX_TICK)
+                            .text_color(palette.onacc),
+                    )
             })
             .when(!self.checked, |b| {
                 b.bg(palette.editor).border_color(palette.line2)

@@ -28,7 +28,8 @@ pub use diff::{DiffFile, DiffLine, DiffView, LineKind, parse_unified};
 pub use dock::{Dock, DockState, DockTab};
 pub use header::{PageHeader, PageTitle};
 pub use input::{
-    InputEvent, TextField, TextFieldDown, TextFieldEscape, TextFieldState, TextFieldUp,
+    InputEvent, TextArea, TextAreaState, TextField, TextFieldDown, TextFieldEscape, TextFieldState,
+    TextFieldUp,
 };
 pub use inspector::Inspector;
 pub use log::{LOG_CAPACITY, Level, LogLine, LogView, strip_ansi};

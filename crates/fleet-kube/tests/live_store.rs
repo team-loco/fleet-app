@@ -47,6 +47,7 @@ fn connects_only_to_added_clusters_and_remembers_them() {
     let sources = DiscoverySources {
         kubeconfig_env: None,
         home: Some(home.path().to_path_buf()),
+        folders: Vec::new(),
     };
     let support = home.path().join(SUPPORT_DIR);
     let store = ClusterStore::empty(&support);
@@ -110,4 +111,126 @@ fn connects_only_to_added_clusters_and_remembers_them() {
         panic!("store readable");
     };
     assert_eq!(saved.clusters().len(), 0);
+}
+
+const PASTED_NAME: &str = "lab";
+const FOLDER_CONTEXT: &str = "folder-context";
+
+fn start(
+    home: &std::path::Path,
+) -> (
+    async_channel::Sender<Command>,
+    async_channel::Receiver<Update>,
+) {
+    let sources = DiscoverySources {
+        kubeconfig_env: None,
+        home: Some(home.to_path_buf()),
+        folders: Vec::new(),
+    };
+    let store = ClusterStore::empty(&home.join(SUPPORT_DIR));
+    let settings = KubeSettings {
+        shell_env_timeout: Duration::from_millis(1),
+        ..KubeSettings::default()
+    };
+    let backend = LiveBackend::new(settings, sources, store);
+    let (updates_tx, updates) = async_channel::unbounded();
+    let (commands, commands_rx) = async_channel::unbounded();
+    Box::new(backend).start(updates_tx, commands_rx);
+    (commands, updates)
+}
+
+fn contexts_named(
+    updates: &async_channel::Receiver<Update>,
+    deadline: Instant,
+    context: &str,
+) -> Update {
+    loop {
+        let update = next(updates, deadline);
+        let found = match &update {
+            Update::Contexts(files) => files
+                .iter()
+                .flat_map(|file| &file.contexts)
+                .any(|choice| choice.id.context == context),
+            Update::KubeconfigRejected(_) => true,
+            _ => false,
+        };
+        if found {
+            return update;
+        }
+    }
+}
+
+#[test]
+fn pasted_kubeconfig_is_saved_and_discovered() {
+    let Ok(home) = tempfile::tempdir() else {
+        panic!("tempdir");
+    };
+    let (commands, updates) = start(home.path());
+    let deadline = Instant::now() + WAIT;
+
+    let bad = Command::SaveKubeconfig {
+        name: PASTED_NAME.to_owned(),
+        yaml: "foo: bar".to_owned(),
+    };
+    assert!(commands.send_blocking(bad).is_ok());
+    assert!(matches!(
+        contexts_named(&updates, deadline, CONTEXT),
+        Update::KubeconfigRejected(_)
+    ));
+
+    let good = Command::SaveKubeconfig {
+        name: PASTED_NAME.to_owned(),
+        yaml: KUBECONFIG.to_owned(),
+    };
+    assert!(commands.send_blocking(good).is_ok());
+    let Update::Contexts(files) = contexts_named(&updates, deadline, CONTEXT) else {
+        panic!("expected the discovered context");
+    };
+    let saved = home
+        .path()
+        .join(SUPPORT_DIR)
+        .join("kubeconfigs")
+        .join("lab.yaml");
+    let files_ids: Vec<_> = files
+        .iter()
+        .flat_map(|f| &f.contexts)
+        .map(|c| &c.id.file)
+        .collect();
+    assert_eq!(files_ids, vec![&saved]);
+}
+
+#[test]
+fn watched_folder_is_discovered_remembered_and_watched() {
+    let Ok(home) = tempfile::tempdir() else {
+        panic!("tempdir");
+    };
+    let folder = home.path().join("team");
+    assert!(std::fs::create_dir_all(&folder).is_ok());
+    let (commands, updates) = start(home.path());
+    let deadline = Instant::now() + WAIT;
+
+    let missing = Command::WatchFolder(home.path().join("nope"));
+    assert!(commands.send_blocking(missing).is_ok());
+    assert!(matches!(
+        contexts_named(&updates, deadline, FOLDER_CONTEXT),
+        Update::KubeconfigRejected(_)
+    ));
+
+    assert!(
+        std::fs::write(
+            folder.join("a.yaml"),
+            KUBECONFIG.replace(CONTEXT, FOLDER_CONTEXT)
+        )
+        .is_ok()
+    );
+    assert!(
+        commands
+            .send_blocking(Command::WatchFolder(folder.clone()))
+            .is_ok()
+    );
+    contexts_named(&updates, deadline, FOLDER_CONTEXT);
+    let Ok(store) = ClusterStore::open(&home.path().join(SUPPORT_DIR)) else {
+        panic!("store readable");
+    };
+    assert_eq!(store.folders(), [folder]);
 }

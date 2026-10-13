@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
@@ -52,6 +52,7 @@ const SEEDS: [Seed; 3] = [
 #[derive(Default)]
 pub struct AddClusters {
     added: BTreeMap<ClusterId, ContextRef>,
+    checked: BTreeSet<ContextRef>,
 }
 
 impl AddClusters {
@@ -66,7 +67,13 @@ impl AddClusters {
                 let files = self.files();
                 send(updates, Update::Contexts(files));
             }
-            Command::CheckContexts(ids) => simulate(updates, ids.clone()),
+            Command::CheckContexts(ids) => {
+                let runs = ids
+                    .iter()
+                    .map(|id| (id.clone(), !self.checked.insert(id.clone())))
+                    .collect();
+                simulate(updates, runs);
+            }
             Command::AddClusters(new) => {
                 for cluster in new {
                     self.added
@@ -131,7 +138,7 @@ fn line(status: CheckStatus, detail: &str, millis: u64) -> CheckLine {
     }
 }
 
-pub fn script(context: &ContextRef) -> (Vec<CheckLine>, Verdict) {
+pub fn script(context: &ContextRef, retried: bool) -> (Vec<CheckLine>, Verdict) {
     match context.context.as_str() {
         ANALYTICS => (
             vec![
@@ -155,6 +162,17 @@ pub fn script(context: &ContextRef) -> (Vec<CheckLine>, Verdict) {
                     CheckStatus::Warn,
                     "Can’t read Secrets, so env var values won’t resolve. Everything else works.",
                     180,
+                ),
+            ],
+            Verdict::Ready,
+        ),
+        SANDBOX if retried => (
+            vec![
+                line(CheckStatus::Ok, "Reachable in 88 ms", 88),
+                line(
+                    CheckStatus::Ok,
+                    "Kubernetes v1.29.8 · 4 nodes · 61 pods",
+                    240,
                 ),
             ],
             Verdict::Ready,
@@ -183,13 +201,13 @@ pub fn script(context: &ContextRef) -> (Vec<CheckLine>, Verdict) {
     }
 }
 
-fn simulate(updates: &Sender<Update>, ids: Vec<ContextRef>) {
-    for id in ids {
+fn simulate(updates: &Sender<Update>, runs: Vec<(ContextRef, bool)>) {
+    for (id, retried) in runs {
         let updates = updates.clone();
         let spawned = thread::Builder::new()
             .name("fleet-demo-checks".into())
             .spawn(move || {
-                let (lines, verdict) = script(&id);
+                let (lines, verdict) = script(&id, retried);
                 for line in lines {
                     thread::sleep(CHECK_STEP);
                     send(&updates, Update::Check(id.clone(), line));
@@ -260,7 +278,7 @@ mod tests {
 
     #[test]
     fn scripts_match_the_design_results() {
-        let (lines, verdict) = script(&analytics().context);
+        let (lines, verdict) = script(&analytics().context, false);
         assert_eq!(verdict, Verdict::Ready);
         assert_eq!(lines.len(), 5);
         assert_eq!(lines.last().map(|l| l.status), Some(CheckStatus::Warn));
@@ -268,17 +286,19 @@ mod tests {
             file: PathBuf::from(SANDBOX_FILE),
             context: SANDBOX.to_owned(),
         };
-        let (lines, verdict) = script(&sandbox);
+        let (lines, verdict) = script(&sandbox, false);
         assert_eq!(verdict, Verdict::CannotAuthenticate);
         let remedy = lines.last().and_then(|l| l.remedy.clone());
         assert_eq!(remedy.as_deref(), Some("aws sso login --profile sandbox"));
+        let (_, verdict) = script(&sandbox, true);
+        assert_eq!(verdict, Verdict::Ready);
     }
 
     #[test]
     fn checks_stream_one_line_at_a_time_then_finish() {
         let (tx, rx) = async_channel::unbounded();
         let id = analytics().context;
-        simulate(&tx, vec![id.clone()]);
+        simulate(&tx, vec![(id.clone(), false)]);
         let received: Vec<Update> = (0..6).filter_map(|_| rx.recv_blocking().ok()).collect();
         assert_eq!(received.len(), 6);
         assert!(matches!(received.first(), Some(Update::Check(ctx, _)) if ctx == &id));
