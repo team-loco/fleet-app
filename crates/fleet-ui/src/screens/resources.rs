@@ -119,6 +119,18 @@ fn presence(screen: &mut ResourcesScreen) -> &mut Presence<Resource> {
 impl EventEmitter<ScreenEvent> for ResourcesScreen {}
 
 impl ResourcesScreen {
+    pub fn close_inspector(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.selected.is_none() {
+            return false;
+        }
+        self.close(cx);
+        true
+    }
+
+    pub fn list_focus(&mut self, cx: &mut Context<Self>) -> gpui::FocusHandle {
+        gpui::Focusable::focus_handle(&self.table(cx), cx)
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let namespaces = cx.new(|cx| {
             Select::new("resource-namespace", vec![ALL_NAMESPACES.into()], cx)

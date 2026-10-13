@@ -10,6 +10,7 @@ pub mod fleet;
 pub mod flux;
 pub mod fuzzy;
 pub mod gitops;
+pub mod history;
 pub mod home;
 pub mod id;
 #[cfg(feature = "loco")]

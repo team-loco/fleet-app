@@ -56,6 +56,18 @@ fn presence(screen: &mut NodesScreen) -> &mut Presence<Node> {
 impl EventEmitter<ScreenEvent> for NodesScreen {}
 
 impl NodesScreen {
+    pub fn close_inspector(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.selected.is_none() {
+            return false;
+        }
+        self.close(cx);
+        true
+    }
+
+    pub fn list_focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
+        gpui::Focusable::focus_handle(&self.table, cx)
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let table = cx.new(|cx| {
             Table::new("nodes", columns(), cx)

@@ -32,9 +32,14 @@ pub struct EventsScreen {
 impl EventEmitter<ScreenEvent> for EventsScreen {}
 
 impl EventsScreen {
+    pub fn list_focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
+        gpui::Focusable::focus_handle(&self.table, cx)
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let table = cx.new(|cx| {
             Table::new("events", columns(), cx)
+                .type_ahead(|e: &Event| e.object.clone().into())
                 .row_status(|e: &Event| (e.status == Status::Err).then_some(Status::Err))
                 .empty("No events match the filter.")
         });

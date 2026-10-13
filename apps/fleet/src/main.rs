@@ -5,8 +5,8 @@ use std::rc::Rc;
 use anyhow::Context as _;
 use clap::Parser;
 use fleet::{
-    APP_ID, APP_NAME, AppearanceArg, NewWindow, Object, Preset, Quit, Screen, WINDOW_HEIGHT,
-    WINDOW_WIDTH, bind_keys, bundled, menus, parse_object, root_view,
+    APP_ID, APP_NAME, AppearanceArg, Object, Preset, Screen, WINDOW_HEIGHT, WINDOW_WIDTH,
+    bind_keys, bundled, menus, parse_object, root_view,
 };
 use fleet_core::Status;
 use fleet_core::{Backend, ClusterId, Command};
@@ -16,6 +16,7 @@ use fleet_kube::app_settings::SettingsStore;
 use fleet_kube::discovery::DiscoverySources;
 use fleet_kube::settings::KubeSettings;
 use fleet_kube::store::ClusterStore;
+use fleet_ui::actions::{NewWindow, Quit};
 use fleet_ui::kit::{Toast, toast};
 use fleet_ui::theme::{Appearance, TRAFFIC_LIGHT_X, TRAFFIC_LIGHT_Y};
 use fleet_ui::{NewWindowRequest, Root, Shell, Store, assets};

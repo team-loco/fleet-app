@@ -67,3 +67,7 @@ depends = ["fmt", "lint", "test", "typos", "deny"]
 
 [env]
 FLEET_SCALE_IMAGE = "registry.k8s.io/pause:3.10"
+
+[tasks."gen:keys"]
+description = "Regenerate docs/keyboard.md from the binding table"
+run = "FLEET_UPDATE_DOCS=1 cargo test -p fleet-ui --lib keymap::tests::docs_are_generated_from_the_table"

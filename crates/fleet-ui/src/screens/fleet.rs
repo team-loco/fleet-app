@@ -72,9 +72,17 @@ pub struct FleetScreen {
 impl EventEmitter<Command> for FleetScreen {}
 
 impl FleetScreen {
+    pub fn list_focus(&self, page: Page, cx: &gpui::App) -> gpui::FocusHandle {
+        match page {
+            Page::Problems => gpui::Focusable::focus_handle(&self.problem_table, cx),
+            _ => gpui::Focusable::focus_handle(&self.cluster_table, cx),
+        }
+    }
+
     pub fn new(cx: &mut Context<Self>) -> Self {
         let cluster_table = cx.new(|cx| {
             Table::new("fleet-clusters", cluster_columns(), cx)
+                .type_ahead(|c: &ClusterSummary| c.name.clone().into())
                 .row_height(ROW_TABLE_MAX)
                 .column_gap(SPACE_7)
                 .click_opens()

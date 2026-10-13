@@ -182,7 +182,7 @@ impl Shell {
         }
     }
 
-    fn has_detail(&self) -> bool {
+    pub(super) fn has_detail(&self) -> bool {
         self.selected_cluster()
             .is_some_and(|c| self.state.snapshot.detail(&c.id).is_some())
     }

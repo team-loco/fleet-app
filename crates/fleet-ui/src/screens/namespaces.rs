@@ -32,6 +32,10 @@ pub struct NamespacesScreen {
 impl EventEmitter<ScreenEvent> for NamespacesScreen {}
 
 impl NamespacesScreen {
+    pub fn list_focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
+        gpui::Focusable::focus_handle(&self.table, cx)
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let table = cx.new(|cx| {
             Table::new("namespaces", columns(), cx)

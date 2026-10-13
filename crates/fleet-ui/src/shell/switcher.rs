@@ -10,10 +10,12 @@ use gpui::{
 
 use super::Shell;
 use crate::assets::{CHEVRON_LEFT, CHEVRON_UP};
+use crate::kit::list_keys::Nav;
 use crate::kit::{
     ConfirmDialog, Dismissal, Highlighted, InputEvent, Step, TextField, TextFieldDown,
-    TextFieldEscape, TextFieldState, TextFieldUp, Tooltip, above_left, appear, confirm,
-    status_symbols, step, surface,
+    TextFieldEnd, TextFieldEscape, TextFieldHome, TextFieldPageDown, TextFieldPageUp,
+    TextFieldState, TextFieldUp, Tooltip, above_left, appear, confirm, status_symbols, step,
+    surface,
 };
 use crate::screens::settings::{DISCONNECT, DISCONNECT_DESCRIPTION};
 use crate::theme::{
@@ -269,6 +271,23 @@ impl ClusterSwitcher {
         self.highlighted = step(self.highlighted, len, |_| true, direction);
         self.scroll_to_highlight();
         cx.notify();
+    }
+
+    fn jump(&mut self, nav: Nav, cx: &mut Context<Self>) {
+        let len = match self.actions() {
+            Some((_, actions)) => actions.len(),
+            None => self.rows.len(),
+        };
+        self.highlighted = nav.target(self.highlighted, len);
+        self.scroll_to_highlight();
+        cx.notify();
+    }
+
+    fn jump_if_empty(&mut self, nav: Nav, cx: &mut Context<Self>) {
+        if self.query.read(cx).value().is_empty() {
+            self.jump(nav, cx);
+            cx.stop_propagation();
+        }
     }
 
     fn activate_highlighted(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -685,6 +704,20 @@ impl Render for ClusterSwitcher {
                 .capture_action(cx.listener(|this, _: &TextFieldDown, _, cx| {
                     this.move_highlight(Step::Next, cx);
                     cx.stop_propagation();
+                }))
+                .capture_action(cx.listener(|this, _: &TextFieldPageUp, _, cx| {
+                    this.jump(Nav::PageUp, cx);
+                    cx.stop_propagation();
+                }))
+                .capture_action(cx.listener(|this, _: &TextFieldPageDown, _, cx| {
+                    this.jump(Nav::PageDown, cx);
+                    cx.stop_propagation();
+                }))
+                .capture_action(cx.listener(|this, _: &TextFieldHome, _, cx| {
+                    this.jump_if_empty(Nav::Home, cx);
+                }))
+                .capture_action(cx.listener(|this, _: &TextFieldEnd, _, cx| {
+                    this.jump_if_empty(Nav::End, cx);
                 }))
                 .on_action(cx.listener(|this, _: &TextFieldEscape, window, cx| {
                     this.escape(window, cx);

@@ -16,7 +16,9 @@ pub mod settings;
 pub mod workload;
 
 use fleet_core::{ClusterDetail, ClusterSummary, Command, Counts, Page, ResourceKind, ResourceRef};
-use gpui::{AnyElement, App, AppContext, Context, Entity, IntoElement, Subscription, Window};
+use gpui::{
+    AnyElement, App, AppContext, Context, Entity, FocusHandle, IntoElement, Subscription, Window,
+};
 
 use crate::kit::FilterBar;
 
@@ -153,6 +155,28 @@ impl ClusterPages {
         Some(bar.clone())
     }
 
+    pub fn close_inspector(&self, page: Page, cx: &mut App) -> bool {
+        match page {
+            Page::Nodes => self.nodes.update(cx, NodesScreen::close_inspector),
+            other if ResourceKind::for_page(other).is_some() => {
+                self.resources.update(cx, ResourcesScreen::close_inspector)
+            }
+            _ => false,
+        }
+    }
+
+    pub fn list_focus(&self, page: Page, cx: &mut App) -> Option<FocusHandle> {
+        match page {
+            Page::Nodes => Some(self.nodes.read(cx).list_focus(cx)),
+            Page::Namespaces => Some(self.namespaces.read(cx).list_focus(cx)),
+            Page::Events => Some(self.events.read(cx).list_focus(cx)),
+            other => {
+                ResourceKind::for_page(other)?;
+                Some(self.resources.update(cx, ResourcesScreen::list_focus))
+            }
+        }
+    }
+
     pub fn header_controls(&self, page: Page, cx: &App) -> Option<AnyElement> {
         (page == Page::ClusterOverview)
             .then(|| OverviewScreen::header_controls(&self.overview, cx).into_any_element())
@@ -182,8 +206,6 @@ fn subscribe<V: 'static, S: gpui::EventEmitter<ScreenEvent>>(
     cx.subscribe(screen, move |view, _, event, cx| on_event(view, event, cx))
 }
 
-pub(crate) fn init(cx: &mut App) {
-    flux_object::bind_keys(cx);
-}
+pub(crate) fn init(_: &mut App) {}
 #[cfg(feature = "loco")]
 pub mod loco;

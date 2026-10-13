@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
+use std::time::Instant;
 
 use fleet_core::Status;
 use fleet_core::filter::highlights;
@@ -16,9 +17,11 @@ use gpui::{
 };
 
 use super::button::IconButton;
+use super::list_keys::{Nav, TypeAhead, find, typed};
 use super::menu::{ActionMenu, MenuItem};
 use super::status::StatusGlyph;
 use super::text::Highlighted;
+use crate::actions::CloseInspector;
 use crate::prefs::{self, ColumnWidths, FLEET_SCOPE};
 use crate::theme::{
     ActiveTheme, COLUMN_HANDLE, COLUMN_MIN, FLASH, FONT_MONO, FONT_SANS, GLYPH_SLOT, Palette,
@@ -33,6 +36,7 @@ const MORE_TOOLTIP: &str = "Actions";
 const FLASH_STRENGTH: f32 = 0.35;
 const TRAILING: Pixels = SPACE_8;
 const DOUBLE_CLICK: usize = 2;
+pub const TABLE_CONTEXT: &str = "FleetTable";
 
 pub type CellRenderer<R> = Rc<dyn Fn(&R, &Palette) -> AnyElement>;
 pub type Comparator<R> = Rc<dyn Fn(&R, &R) -> Ordering>;
@@ -378,6 +382,7 @@ pub struct Table<R: 'static> {
     header: Header,
     status: Option<RowStatus<R>>,
     key: Option<RowKey<R>>,
+    name: Option<RowKey<R>>,
     flashes: HashMap<SharedString, u64>,
     flash_generation: u64,
     empty: SharedString,
@@ -391,6 +396,7 @@ pub struct Table<R: 'static> {
     hovered: Option<usize>,
     actions: Option<RowActions<R>>,
     menu: Entity<ActionMenu>,
+    type_ahead: TypeAhead,
 }
 
 impl<R: 'static> EventEmitter<TableEvent> for Table<R> {}
@@ -421,11 +427,13 @@ impl<R: 'static> Table<R> {
             header: Header::Sans,
             status: None,
             key: None,
+            name: None,
             flashes: HashMap::new(),
             flash_generation: 0,
             empty: SharedString::default(),
             scroll: UniformListScrollHandle::new(),
-            focus: cx.focus_handle(),
+            focus: cx.focus_handle().tab_stop(true),
+            type_ahead: TypeAhead::default(),
             scope: FLEET_SCOPE.into(),
             widths,
             measured: Rc::default(),
@@ -681,6 +689,11 @@ impl<R: 'static> Table<R> {
         self
     }
 
+    pub fn type_ahead(mut self, name: impl Fn(&R) -> SharedString + 'static) -> Self {
+        self.name = Some(Rc::new(name));
+        self
+    }
+
     pub fn sorted_by(mut self, column: usize, direction: SortDirection) -> Self {
         self.sort = Some((column, direction));
         self.resort();
@@ -792,20 +805,25 @@ impl<R: 'static> Table<R> {
         cx.notify();
     }
 
-    fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let position = self.position_of(self.selected);
-        let last = self.order.len().checked_sub(1);
-        let target = match event.keystroke.key.as_str() {
-            "down" => position.map_or(Some(0), |p| Some((p + 1).min(last.unwrap_or(0)))),
-            "up" => position.map_or(last, |p| Some(p.saturating_sub(1))),
-            "enter" => {
-                if let Some(row) = self.selected {
-                    cx.emit(TableEvent::Opened(row));
-                }
-                cx.stop_propagation();
-                return;
+    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let keystroke = &event.keystroke;
+        if keystroke.key == "escape" && !keystroke.modifiers.modified() {
+            window.dispatch_action(Box::new(CloseInspector), cx);
+            cx.stop_propagation();
+            return;
+        }
+        if keystroke.key == "enter" && !keystroke.modifiers.modified() {
+            if let Some(row) = self.selected {
+                cx.emit(TableEvent::Opened(row));
             }
-            _ => return,
+            cx.stop_propagation();
+            return;
+        }
+        let position = self.position_of(self.selected);
+        let target = match (Nav::parse(keystroke), typed(keystroke)) {
+            (Some(nav), _) => nav.target(position, self.order.len()),
+            (None, Some(text)) => self.jump_to_name(text),
+            (None, None) => return,
         };
         cx.stop_propagation();
         let Some(row) = target.and_then(|p| self.order.get(p).copied()) else {
@@ -818,6 +836,18 @@ impl<R: 'static> Table<R> {
         }
         cx.emit(TableEvent::Selected(row));
         cx.notify();
+    }
+
+    fn jump_to_name(&mut self, text: &str) -> Option<usize> {
+        let key = self.name.clone().or_else(|| self.key.clone())?;
+        let query = self.type_ahead.push(text, Instant::now()).to_owned();
+        let names: Vec<SharedString> = self
+            .order
+            .iter()
+            .filter_map(|&ix| self.rows.get(ix))
+            .map(|row| key(row))
+            .collect();
+        find(&query, names.iter().map(SharedString::as_ref))
     }
 
     fn render_header(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
@@ -890,17 +920,18 @@ impl<R: 'static> Table<R> {
     fn render_rows(
         &mut self,
         range: Range<usize>,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let palette = *cx.palette();
+        let focused = self.focus.is_focused(window);
         let columns = self.columns.clone();
         let rows = self.rows.clone();
         range
             .filter_map(|position| {
                 let ix = *self.order.get(position)?;
                 let row = rows.get(ix)?;
-                Some(self.render_row(ix, row, &columns, &palette, cx))
+                Some(self.render_row(ix, row, &columns, focused, &palette, cx))
             })
             .collect()
     }
@@ -910,6 +941,7 @@ impl<R: 'static> Table<R> {
         ix: usize,
         row: &R,
         columns: &[Column<R>],
+        focused: bool,
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -925,6 +957,11 @@ impl<R: 'static> Table<R> {
                 .into_any_element();
         }
         let selected = self.selected == Some(ix);
+        let outline = if focused {
+            palette.focus
+        } else {
+            palette.selline
+        };
         let status = self.status.as_ref().and_then(|status| status(row));
         let tint = status.and_then(|status| palette.tint(status));
         let hover = palette.hover;
@@ -967,7 +1004,7 @@ impl<R: 'static> Table<R> {
                         .left_0()
                         .size_full()
                         .border(RULE)
-                        .border_color(palette.selline),
+                        .border_color(outline),
                 )
             })
             .when(!selected, |row| row.hover(move |style| style.bg(hover)))
@@ -1063,8 +1100,17 @@ impl<R: 'static> Focusable for Table<R> {
 }
 
 impl<R: 'static> Render for Table<R> {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
+        let ring = (self.selected.is_none() && self.focus.is_focused(window)).then(|| {
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .border(RULE)
+                .border_color(palette.focus)
+        });
         let header = (self.header != Header::Hidden).then(|| self.render_header(&palette, cx));
         let body = if self.rows.is_empty() {
             div()
@@ -1103,6 +1149,8 @@ impl<R: 'static> Render for Table<R> {
             .child(body);
         div()
             .id(ElementId::NamedInteger(self.id.clone(), 0))
+            .key_context(TABLE_CONTEXT)
+            .relative()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
@@ -1127,6 +1175,7 @@ impl<R: 'static> Render for Table<R> {
             .when(self.fit, Styled::w_full)
             .child(content)
             .child(self.menu.clone())
+            .children(ring)
     }
 }
 
