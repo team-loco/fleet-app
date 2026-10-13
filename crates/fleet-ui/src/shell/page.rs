@@ -7,6 +7,7 @@ use gpui::{
 use fleet_core::AddClusterStep;
 
 use super::Shell;
+use crate::kit::status_symbols;
 use crate::screens::add_cluster::empty_fleet;
 use crate::screens::gitops::GitOpsScreen;
 use crate::screens::workload::WorkloadScreen;
@@ -136,7 +137,7 @@ impl Shell {
                 .children(
                     parts
                         .into_iter()
-                        .map(|(text, color)| div().text_color(color).child(text)),
+                        .map(|(text, color)| div().text_color(color).child(status_symbols(text))),
                 )
         });
         let more = self.selected_cluster().map(|_| more_button(palette));

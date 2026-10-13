@@ -13,7 +13,7 @@ use gpui::{
 use super::Shell;
 use super::strip::{ClusterStripRow, ResourceStripRow, cluster_strip_rows, resource_strip_rows};
 use crate::assets::{CHEVRON_LEFT, CHEVRON_RIGHT};
-use crate::kit::Tooltip;
+use crate::kit::{Tooltip, status_symbols};
 use crate::theme::{
     ActiveTheme, CLUSTERS_PANEL, COLLAPSE, FONT_MONO, GLYPH_SLOT, ICON, ICON_BUTTON, PANEL_HEADER,
     Palette, RADIUS, RESOURCES_PANEL, ROW_CLUSTER, ROW_NAV, RULE, SPACE_1, SPACE_2, SPACE_3,
@@ -314,7 +314,7 @@ fn badge(text: String, color: Hsla) -> AnyElement {
         .font_family(FONT_MONO)
         .text_size(TEXT_SMALL)
         .text_color(color)
-        .child(text)
+        .child(status_symbols(text))
         .into_any_element()
 }
 
@@ -325,7 +325,7 @@ fn glyph(status: Status, palette: &Palette) -> impl IntoElement {
         .font_family(FONT_MONO)
         .text_size(TEXT_GLYPH)
         .text_color(palette.status(status))
-        .child(status.glyph())
+        .child(status_symbols(status.glyph()))
 }
 
 fn nav_row(
@@ -465,7 +465,7 @@ fn cluster_strip_item(
     strip_item(key, row.selected, row.tooltip.into(), palette)
         .text_size(TEXT_GLYPH)
         .text_color(color)
-        .child(row.glyph)
+        .child(status_symbols(row.glyph))
         .on_click(cx.listener(move |this, _, _, cx| {
             this.dispatch(Command::SelectCluster(target.clone()), cx);
         }))
@@ -482,7 +482,11 @@ fn resource_strip_item(
     strip_item(key, row.selected, row.tooltip.into(), palette)
         .text_size(TEXT_SMALL)
         .text_color(palette.status(row.status))
-        .child(div().text_size(TEXT_GLYPH).child(row.status.glyph()))
+        .child(
+            div()
+                .text_size(TEXT_GLYPH)
+                .child(status_symbols(row.status.glyph())),
+        )
         .child(row.count.to_string())
         .on_click(cx.listener(move |this, _, _, cx| {
             this.dispatch(Command::SelectPage(page), cx);

@@ -8,6 +8,7 @@ use gpui::{
 };
 
 use super::Shell;
+use crate::kit::status_symbols;
 use crate::theme::{
     ActiveTheme, FONT_MONO, RULE, SPACE_5, SPACE_6, SPACE_8, STATUS_BAR, TEXT_SMALL,
 };
@@ -70,16 +71,16 @@ impl Shell {
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.dispatch(Command::SelectPage(Page::Overview), cx);
                     }))
-                    .child(div().text_color(palette.err).child(format!(
+                    .child(div().text_color(palette.err).child(status_symbols(format!(
                         "{} {}",
                         Status::Err.glyph(),
                         problems.err
-                    )))
-                    .child(div().text_color(palette.warn).child(format!(
+                    ))))
+                    .child(div().text_color(palette.warn).child(status_symbols(format!(
                         "{} {}",
                         Status::Warn.glyph(),
                         problems.warn
-                    ))),
+                    )))),
             )
             .child(left)
             .child(div().flex_1())
@@ -130,7 +131,7 @@ impl Shell {
             .child(
                 div()
                     .text_color(palette.status(status))
-                    .child(status.glyph()),
+                    .child(status_symbols(status.glyph())),
             )
             .child(label)
             .into_any_element();

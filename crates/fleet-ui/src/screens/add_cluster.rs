@@ -12,6 +12,7 @@ use gpui::{
     Window, div, prelude::FluentBuilder, relative,
 };
 
+use crate::kit::status_symbols;
 use crate::kit::{
     Button, Checkbox, InputEvent, Modal, TextArea, TextAreaState, TextField, TextFieldState, Toast,
     toast,
@@ -486,7 +487,7 @@ impl AddClusterDialog {
                         div()
                             .font_family(FONT_MONO)
                             .text_size(TEXT_GLYPH)
-                            .child(status.glyph()),
+                            .child(status_symbols(status.glyph())),
                     )
                     .child(candidate.verdict.label()),
             )
@@ -599,7 +600,7 @@ fn check_line(
                 .font_family(FONT_MONO)
                 .text_size(TEXT_GLYPH)
                 .text_color(color)
-                .child(glyph),
+                .child(status_symbols(glyph)),
         )
         .child(
             div()

@@ -11,6 +11,7 @@ use gpui::{
     prelude::FluentBuilder, px, relative,
 };
 
+use crate::kit::status_symbols;
 use crate::kit::{
     ActionMenu, CodeView, Column, ConfirmDialog, DockState, KeyValue, Link, LogView, MenuItem,
     PageHeader, Rule, SectionHeader, SectionLabel, Segmented, StatusText, Table, TableEvent,
@@ -631,7 +632,12 @@ fn env_box(var: &EnvVar, palette: &Palette) -> impl IntoElement {
                 .gap(SPACE_3)
                 .font_family(FONT_MONO)
                 .text_size(TEXT_SMALL)
-                .child(div().text_size(TEXT_GLYPH).text_color(color).child(glyph))
+                .child(
+                    div()
+                        .text_size(TEXT_GLYPH)
+                        .text_color(color)
+                        .child(status_symbols(glyph)),
+                )
                 .child(div().text_color(palette.fg).child(var.name.clone())),
         )
         .child(

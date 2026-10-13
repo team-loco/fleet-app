@@ -8,6 +8,7 @@ use gpui::{
     Subscription, Window, div, px,
 };
 
+use crate::kit::status_symbols;
 use crate::kit::{
     Column, DiffFile, DiffLine, DiffView, InputEvent, LineKind, SectionHeader, Segmented, Select,
     SelectEvent, Table, TableEvent, TextField, TextFieldState, Tooltip,
@@ -332,7 +333,7 @@ fn lane_cell(ix: usize, commit: &Commit, cluster: &ClusterId, palette: &Palette)
         .font_family(FONT_MONO)
         .text_size(TEXT_LABEL)
         .text_color(color)
-        .child(glyph)
+        .child(status_symbols(glyph))
         .tooltip(Tooltip::text(tooltip))
         .into_any_element()
 }
@@ -396,7 +397,7 @@ fn rollout_row(rollout: &Rollout, palette: &Palette) -> impl IntoElement {
                 .font_family(FONT_MONO)
                 .text_size(TEXT_AXIS)
                 .text_color(palette.status(rollout.status))
-                .child(rollout.status.glyph()),
+                .child(status_symbols(rollout.status.glyph())),
         )
         .child(
             div()

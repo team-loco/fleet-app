@@ -18,5 +18,8 @@ gpui-component.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
+[dev-dependencies]
+ttf-parser = { version = "0.25.1", default-features = false, features = ["std"] }
+
 [lints]
 workspace = true

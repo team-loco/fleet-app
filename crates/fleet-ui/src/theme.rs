@@ -4,6 +4,7 @@ use fleet_core::Status;
 use gpui::{App, Global, Hsla, Pixels, Window, WindowAppearance, px, rgb, rgba};
 
 pub const FONT_SANS: &str = "IBM Plex Sans";
+pub const FONT_STATUS: &str = "Fleet Status";
 pub const FONT_MONO: &str = "IBM Plex Mono";
 
 pub const TEXT_UI: Pixels = px(13.);

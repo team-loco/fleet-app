@@ -41,6 +41,9 @@ pub(crate) use popover::{Step, shadow, step};
 pub use prose::Prose;
 pub use select::{Select, SelectEvent};
 pub use split::Split;
+#[cfg(test)]
+pub(crate) use status::STATUSES;
+pub(crate) use status::status_symbols;
 pub use status::{StatusGlyph, StatusText};
 pub use table::{Align, Column, SortDirection, Table, TableEvent, Width, min_row_width};
 pub use terminal::{Terminal, TerminalEvent};

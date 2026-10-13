@@ -8,6 +8,7 @@ use gpui::{
 };
 
 use super::ScreenEvent;
+use crate::kit::status_symbols;
 use crate::kit::{Column, Lede, StatusGlyph, Table};
 use crate::theme::{ActiveTheme, FONT_MONO, Palette, SPACE_4};
 
@@ -98,7 +99,11 @@ impl gpui::RenderOnce for ProblemBadge {
         div()
             .font_family(FONT_MONO)
             .text_color(cx.palette().status(self.status))
-            .child(format!("{} {}", self.status.glyph(), self.n))
+            .child(status_symbols(format!(
+                "{} {}",
+                self.status.glyph(),
+                self.n
+            )))
     }
 }
 
