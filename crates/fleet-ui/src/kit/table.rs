@@ -577,6 +577,7 @@ impl<R: 'static> Table<R> {
                 .child((column.cell)(row, palette))
         });
         let element = div()
+            .debug_selector(|| format!("{}-row-{ix}", self.id))
             .id(ix)
             .relative()
             .w_full()

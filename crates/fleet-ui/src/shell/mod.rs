@@ -219,6 +219,14 @@ impl Shell {
         }
     }
 
+    pub fn state(&self) -> &AppState {
+        &self.state
+    }
+
+    pub fn settled(&self) -> bool {
+        self.loaded && self.pending.is_empty()
+    }
+
     pub fn open_palette(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.sync_palette(cx);
         self.palette

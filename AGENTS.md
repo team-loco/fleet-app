@@ -17,8 +17,20 @@ Every tool is pinned in `mise.toml`. `mise run <task>`:
 
 - `check` runs everything a PR needs: fmt, clippy (default and `--features loco`), nextest, typos, deny
 - `run` / `demo` / `run:loco` start the app (live / sample data / with Loco)
+- `shot -- <screen> [dark|light]` renders a demo screen headlessly to `target/shots/<screen>-<appearance>.png`
+  (1440×900 @2x; `FLEET_FEATURES=loco` for Loco screens). No window opens.
+- UI interaction tests live in `apps/fleet-shots/tests/ui.rs`: `fleet_shots::Ui::open(Screen::…)` builds the
+  shell on demo data headlessly, then `press("cmd-k")`, `type_text(..)`, `click("<debug selector>")`,
+  `state()` and `save_png(..)`. Kit buttons, menu items (`<menu>-item-<ix>`) and table rows
+  (`<table>-row-<ix>`) carry debug selectors named after their element ids.
 - `e2e:up` / `e2e:down` create and remove the kind + Flux scenario clusters
 - `e2e:test` brings them up, verifies, and runs every `FLEET_E2E` test (flags: `--skip-up`, `--no-teardown`)
+
+## Verifying the UI
+
+- Never launch the GUI app or send synthetic input to it (osascript, cliclick, `screencapture`) to verify
+  a change. It takes focus from whoever is using the Mac. Use `mise run shot` and the `Ui` test helper,
+  which render without any window. `run` / `demo` are for people only.
 
 ## Principles
 
@@ -35,7 +47,7 @@ Every tool is pinned in `mise.toml`. `mise run <task>`:
   of the file. All visual values (colours, sizes, radii, row heights) come from `fleet-ui`'s theme
   module, never literals in a screen.
 - One source per value. Versions live in `mise.toml` / `Cargo.toml` only.
-- Errors: `thiserror` enums per crate; `anyhow` only in `apps/fleet`. No `unwrap`/`expect` on data
+- Errors: `thiserror` enums per crate; `anyhow` only in `apps/`. No `unwrap`/`expect` on data
   from a cluster, a file or the user.
 - Never group `match` arms with `|` to share a body when the arms mean different things.
 - Name intermediate results instead of nesting calls inside calls or struct literals.

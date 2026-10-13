@@ -234,6 +234,7 @@ impl ActionMenu {
                 )
             });
         div()
+            .debug_selector(|| format!("{}-item-{ix}", self.id))
             .id(ix)
             .flex()
             .flex_col()
