@@ -5,6 +5,7 @@ use crate::{ClusterId, Page, ResourceRef, Snapshot};
 pub enum Command {
     SelectCluster(Option<ClusterId>),
     SelectPage(Page),
+    OpenCommit(String),
     ToggleClustersPanel,
     ToggleResourcesPanel,
     OpenResource(ResourceRef),
@@ -61,6 +62,7 @@ impl AppState {
                 self.resource = None;
             }
             Command::SelectPage(page) => self.select_page(*page),
+            Command::OpenCommit(_) => self.select_page(Page::Changes),
             Command::ToggleClustersPanel => self.clusters_open = !self.clusters_open,
             Command::ToggleResourcesPanel => self.resources_open = !self.resources_open,
             Command::OpenResource(resource) => self.open_resource(resource),
@@ -149,6 +151,15 @@ mod tests {
         state.apply(&Command::SelectPage(Page::GitOps));
         assert_eq!(state.cluster, None);
         assert_eq!(state.page, Page::GitOps);
+    }
+
+    #[test]
+    fn opening_a_commit_shows_changes_for_the_fleet() {
+        let mut state = loaded();
+        state.apply(&Command::SelectCluster(Some(ClusterId::new("a"))));
+        state.apply(&Command::OpenCommit("a41e07c".into()));
+        assert_eq!(state.cluster, None);
+        assert_eq!(state.page, Page::Changes);
     }
 
     #[test]

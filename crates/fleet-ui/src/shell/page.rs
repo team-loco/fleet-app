@@ -16,6 +16,15 @@ const MORE: &str = "⋯";
 impl Shell {
     pub(super) fn page(&self, cx: &mut Context<Self>) -> AnyElement {
         let palette = *cx.palette();
+        if self.state.page == Page::Changes {
+            return div()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .bg(palette.editor)
+                .child(self.changes.clone())
+                .into_any_element();
+        }
         div()
             .flex()
             .flex_col()

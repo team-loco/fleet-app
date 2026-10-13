@@ -94,10 +94,8 @@ impl FleetScreen {
             cx.subscribe(&problem_table, |_, table, event, cx| {
                 problem_opened(&table, event, cx);
             }),
-            cx.subscribe(&commit_table, |_, _, event: &TableEvent, cx| {
-                if let TableEvent::Opened(_) = event {
-                    cx.emit(Command::SelectPage(Page::Changes));
-                }
+            cx.subscribe(&commit_table, |_, table, event: &TableEvent, cx| {
+                commit_opened(&table, event, cx);
             }),
         ];
         Self {
@@ -236,6 +234,16 @@ fn cluster_opened(
     let id = table.read(cx).row(ix).map(|c| c.id.clone());
     if let Some(id) = id {
         cx.emit(Command::SelectCluster(Some(id)));
+    }
+}
+
+fn commit_opened(table: &Entity<Table<Commit>>, event: &TableEvent, cx: &mut Context<FleetScreen>) {
+    let TableEvent::Opened(ix) = *event else {
+        return;
+    };
+    let sha = table.read(cx).row(ix).map(|c| c.sha.clone());
+    if let Some(sha) = sha {
+        cx.emit(Command::OpenCommit(sha));
     }
 }
 

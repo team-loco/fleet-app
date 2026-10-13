@@ -10,6 +10,7 @@ use gpui::{
 
 use crate::actions::{ToggleClustersPanel, ToggleCommandPalette, ToggleResourcesPanel};
 use crate::kit::{Toast, toast};
+use crate::screens::changes::ChangesScreen;
 use crate::screens::command::{CommandPalette, PaletteEvent};
 use crate::screens::fleet::FleetScreen;
 use crate::theme::{self, ActiveTheme, NAV_MIN_WIDTH, RULE, STRIP, TEXT_UI};
@@ -23,6 +24,7 @@ pub struct Shell {
     focus: FocusHandle,
     fleet: Entity<FleetScreen>,
     palette: Entity<CommandPalette>,
+    changes: Entity<ChangesScreen>,
     _updates: Task<()>,
     _appearance: Subscription,
     _fleet_commands: Subscription,
@@ -53,6 +55,7 @@ impl Shell {
         let fleet_commands = cx.subscribe(&fleet, |this, _, command: &Command, cx| {
             this.dispatch(command.clone(), cx);
         });
+        let changes = cx.new(|cx| ChangesScreen::new(window, cx));
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         theme::follow_window(window, cx);
@@ -74,6 +77,7 @@ impl Shell {
             focus,
             fleet,
             palette,
+            changes,
             _updates: listen,
             _appearance: appearance,
             _fleet_commands: fleet_commands,
@@ -90,6 +94,8 @@ impl Shell {
         let snapshot = &self.state.snapshot;
         self.fleet
             .update(cx, |fleet, cx| fleet.set_snapshot(snapshot, cx));
+        self.changes
+            .update(cx, |changes, cx| changes.set_snapshot(snapshot, cx));
         self.sync_page(cx);
         self.sync_palette(cx);
         cx.notify();
@@ -142,6 +148,9 @@ impl Shell {
                     service.namespace.as_deref().unwrap_or_default()
                 );
                 toast(Toast::new(Status::Ok, title).detail(detail), cx);
+            }
+            Command::OpenCommit(ref sha) => {
+                self.changes.update(cx, |changes, cx| changes.open(sha, cx));
             }
         }
         self.state.apply(&command);

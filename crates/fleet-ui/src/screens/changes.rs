@@ -1,0 +1,502 @@
+use fleet_core::changes::{
+    ChangesLog, Commit, FilePatch, Lane, LineChange, PatchLine, Rendering, Rollout, ViewKind,
+};
+use fleet_core::{ClusterId, Page, Snapshot, Status};
+use gpui::{
+    AnyElement, AppContext as _, Context, Entity, FontWeight, InteractiveElement, IntoElement,
+    MouseButton, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, Window, div, px,
+};
+
+use crate::kit::{
+    Column, DiffFile, DiffLine, DiffView, InputEvent, LineKind, SectionHeader, Segmented, Select,
+    SelectEvent, Table, TableEvent, TextField, TextFieldState, Tooltip,
+};
+use crate::theme::{
+    ActiveTheme, FONT_MONO, PAGE_HEADER, Palette, ROW_COMMIT, ROW_ROLLOUT, RULE, SPACE_1, SPACE_2,
+    SPACE_3, SPACE_4, SPACE_6, SPACE_7, SPACE_8, TEXT_AXIS, TEXT_BODY, TEXT_CONTROL, TEXT_LABEL,
+    TEXT_MONO, TEXT_SMALL, TEXT_SUBHEADING, TEXT_TITLE,
+};
+
+const COMMIT_LIST: Pixels = px(360.);
+const DETAIL_MIN: Pixels = px(560.);
+const DETAIL_GROW: f32 = 999.;
+const LANE: Pixels = px(30.);
+const PATH_FIELD: Pixels = px(220.);
+const CLUSTER_MENU: Pixels = px(180.);
+const ROLLOUT_GLYPH: Pixels = px(14.);
+const ROLLOUT_CLUSTER: Pixels = px(110.);
+const ROLLOUT_OBJECT: Pixels = px(140.);
+
+const PATH_PREFIX: &str = "path:";
+const PATH_PLACEHOLDER: &str = "apps/payments";
+const ALL_CLUSTERS: &str = "All clusters";
+const COMMIT: &str = "commit";
+const NO_COMMITS: &str = "No commits match the filter.";
+const NOT_TARGETED: &str = "·";
+const SEPARATOR: &str = " · ";
+
+pub struct ChangesScreen {
+    log: ChangesLog,
+    selected: Option<String>,
+    view: Option<ViewKind>,
+    cluster: Option<ClusterId>,
+    path: Entity<TextFieldState>,
+    clusters: Entity<Select>,
+    commits: Entity<Table<Commit>>,
+    _subscriptions: [Subscription; 3],
+}
+
+impl ChangesScreen {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let path = cx.new(|cx| TextFieldState::new(window, cx).placeholder(PATH_PLACEHOLDER));
+        let clusters = cx.new(|cx| {
+            Select::new("changes-cluster", vec![ALL_CLUSTERS.into()], cx).width(CLUSTER_MENU)
+        });
+        let commits = cx.new(|cx| {
+            Table::new("changes-commits", commit_columns(&[]), cx)
+                .row_height(ROW_COMMIT)
+                .column_gap(SPACE_2)
+                .inset(SPACE_6)
+                .mono_header()
+                .empty(NO_COMMITS)
+        });
+        let subscriptions = [
+            cx.subscribe(&path, |this, _, event: &InputEvent, cx| {
+                if let InputEvent::Change = event {
+                    this.refresh(cx);
+                }
+            }),
+            cx.subscribe(&clusters, |this, _, SelectEvent::Changed(ix), cx| {
+                this.cluster = ix
+                    .checked_sub(1)
+                    .and_then(|lane| this.log.lanes.get(lane))
+                    .map(|lane| lane.cluster.clone());
+                this.refresh(cx);
+            }),
+            cx.subscribe(&commits, |this, table, event: &TableEvent, cx| {
+                let TableEvent::Selected(ix) = *event else {
+                    return;
+                };
+                this.selected = table.read(cx).row(ix).map(|c| c.sha.clone());
+                cx.notify();
+            }),
+        ];
+        Self {
+            log: ChangesLog::default(),
+            selected: None,
+            view: None,
+            cluster: None,
+            path,
+            clusters,
+            commits,
+            _subscriptions: subscriptions,
+        }
+    }
+
+    pub fn set_snapshot(&mut self, snapshot: &Snapshot, cx: &mut Context<Self>) {
+        if self.log.lanes != snapshot.changes.lanes {
+            let columns = commit_columns(&snapshot.changes.lanes);
+            self.commits
+                .update(cx, |table, cx| table.set_columns(columns, cx));
+            let options = cluster_options(&snapshot.changes.lanes);
+            self.clusters
+                .update(cx, |select, cx| select.set_options(options, cx));
+        }
+        self.log.clone_from(&snapshot.changes);
+        self.refresh(cx);
+    }
+
+    pub fn open(&mut self, sha: &str, cx: &mut Context<Self>) {
+        self.selected = self.log.commit(sha).map(|c| c.sha.clone());
+        self.refresh(cx);
+    }
+
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        let path = self.path.read(cx).value();
+        let visible: Vec<Commit> = self
+            .log
+            .visible(&path, self.cluster.as_ref())
+            .into_iter()
+            .cloned()
+            .collect();
+        let kept = visible
+            .iter()
+            .position(|c| Some(&c.sha) == self.selected.as_ref());
+        let index = kept.or_else(|| (!visible.is_empty()).then_some(0));
+        self.selected = index.and_then(|ix| visible.get(ix)).map(|c| c.sha.clone());
+        self.commits.update(cx, |table, cx| {
+            table.set_rows(visible, cx);
+            table.select(index, cx);
+        });
+        cx.notify();
+    }
+
+    fn current(&self) -> Option<&Commit> {
+        self.selected
+            .as_deref()
+            .and_then(|sha| self.log.commit(sha))
+    }
+
+    fn header(&self, palette: &Palette) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(SPACE_4)
+            .h(PAGE_HEADER)
+            .px(SPACE_8)
+            .border_b(RULE)
+            .border_color(palette.line)
+            .text_size(TEXT_BODY)
+            .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
+            .child(
+                div()
+                    .text_size(TEXT_TITLE)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(Page::Changes.label()),
+            )
+            .child(
+                div()
+                    .pl(SPACE_2)
+                    .font_family(FONT_MONO)
+                    .text_size(TEXT_SMALL)
+                    .text_color(palette.mute)
+                    .child(self.log.source_label()),
+            )
+            .child(div().flex_1())
+            .child(
+                div()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(
+                        TextField::new(&self.path)
+                            .prefix(PATH_PREFIX)
+                            .width(PATH_FIELD)
+                            .small(),
+                    ),
+            )
+            .child(self.clusters.clone())
+    }
+
+    fn detail(&self, commit: &Commit, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let view = commit.view(self.view.as_ref());
+        div()
+            .id("changes-detail")
+            .flex()
+            .flex_col()
+            .flex_grow(DETAIL_GROW)
+            .flex_basis(DETAIL_MIN)
+            .min_w_0()
+            .h_full()
+            .overflow_y_scroll()
+            .child(commit_header(commit, palette))
+            .child(SectionHeader::new("Rollout").count(commit.target_sentence()))
+            .child(
+                div()
+                    .border_t(RULE)
+                    .border_color(palette.line)
+                    .children(commit.rollout.iter().map(|r| rollout_row(r, palette))),
+            )
+            .child(diff_header(commit, view, cx))
+            .children(view.map(|v| diff_body(v, palette)))
+            .into_any_element()
+    }
+}
+
+impl Render for ChangesScreen {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = *cx.palette();
+        let detail = self
+            .current()
+            .cloned()
+            .map(|commit| self.detail(&commit, &palette, cx));
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .child(self.header(&palette))
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_grow(1.)
+                            .flex_basis(COMMIT_LIST)
+                            .min_w_0()
+                            .h_full()
+                            .bg(palette.panel)
+                            .border_r(RULE)
+                            .border_color(palette.line)
+                            .child(self.commits.clone()),
+                    )
+                    .children(detail),
+            )
+    }
+}
+fn diff_header(
+    commit: &Commit,
+    current: Option<&Rendering>,
+    cx: &mut Context<ChangesScreen>,
+) -> impl IntoElement {
+    let kinds: Vec<ViewKind> = commit.views.iter().map(|v| v.kind.clone()).collect();
+    let selected = current
+        .and_then(|c| kinds.iter().position(|k| *k == c.kind))
+        .unwrap_or_default();
+    let segmented = kinds
+        .iter()
+        .fold(Segmented::new("changes-view"), |seg, kind| {
+            seg.option(kind.label())
+        })
+        .selected(selected)
+        .on_select(cx.listener(move |this, ix: &usize, _, cx| {
+            this.view = kinds.get(*ix).cloned();
+            cx.notify();
+        }));
+    SectionHeader::new("Diff").end(segmented)
+}
+
+fn cluster_options(lanes: &[Lane]) -> Vec<SharedString> {
+    let clusters = lanes
+        .iter()
+        .map(|l| SharedString::from(l.cluster.to_string()));
+    std::iter::once(ALL_CLUSTERS.into())
+        .chain(clusters)
+        .collect()
+}
+
+fn commit_columns(lanes: &[Lane]) -> Vec<Column<Commit>> {
+    let summary = Column::new(COMMIT, |commit: &Commit, palette| {
+        commit_summary(commit, palette).into_any_element()
+    })
+    .flex(1., Pixels::ZERO);
+    let lanes = lanes.iter().enumerate().map(|(ix, lane)| {
+        let cluster = lane.cluster.clone();
+        Column::new(lane.short.clone(), move |commit: &Commit, palette| {
+            lane_cell(ix, commit, &cluster, palette)
+        })
+        .fixed(LANE)
+        .center()
+    });
+    std::iter::once(summary).chain(lanes).collect()
+}
+
+fn commit_summary(commit: &Commit, palette: &Palette) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap(SPACE_1)
+        .min_w_0()
+        .child(div().truncate().child(commit.message.clone()))
+        .child(
+            div()
+                .flex()
+                .font_family(FONT_MONO)
+                .text_size(TEXT_LABEL)
+                .text_color(palette.mute)
+                .whitespace_nowrap()
+                .child(
+                    div()
+                        .text_color(palette.acc)
+                        .child(commit.short_sha().to_owned()),
+                )
+                .child(format!(
+                    "{SEPARATOR}{}{SEPARATOR}{}",
+                    commit.author,
+                    commit.age_label()
+                )),
+        )
+}
+
+fn lane_cell(ix: usize, commit: &Commit, cluster: &ClusterId, palette: &Palette) -> AnyElement {
+    let rollout = commit.rollout_on(cluster);
+    let (glyph, color) = match rollout {
+        Some(r) => (r.status.glyph(), palette.status(r.status)),
+        None => (NOT_TARGETED, palette.sep),
+    };
+    let tooltip = lane_tooltip(cluster, rollout);
+    div()
+        .id(ix)
+        .font_family(FONT_MONO)
+        .text_size(TEXT_LABEL)
+        .text_color(color)
+        .child(glyph)
+        .tooltip(Tooltip::text(tooltip))
+        .into_any_element()
+}
+
+fn lane_tooltip(cluster: &ClusterId, rollout: Option<&Rollout>) -> String {
+    match rollout {
+        Some(r) => format!("{cluster}: {}", r.note),
+        None => format!("{cluster}: not affected"),
+    }
+}
+
+fn commit_header(commit: &Commit, palette: &Palette) -> impl IntoElement {
+    let meta = [commit.author.as_str(), commit.when.as_str(), &commit.stat()].join(SEPARATOR);
+    div()
+        .flex()
+        .flex_col()
+        .flex_none()
+        .gap(SPACE_3)
+        .px(SPACE_8)
+        .py(SPACE_7)
+        .border_b(RULE)
+        .border_color(palette.line)
+        .child(
+            div()
+                .text_size(TEXT_SUBHEADING)
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(commit.message.clone()),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_wrap()
+                .font_family(FONT_MONO)
+                .text_size(TEXT_MONO)
+                .text_color(palette.mute)
+                .child(div().text_color(palette.acc).child(commit.sha.clone()))
+                .child(format!("{SEPARATOR}{meta}")),
+        )
+}
+
+fn rollout_row(rollout: &Rollout, palette: &Palette) -> impl IntoElement {
+    let note_color = if rollout.status == Status::Err {
+        palette.err
+    } else {
+        palette.fg2
+    };
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(SPACE_6)
+        .h(ROW_ROLLOUT)
+        .px(SPACE_8)
+        .border_b(RULE)
+        .border_color(palette.line)
+        .text_size(TEXT_BODY)
+        .child(
+            div()
+                .w(ROLLOUT_GLYPH)
+                .flex_none()
+                .font_family(FONT_MONO)
+                .text_size(TEXT_AXIS)
+                .text_color(palette.status(rollout.status))
+                .child(rollout.status.glyph()),
+        )
+        .child(
+            div()
+                .w(ROLLOUT_CLUSTER)
+                .flex_none()
+                .truncate()
+                .child(rollout.cluster.to_string()),
+        )
+        .child(
+            div()
+                .w(ROLLOUT_OBJECT)
+                .flex_none()
+                .truncate()
+                .font_family(FONT_MONO)
+                .text_size(TEXT_MONO)
+                .text_color(palette.fg2)
+                .child(rollout.object.clone()),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_color(note_color)
+                .child(rollout.note.clone()),
+        )
+}
+
+fn diff_body(view: &Rendering, palette: &Palette) -> impl IntoElement {
+    let files = view.files.iter().map(diff_file).collect();
+    div()
+        .flex()
+        .flex_col()
+        .gap(SPACE_4)
+        .px(SPACE_8)
+        .pb(SPACE_7)
+        .child(
+            div()
+                .text_size(TEXT_CONTROL)
+                .text_color(palette.mute)
+                .child(view.note.clone()),
+        )
+        .child(DiffView::new("changes-diff", files))
+}
+
+fn diff_file(file: &FilePatch) -> DiffFile {
+    let lines = file.lines.iter().map(diff_line).collect();
+    DiffFile::new(file.path.clone(), lines)
+}
+
+fn diff_line(line: &PatchLine) -> DiffLine {
+    let kind = match line.change {
+        LineChange::Context => LineKind::Context,
+        LineChange::Added => LineKind::Added,
+        LineChange::Removed => LineKind::Removed,
+    };
+    let converted = DiffLine::new(kind, Some(line.number), line.text.clone());
+    match &line.note {
+        Some(note) => converted.note(note.clone()),
+        None => converted,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cluster_options_start_with_all_clusters() {
+        let lanes = [Lane {
+            cluster: ClusterId::new("staging"),
+            short: "stg".into(),
+        }];
+        assert_eq!(
+            cluster_options(&lanes),
+            [
+                SharedString::from(ALL_CLUSTERS),
+                SharedString::from("staging")
+            ]
+        );
+    }
+
+    #[test]
+    fn lane_tooltips_explain_the_outcome() {
+        let cluster = ClusterId::new("prod-us-east");
+        let rollout = Rollout {
+            cluster: cluster.clone(),
+            status: Status::Err,
+            object: "apps-payments".into(),
+            note: "health check failing".into(),
+        };
+        assert_eq!(
+            lane_tooltip(&cluster, Some(&rollout)),
+            "prod-us-east: health check failing"
+        );
+        assert_eq!(lane_tooltip(&cluster, None), "prod-us-east: not affected");
+    }
+
+    #[test]
+    fn notes_survive_the_conversion_to_kit_lines() {
+        let line = PatchLine {
+            change: LineChange::Added,
+            number: 48,
+            text: "key: webhook_secret".into(),
+            note: Some("set by overlay".into()),
+        };
+        let converted = diff_line(&line);
+        assert_eq!(converted.kind, LineKind::Added);
+        assert_eq!(converted.new, Some(48));
+        assert_eq!(converted.note, Some("set by overlay".into()));
+    }
+}

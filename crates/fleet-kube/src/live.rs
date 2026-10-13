@@ -4,7 +4,8 @@ use std::thread;
 
 use fleet_core::resource::page_for_kind;
 use fleet_core::{
-    Backend, ClusterId, Command, FleetHome, Page, Receiver, ResourceRef, Sender, Snapshot, Update,
+    Backend, ChangesLog, ClusterId, Command, FleetHome, Page, Receiver, ResourceRef, Sender,
+    Snapshot, Update,
 };
 use tokio::time::MissedTickBehavior;
 
@@ -167,6 +168,10 @@ impl Live {
                 self.page = *page;
                 self.resubscribe_page();
             }
+            Command::OpenCommit(_) => {
+                self.page = Page::Changes;
+                self.resubscribe_page();
+            }
             Command::ToggleClustersPanel => {}
             Command::ToggleResourcesPanel => {}
             Command::OpenResource(resource) => self.open(resource),
@@ -194,6 +199,7 @@ impl Live {
             fleet_nav: BTreeMap::new(),
             home: FleetHome::default(),
             resources: Vec::new(),
+            changes: ChangesLog::default(),
         }
     }
 }

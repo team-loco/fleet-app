@@ -193,7 +193,8 @@ pods.update(cx, |t, cx| t.set_rows(new_rows, cx));
 Column options: `.fixed(px)`, `.flex(weight, min)`, `.end()`, `.center()`, `.mono()` (Plex Mono 12;
 rows are otherwise Sans 12.5), `.sortable(cmp)` / `.sort_by_key(key)`. Table options:
 `.row_height(px)` (default `ROW_TABLE` 26), `.headerless()`, `.sorted_by(col, dir)`,
-`.column_gap(px)` (default `SPACE_6`), `.inset(px)` (leading row padding, default `SPACE_8`),
+`.column_gap(px)` (default `SPACE_6`), `.inset(px)` (leading row and header padding, default `SPACE_8`),
+`.mono_header()` (Plex Mono 10.5 header titles, e.g. short cluster lanes),
 `.click_opens()` (a single click also emits `Opened`, for rows that act as links) and
 `.span_rows(|row, palette| Option<AnyElement>)`: rows for which it returns `Some` render that
 element across the full width instead of cells (group headers). `set_columns(columns, cx)` swaps
