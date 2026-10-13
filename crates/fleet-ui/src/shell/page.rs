@@ -33,13 +33,19 @@ impl Shell {
                 .into_any_element();
         }
         let palette = *cx.palette();
-        if self.state.page == Page::Changes {
+        let full_page: Option<AnyElement> = match self.state.page {
+            Page::Changes => Some(self.changes.clone().into_any_element()),
+            Page::Compare => Some(self.compare.clone().into_any_element()),
+            Page::ClusterSettings => Some(self.settings.clone().into_any_element()),
+            _ => None,
+        };
+        if let Some(screen) = full_page {
             return div()
                 .flex_1()
                 .min_w_0()
                 .h_full()
                 .bg(palette.editor)
-                .child(self.changes.clone())
+                .child(screen)
                 .into_any_element();
         }
         if self.state.flux_object.is_some() {

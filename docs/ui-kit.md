@@ -114,6 +114,7 @@ in the capture phase on the parent: `.capture_action(cx.listener(|this, _: &Text
 let select = cx.new(|cx| Select::new("context", vec!["prod-us-east".into(), ..], cx).mono().width(px));
 cx.subscribe(&select, |this, _, SelectEvent::Changed(ix), cx| ..).detach();
 select.read(cx).selected_index()
+select.update(cx, |s, cx| s.set_selected(ix, cx));   // e.g. when the edited object changes
 ```
 
 Own popover (same look and keyboard as the action menu); arrow keys, Enter, Esc.

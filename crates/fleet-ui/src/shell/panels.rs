@@ -4,8 +4,8 @@ use fleet_core::{
 };
 use gpui::{
     Animation, AnimationExt, AnyElement, Context, ElementId, FontWeight, Hsla, InteractiveElement,
-    IntoElement, ParentElement, Pixels, SharedString, StatefulInteractiveElement, Styled, div,
-    ease_out_quint, prelude::FluentBuilder, svg,
+    IntoElement, MouseButton, ParentElement, Pixels, SharedString, StatefulInteractiveElement,
+    Styled, div, ease_out_quint, prelude::FluentBuilder, svg,
 };
 
 use super::Shell;
@@ -144,6 +144,7 @@ impl Shell {
         let id = cluster.id.clone();
         let group: SharedString = format!("cluster-row-{ix}").into();
         let menu = self.cluster_menus.get(&cluster.id).cloned();
+        let context_menu = menu.clone();
         let name_color = if cluster.status == Status::Offline {
             palette.mute
         } else {
@@ -178,6 +179,12 @@ impl Shell {
         .on_click(cx.listener(move |this, _, _, cx| {
             this.dispatch(Command::SelectCluster(Some(id.clone())), cx);
         }))
+        .on_mouse_down(MouseButton::Right, move |_, window, cx| {
+            if let Some(menu) = &context_menu {
+                menu.update(cx, |menu, cx| menu.show(window, cx));
+            }
+            cx.stop_propagation();
+        })
         .into_any_element()
     }
 

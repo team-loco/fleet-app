@@ -16,9 +16,11 @@ use crate::kit::{ActionMenu, Toast, toast};
 use crate::screens::add_cluster::{AddClusterDialog, AddClusterEvent};
 use crate::screens::changes::ChangesScreen;
 use crate::screens::command::{CommandPalette, PaletteEvent};
+use crate::screens::compare::CompareScreen;
 use crate::screens::fleet::FleetScreen;
 use crate::screens::flux_object::FluxObjectPage;
 use crate::screens::gitops::GitOpsScreen;
+use crate::screens::settings::SettingsScreen;
 use crate::screens::workload::WorkloadScreen;
 use crate::screens::{ClusterPages, ScreenEvent};
 use crate::theme::{self, ActiveTheme, NAV_MIN_WIDTH, RULE, STRIP, TEXT_UI};
@@ -43,6 +45,8 @@ pub struct Shell {
     loco: Entity<crate::screens::loco::LocoScreens>,
     #[cfg(feature = "loco")]
     _loco_commands: Subscription,
+    compare: Entity<CompareScreen>,
+    settings: Entity<SettingsScreen>,
     _updates: Task<()>,
     _appearance: Subscription,
     _fleet_commands: Subscription,
@@ -50,6 +54,7 @@ pub struct Shell {
     gitops: Entity<GitOpsScreen>,
     _gitops_commands: Subscription,
     _flux_object: Subscription,
+    _screen_commands: [Subscription; 2],
 }
 
 impl Shell {
@@ -89,6 +94,16 @@ impl Shell {
         let loco_commands = cx.subscribe(&loco, |this, _, command: &Command, cx| {
             this.dispatch(command.clone(), cx);
         });
+        let compare = cx.new(CompareScreen::new);
+        let settings = cx.new(|cx| SettingsScreen::new(window, cx));
+        let screen_commands = [
+            cx.subscribe(&compare, |this, _, command: &Command, cx| {
+                this.dispatch(command.clone(), cx);
+            }),
+            cx.subscribe(&settings, |this, _, command: &Command, cx| {
+                this.dispatch(command.clone(), cx);
+            }),
+        ];
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         theme::follow_window(window, cx);
@@ -126,6 +141,8 @@ impl Shell {
             loco,
             #[cfg(feature = "loco")]
             _loco_commands: loco_commands,
+            compare,
+            settings,
             _updates: listen,
             _appearance: appearance,
             _fleet_commands: fleet_commands,
@@ -133,6 +150,7 @@ impl Shell {
             gitops,
             _gitops_commands: gitops_commands,
             _flux_object: flux_commands,
+            _screen_commands: screen_commands,
         }
     }
 
@@ -147,6 +165,10 @@ impl Shell {
         self.sync_cluster_menus(cx);
         let pending = std::mem::take(&mut self.pending);
         for command in pending {
+            if let Command::ShowClusterSettings(cluster) = &command {
+                self.settings
+                    .update(cx, |settings, cx| settings.open(cluster, cx));
+            }
             self.state.apply(&command);
             if let Command::OpenAddCluster(step) = command {
                 self.open_add_cluster(step, window, cx);
@@ -159,6 +181,8 @@ impl Shell {
             .update(cx, |changes, cx| changes.set_snapshot(snapshot, cx));
         self.gitops
             .update(cx, |gitops, cx| gitops.set_snapshot(snapshot, cx));
+        self.settings
+            .update(cx, |settings, cx| settings.set_snapshot(snapshot, cx));
         self.sync_page(cx);
         self.sync_palette(cx);
         cx.notify();
@@ -243,6 +267,15 @@ impl Shell {
             Command::Compare(_) => {}
             #[cfg(feature = "loco")]
             Command::Loco(_) => {}
+            Command::CopySpec { .. } => {}
+            Command::ShowClusterSettings(ref cluster) => {
+                self.settings
+                    .update(cx, |settings, cx| settings.open(cluster, cx));
+            }
+            Command::SetPreferences(..) => {}
+            Command::Connect(_) => {}
+            Command::Reauthenticate(_) => {}
+            Command::Disconnect(_) => {}
             Command::PortForward {
                 ref service,
                 local,
@@ -300,6 +333,11 @@ impl Shell {
         #[cfg(feature = "loco")]
         self.loco
             .update(cx, |loco, cx| loco.set_context(&self.state, cx));
+        let snapshot = &self.state.snapshot;
+        let resource = self.state.resource.as_ref();
+        self.compare.update(cx, |compare, cx| {
+            compare.set_snapshot(snapshot, resource, cx);
+        });
     }
 
     fn strip(cx: &App) -> impl IntoElement {

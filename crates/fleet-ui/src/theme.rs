@@ -35,6 +35,7 @@ pub const ROW_CLUSTER: Pixels = px(28.);
 pub const ROW_COMMIT: Pixels = px(48.);
 pub const ROW_ROLLOUT: Pixels = px(25.);
 pub const ROW_MATRIX: Pixels = px(38.);
+pub const ROW_CATALOG: Pixels = px(44.);
 
 pub const STRIP: Pixels = px(28.);
 pub const CLUSTERS_PANEL: Pixels = px(164.);

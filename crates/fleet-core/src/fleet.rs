@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use crate::home::ClusterMetrics;
 use crate::{
-    ChangesLog, ClusterDetail, ClusterId, Counts, FleetHome, FluxObject, GitOps, Page,
-    ResourceSummary, Status,
+    ChangesLog, ClusterCatalog, ClusterDetail, ClusterId, Comparison, Counts, FleetHome,
+    FluxObject, GitOps, Page, ResourceRef, ResourceSummary, Status,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,6 +43,8 @@ pub struct Snapshot {
     pub flux: Vec<FluxObject>,
     #[cfg(feature = "loco")]
     pub loco: BTreeMap<ClusterId, crate::loco::LocoCluster>,
+    pub comparisons: Vec<Comparison>,
+    pub catalog: ClusterCatalog,
 }
 
 impl Snapshot {
@@ -52,6 +54,10 @@ impl Snapshot {
 
     pub fn detail(&self, id: &ClusterId) -> Option<&ClusterDetail> {
         self.details.get(id)
+    }
+
+    pub fn comparison(&self, resource: &ResourceRef) -> Option<&Comparison> {
+        self.comparisons.iter().find(|c| c.matches(resource))
     }
 
     pub fn connected(&self) -> usize {
@@ -105,6 +111,8 @@ pub(crate) mod tests {
             flux: Vec::new(),
             #[cfg(feature = "loco")]
             loco: BTreeMap::new(),
+            comparisons: Vec::new(),
+            catalog: ClusterCatalog::default(),
         }
     }
 

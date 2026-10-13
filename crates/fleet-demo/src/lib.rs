@@ -1,5 +1,6 @@
 mod add_cluster;
 mod changes;
+mod compare;
 mod detail;
 mod flux;
 mod gitops;
@@ -8,6 +9,8 @@ mod lists;
 #[cfg(feature = "loco")]
 mod loco;
 mod resources;
+mod settings;
+mod sim;
 mod simulate;
 mod workload;
 
@@ -89,8 +92,9 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
                     }
                     outcome.changed
                 } else {
+                    let immediate = sim::apply_now(&mut state, &command);
                     let pending = simulate::apply(&mut state, &command);
-                    let changed = pending.is_some();
+                    let changed = immediate || pending.is_some();
                     if let Some(pending) = pending {
                         schedule(&input_tx, Input::Settle(pending));
                     }
@@ -197,6 +201,8 @@ pub fn snapshot() -> Snapshot {
         flux: flux::objects(),
         #[cfg(feature = "loco")]
         loco: loco::clusters(),
+        comparisons: compare::comparisons(),
+        catalog: settings::catalog(),
     }
 }
 

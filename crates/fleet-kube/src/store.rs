@@ -2,7 +2,8 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use fleet_core::{ClusterId, NewCluster};
+use fleet_core::settings::MetricsSource;
+use fleet_core::{ClusterId, NewCluster, Preferences};
 use serde::{Deserialize, Serialize};
 
 use crate::discovery::ContextRef;
@@ -18,6 +19,64 @@ pub struct SavedCluster {
     pub file: PathBuf,
     pub context: String,
     pub name: String,
+    #[serde(default)]
+    pub preferences: SavedPreferences,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SavedPreferences {
+    pub default_namespace: Option<String>,
+    pub metrics: SavedMetrics,
+    pub confirm_destructive: bool,
+    pub labels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SavedMetrics {
+    #[default]
+    Auto,
+    MetricsServer,
+    Prometheus,
+}
+
+impl Default for SavedPreferences {
+    fn default() -> Self {
+        Self::from(&Preferences::default())
+    }
+}
+
+impl From<&Preferences> for SavedPreferences {
+    fn from(preferences: &Preferences) -> Self {
+        let metrics = match preferences.metrics {
+            MetricsSource::Auto => SavedMetrics::Auto,
+            MetricsSource::MetricsServer => SavedMetrics::MetricsServer,
+            MetricsSource::Prometheus => SavedMetrics::Prometheus,
+        };
+        Self {
+            default_namespace: preferences.default_namespace.clone(),
+            metrics,
+            confirm_destructive: preferences.confirm_destructive,
+            labels: preferences.labels.clone(),
+        }
+    }
+}
+
+impl From<&SavedPreferences> for Preferences {
+    fn from(saved: &SavedPreferences) -> Self {
+        let metrics = match saved.metrics {
+            SavedMetrics::Auto => MetricsSource::Auto,
+            SavedMetrics::MetricsServer => MetricsSource::MetricsServer,
+            SavedMetrics::Prometheus => MetricsSource::Prometheus,
+        };
+        Self {
+            default_namespace: saved.default_namespace.clone(),
+            metrics,
+            confirm_destructive: saved.confirm_destructive,
+            labels: saved.labels.clone(),
+        }
+    }
 }
 
 impl SavedCluster {
@@ -89,6 +148,7 @@ impl ClusterStore {
                 file: cluster.context.file.clone(),
                 context: cluster.context.context.clone(),
                 name: cluster.name.clone(),
+                preferences: SavedPreferences::default(),
             });
         }
         self.save()
@@ -101,6 +161,19 @@ impl ClusterStore {
         let removed = self.clusters.remove(ix);
         self.save()?;
         Ok(Some(removed))
+    }
+
+    pub fn get(&self, id: &ClusterId) -> Option<&SavedCluster> {
+        self.clusters.iter().find(|c| &c.id() == id)
+    }
+
+    pub fn set_preferences(&mut self, id: &ClusterId, preferences: &Preferences) -> Result<bool> {
+        let Some(saved) = self.clusters.iter_mut().find(|c| &c.id() == id) else {
+            return Ok(false);
+        };
+        saved.preferences = SavedPreferences::from(preferences);
+        self.save()?;
+        Ok(true)
     }
 
     fn save(&self) -> Result<()> {
@@ -179,6 +252,48 @@ mod tests {
         };
         assert_eq!(reopened.clusters().len(), 1);
         assert!(matches!(store.remove(&ClusterId::new("nope")), Ok(None)));
+    }
+
+    #[test]
+    fn preferences_survive_a_reopen() {
+        let Ok(dir) = tempfile::tempdir() else {
+            panic!("tempdir");
+        };
+        let mut store = ClusterStore::empty(dir.path());
+        assert!(store.add(&[new_cluster("kind-fleet-a", "fleet-a")]).is_ok());
+        let preferences = Preferences {
+            default_namespace: Some("payments".to_owned()),
+            metrics: MetricsSource::Prometheus,
+            confirm_destructive: false,
+            labels: vec!["env=dev".to_owned()],
+        };
+        let id = ClusterId::new("fleet-a");
+        assert!(matches!(store.set_preferences(&id, &preferences), Ok(true)));
+        assert!(matches!(
+            store.set_preferences(&ClusterId::new("nope"), &preferences),
+            Ok(false)
+        ));
+        let Ok(reopened) = ClusterStore::open(dir.path()) else {
+            panic!("reopen");
+        };
+        let saved = reopened.get(&id).map(|c| Preferences::from(&c.preferences));
+        assert_eq!(saved, Some(preferences));
+    }
+
+    #[test]
+    fn files_without_preferences_get_defaults() {
+        let Ok(dir) = tempfile::tempdir() else {
+            panic!("tempdir");
+        };
+        let old = r#"{"clusters":[{"file":"/h/.kube/config","context":"a","name":"a"}]}"#;
+        assert!(fs::write(dir.path().join(CLUSTERS_FILE), old).is_ok());
+        let Ok(store) = ClusterStore::open(dir.path()) else {
+            panic!("open");
+        };
+        let saved = store
+            .get(&ClusterId::new("a"))
+            .map(|c| Preferences::from(&c.preferences));
+        assert_eq!(saved, Some(Preferences::default()));
     }
 
     #[test]
