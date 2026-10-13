@@ -41,7 +41,7 @@ Spec column points at `design/`.
 | id | unit | owner | branch | status |
 |---|---|---|---|---|
 | I1 | live backend wired into every screen (I1b: live Flux — object pages, GitOps grid, Changes, Flux actions) | claude | i1b-live-flux | doing |
-| I2 | actions: reconcile, suspend/resume, scale, restart, delete, port-forward, exec, with confirmation | claude | i2-live-actions | doing |
+| I2 | actions: reconcile, suspend/resume, scale, restart, delete, port-forward, exec, with confirmation | claude | i2-live-actions | done (#29, #31) |
 | I3 | e2e run against kind scenarios | | | todo |
 | I4 | Fleet.app bundle, icon (squircle 22%), version stamping | claude | i4-app-bundle | done |
 | I5 | animation polish + parity pass, dark and light, every screen | | | todo |

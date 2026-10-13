@@ -1761,6 +1761,7 @@ name = "fleet-kube"
 version = "0.1.0"
 dependencies = [
  "async-channel",
+ "chrono",
  "fleet-core",
  "fleet-flux",
  "futures",

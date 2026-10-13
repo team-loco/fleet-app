@@ -1,15 +1,20 @@
+pub mod drain;
 pub mod exec;
 pub mod failure;
 pub mod forward;
 pub mod logs;
+pub mod mutate;
+pub mod pending;
+pub mod rollout;
 
 use std::sync::{Arc, Mutex};
 
 use fleet_core::action::Notice;
 use fleet_core::{
     ClusterId, Command, ExecRequest, Forward, LogRequest, Receiver, ResourceRef, Sender, Snapshot,
-    Update,
+    Status, Update,
 };
+use pending::Mutation;
 
 use crate::error::{Error, Result};
 use crate::manager::{ClusterHandle, lock};
@@ -37,6 +42,8 @@ impl Active {
 #[derive(Default)]
 struct Registry {
     forwards: Vec<Active>,
+    pending: Vec<(u64, Mutation)>,
+    next: u64,
 }
 
 #[derive(Clone)]
@@ -51,6 +58,14 @@ pub fn cluster_of(command: &Command) -> Option<&ClusterId> {
         Command::StreamLogs(request) => Some(&request.pod.cluster),
         Command::Exec(request) => Some(&request.target.pod.cluster),
         Command::PortForward { service, .. } => Some(&service.cluster),
+        Command::Cordon(target) => Some(&target.cluster),
+        Command::Uncordon(target) => Some(&target.cluster),
+        Command::Drain(target) => Some(&target.cluster),
+        Command::Delete(target) => Some(&target.cluster),
+        Command::RestartRollout(target) => Some(&target.cluster),
+        Command::Scale { target, .. } => Some(&target.cluster),
+        Command::Rollback { target, .. } => Some(&target.cluster),
+        Command::Flux(key, _) => Some(&key.cluster),
         _ => None,
     }
 }
@@ -102,8 +117,51 @@ impl Actions {
                 };
                 self.start_forward(forward, handle);
             }
-            _ => {}
+            _ => {
+                if let Some(mutation) = Mutation::from_command(command) {
+                    self.mutate(mutation, handle);
+                }
+            }
         }
+    }
+
+    fn mutate(&self, mutation: Mutation, handle: Option<ClusterHandle>) {
+        let id = {
+            let mut registry = lock(&self.registry);
+            registry.next += 1;
+            let id = registry.next;
+            registry.pending.push((id, mutation.clone()));
+            id
+        };
+        self.touch();
+        let this = self.clone();
+        tokio::spawn(async move {
+            let outcome = match handle {
+                Some(handle) => perform(&handle, &mutation).await,
+                None => Err(Error::NotConnected),
+            };
+            lock(&this.registry)
+                .pending
+                .retain(|(pending, _)| *pending != id);
+            this.touch();
+            let target = mutation.target();
+            match outcome {
+                Ok(blocked) if blocked.is_empty() => {}
+                Ok(blocked) => this.notify(Notice {
+                    status: Status::Warn,
+                    title: format!("Drain {} incomplete", target.name),
+                    detail: Some(format!(
+                        "{} · {}",
+                        target.cluster,
+                        drain::blocked_line(&blocked)
+                    )),
+                }),
+                Err(error) => {
+                    let title = failed_title(mutation.verb(), &target);
+                    this.notify(Notice::failed(title, failed_detail(&target, &error)));
+                }
+            }
+        });
     }
 
     fn stream_logs(request: &LogRequest, handle: Option<ClusterHandle>) {
@@ -183,5 +241,37 @@ impl Actions {
             .iter()
             .map(|active| active.forward.clone())
             .collect();
+        for (_, mutation) in &registry.pending {
+            pending::mark(snapshot, mutation);
+        }
     }
+}
+
+async fn perform(handle: &ClusterHandle, mutation: &Mutation) -> Result<Vec<drain::Blocked>> {
+    match mutation {
+        Mutation::Cordon(target) => mutate::cordon(handle, target, true).await?,
+        Mutation::Uncordon(target) => mutate::cordon(handle, target, false).await?,
+        Mutation::Drain(target) => {
+            mutate::cordon(handle, target, true).await?;
+            return drain::drain(handle, &target.name).await;
+        }
+        Mutation::Delete(target) => mutate::delete(handle, target).await?,
+        Mutation::Restart(target) => mutate::restart(handle, target).await?,
+        Mutation::Scale(target, replicas) => mutate::scale(handle, target, *replicas).await?,
+        Mutation::Rollback(target, revision) => {
+            let namespace = target
+                .namespace
+                .as_deref()
+                .ok_or(Error::MissingField("metadata.namespace"))?;
+            if target.kind != rollout::DEPLOYMENT {
+                return Err(Error::Unsupported {
+                    action: "Roll back",
+                    kind: target.kind.clone(),
+                });
+            }
+            rollout::rollback(handle, namespace, &target.name, *revision).await?;
+        }
+        Mutation::Flux(key, action) => mutate::flux(handle, key, *action).await?,
+    }
+    Ok(Vec::new())
 }

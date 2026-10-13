@@ -12,6 +12,7 @@ loco = ["fleet-core/loco"]
 
 [dependencies]
 async-channel.workspace = true
+chrono.workspace = true
 fleet-core.workspace = true
 fleet-flux.workspace = true
 futures.workspace = true

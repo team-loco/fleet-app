@@ -300,10 +300,10 @@ impl ClusterHandle {
         self.patch(target, PatchBody::Merge(body)).await
     }
 
-    pub async fn delete(&self, target: &ObjectRef) -> Result<()> {
+    pub async fn delete(&self, target: &ObjectRef, propagation: PropagationPolicy) -> Result<()> {
         let (_, api) = self.dynamic_api(target).await?;
         let params = DeleteParams {
-            propagation_policy: Some(PropagationPolicy::Background),
+            propagation_policy: Some(propagation),
             ..DeleteParams::default()
         };
         api.delete(&target.name, &params).await?;
