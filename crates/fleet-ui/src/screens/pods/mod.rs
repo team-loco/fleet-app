@@ -1,4 +1,6 @@
-use fleet_core::pods::{Container, Pod, PodFilter, PodQuery, filter_counts, namespaces};
+use fleet_core::pods::{
+    Container, Pod, PodFilter, PodQuery, filter_counts, namespaces, nav_counts,
+};
 use fleet_core::{ClusterId, Command, ResourceRef, Snapshot, Status};
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, InteractiveElement,
@@ -8,7 +10,7 @@ use gpui::{
 
 mod streams;
 
-use streams::{LogSession, SEARCH_PLACEHOLDER, ShellSession, TERMINAL_ID};
+use streams::{LogSession, SEARCH_PLACEHOLDER, ShellSession, TERMINAL_ID, crash_looping};
 
 use crate::kit::{
     ActionMenu, Button, Column, ConfirmDialog, DockState, InputEvent, KeyValue, Link, LogView,
@@ -16,19 +18,18 @@ use crate::kit::{
     TableEvent, Terminal, TextField, TextFieldState, confirm,
 };
 use crate::theme::{
-    ActiveTheme, FONT_MONO, LINE_PROSE, Palette, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5,
-    SPACE_6, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL, TEXT_UI,
+    ActiveTheme, CONTAINER_SQUARE, CONTAINER_SQUARE_GAP, FONT_MONO, LINE_PROSE, Palette,
+    RADIUS_SMALL, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8,
+    TEXT_BODY, TEXT_MONO, TEXT_SMALL, TEXT_UI,
 };
 
-const NAME_MIN: Pixels = px(160.);
-const NAME_WEIGHT: f32 = 1.5;
-const NAMESPACE: Pixels = px(84.);
-const STATUS: Pixels = px(128.);
-const RESTARTS: Pixels = px(50.);
-const NODE: Pixels = px(104.);
-const CPU: Pixels = px(44.);
-const MEM: Pixels = px(52.);
-const AGE: Pixels = px(32.);
+const NAME_MIN: Pixels = px(220.);
+const NAME_WEIGHT: f32 = 2.;
+const NAMESPACE: Pixels = px(100.);
+const CONTAINERS: Pixels = px(72.);
+const RESTARTS: Pixels = px(64.);
+const AGE: Pixels = px(48.);
+const STATUS: Pixels = px(150.);
 const FILTER_WIDTH: Pixels = px(260.);
 const NAMESPACE_SELECT: Pixels = px(180.);
 const CONTAINER_SELECT: Pixels = px(160.);
@@ -71,7 +72,7 @@ impl PodsScreen {
         let table = cx.new(|cx| {
             Table::new("pods", columns(), cx)
                 .row_key(|pod: &Pod| pod.name.clone().into())
-                .column_gap(SPACE_5)
+                .column_gap(SPACE_7)
                 .empty(NO_PODS)
         });
         let filter = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER_PLACEHOLDER));
@@ -120,11 +121,12 @@ impl PodsScreen {
             }),
             cx.subscribe(&containers, |this, select, SelectEvent::Changed(ix), cx| {
                 let name = select.read(cx).selected_label().map(ToString::to_string);
-                this.container = name.or_else(|| {
+                let name = name.or_else(|| {
                     this.selected_pod()
                         .and_then(|pod| pod.containers.get(*ix))
                         .map(|c| c.name.clone())
                 });
+                this.pick_container(name);
                 this.sync_streams(cx);
             }),
             cx.observe(&dock, |this, _, cx| this.sync_streams(cx)),
@@ -172,9 +174,18 @@ impl PodsScreen {
         let wanted = resource.filter(|r| self.pods.iter().any(|pod| pod.is(r)));
         if let Some(pod) = wanted {
             self.selected = Some(pod.clone());
-            self.container = None;
+            self.pick_container(None);
         }
         self.refresh(cx);
+    }
+
+    pub fn header_note(&self) -> (Status, String) {
+        let total = self
+            .cluster
+            .as_ref()
+            .and_then(|cluster| nav_counts(&self.pods, cluster).total)
+            .unwrap_or_default();
+        (Status::Ok, total.to_string())
     }
 
     fn cluster_pods(&self) -> Vec<&Pod> {
@@ -224,7 +235,7 @@ impl PodsScreen {
             .is_some_and(|selected| rows.iter().any(|pod| pod.is(selected)));
         if !still_there {
             self.selected = rows.first().map(Pod::resource);
-            self.container = None;
+            self.pick_container(None);
         }
         let position = self
             .selected
@@ -242,8 +253,13 @@ impl PodsScreen {
             return;
         }
         self.selected = pod;
-        self.container = None;
+        self.pick_container(None);
         self.sync_selection(cx);
+    }
+
+    fn pick_container(&mut self, name: Option<String>) {
+        self.container = name;
+        self.previous = self.selected_container().is_some_and(crash_looping);
     }
 
     fn sync_selection(&mut self, cx: &mut Context<Self>) {
@@ -312,30 +328,39 @@ impl PodsScreen {
 
     fn inspector(&self, cx: &mut Context<Self>) -> AnyElement {
         let palette = *cx.palette();
-        let body = match self.selected_pod() {
-            Some(pod) => self.pod_details(pod, &palette, cx).into_any_element(),
-            None => div()
-                .p(SPACE_6)
-                .text_color(palette.mute)
-                .child(NO_SELECTION)
-                .into_any_element(),
+        let (header, body) = match self.selected_pod() {
+            Some(pod) => (
+                Some(self.pod_header(pod, &palette, cx)),
+                Self::pod_details(pod, &palette, cx).into_any_element(),
+            ),
+            None => (
+                None,
+                div()
+                    .p(SPACE_6)
+                    .text_color(palette.mute)
+                    .child(NO_SELECTION)
+                    .into_any_element(),
+            ),
         };
         div()
-            .id("pod-inspector")
+            .flex()
+            .flex_col()
             .size_full()
-            .overflow_y_scroll()
             .bg(palette.panel)
             .text_size(TEXT_BODY)
-            .child(body)
+            .children(header)
+            .child(
+                div()
+                    .id("pod-inspector")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .child(body),
+            )
             .into_any_element()
     }
 
-    fn pod_details(
-        &self,
-        pod: &Pod,
-        palette: &Palette,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn pod_header(&self, pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let shell = Button::new("pod-shell", "Shell")
             .primary()
             .on_click(cx.listener(|this, _, window, cx| this.show_terminal(window, cx)));
@@ -365,10 +390,13 @@ impl PodsScreen {
                     .line_height(gpui::relative(LINE_PROSE))
                     .child(pod.sentence()),
             );
+        header.flex_none().into_any_element()
+    }
+
+    fn pod_details(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
-            .child(header)
             .child(Self::facts(pod, palette, cx))
             .child(labels(pod, palette))
             .child(Self::containers_section(pod, palette, cx))
@@ -386,11 +414,7 @@ impl PodsScreen {
                     .on_click(cx.listener(move |_, _, _, cx| {
                         cx.emit(Command::OpenResource(target.clone()));
                     }));
-                div()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .child(link)
-                    .into_any_element()
+                div().min_w_0().truncate().child(link).into_any_element()
             }
             None => missing(palette),
         };
@@ -687,6 +711,21 @@ fn text(value: impl Into<SharedString>, color: gpui::Hsla) -> AnyElement {
         .into_any_element()
 }
 
+fn container_squares(pod: &Pod, palette: &Palette) -> AnyElement {
+    let squares = pod.containers.iter().map(|container| {
+        div()
+            .size(CONTAINER_SQUARE)
+            .flex_none()
+            .rounded(RADIUS_SMALL)
+            .bg(palette.status(container.status))
+    });
+    div()
+        .flex()
+        .gap(CONTAINER_SQUARE_GAP)
+        .children(squares)
+        .into_any_element()
+}
+
 fn columns() -> Vec<Column<Pod>> {
     vec![
         Column::text("Name", |p: &Pod| p.name.clone().into())
@@ -698,11 +737,7 @@ fn columns() -> Vec<Column<Pod>> {
         })
         .fixed(NAMESPACE)
         .sort_by_key(|p: &Pod| p.namespace.clone()),
-        Column::new("Status", |p: &Pod, _| {
-            StatusText::new(p.status, p.reason.clone()).into_any_element()
-        })
-        .fixed(STATUS)
-        .sort_by_key(|p: &Pod| std::cmp::Reverse(p.status)),
+        Column::new("Ctrs", container_squares).fixed(CONTAINERS),
         Column::new("Restarts", |p: &Pod, palette| {
             let color = p
                 .restart_status()
@@ -713,37 +748,17 @@ fn columns() -> Vec<Column<Pod>> {
         .end()
         .fixed(RESTARTS)
         .sort_by_key(|p: &Pod| std::cmp::Reverse(p.restarts())),
-        Column::new("Node", |p: &Pod, palette| {
-            text(p.node_short().unwrap_or(MISSING).to_owned(), palette.fg2)
-        })
-        .mono()
-        .fixed(NODE),
-        Column::new("CPU", |p: &Pod, palette| {
-            let label = p
-                .usage
-                .map_or_else(|| MISSING.to_owned(), fleet_core::pods::Usage::cpu_label);
-            text(label, palette.fg2)
-        })
-        .mono()
-        .end()
-        .fixed(CPU)
-        .sort_by_key(|p: &Pod| std::cmp::Reverse(p.usage.map(|u| u.cpu_millis))),
-        Column::new("Mem", |p: &Pod, palette| {
-            let label = p
-                .usage
-                .map_or_else(|| MISSING.to_owned(), fleet_core::pods::Usage::memory_label);
-            text(label, palette.fg2)
-        })
-        .mono()
-        .end()
-        .fixed(MEM)
-        .sort_by_key(|p: &Pod| std::cmp::Reverse(p.usage.map(|u| u.memory_mib))),
         Column::new("Age", |p: &Pod, palette| {
             text(fleet_core::time::age(p.age), palette.mute)
         })
         .mono()
         .fixed(AGE)
         .sort_by_key(|p: &Pod| p.age),
+        Column::new("Status", |p: &Pod, _| {
+            StatusText::new(p.status, p.reason.clone()).into_any_element()
+        })
+        .fixed(STATUS)
+        .sort_by_key(|p: &Pod| std::cmp::Reverse(p.status)),
     ]
 }
 

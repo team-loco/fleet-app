@@ -142,7 +142,7 @@ pub fn snapshot() -> Snapshot {
         (Page::Problems, problems_badge(&home.problems)),
         (Page::GitOps, Counts::default().with_err(1).with_sus(1)),
     ]);
-    Snapshot {
+    let mut snapshot = Snapshot {
         clusters: vec![
             prod_us_east(),
             cluster(ClusterSeed {
@@ -200,7 +200,9 @@ pub fn snapshot() -> Snapshot {
         catalog: settings::catalog(),
         pods: pods::pods(),
         forwards: Vec::new(),
-    }
+    };
+    simulate::recount_pods(&mut snapshot, &ClusterId::new(PROD_US_EAST));
+    snapshot
 }
 
 #[derive(Clone, Copy)]
@@ -291,7 +293,6 @@ fn prod_us_east() -> ClusterSummary {
         (Page::LocoBuilds, Counts::default().with_err(1)),
         #[cfg(feature = "loco")]
         (Page::LocoRoutes, Counts::total(44).with_warn(2)),
-        (Page::Pods, Counts::total(412).with_err(5)),
         (Page::Deployments, Counts::total(48).with_err(1)),
         (Page::StatefulSets, Counts::total(12)),
         (Page::DaemonSets, Counts::total(9)),
@@ -312,6 +313,34 @@ fn prod_us_east() -> ClusterSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pod_nav_counts_come_from_the_pod_rows() {
+        use fleet_core::pods::{PodFilter, filter_counts};
+        let snapshot = snapshot();
+        let cluster = ClusterId::new(PROD_US_EAST);
+        let nav = snapshot
+            .clusters
+            .iter()
+            .find(|c| c.id == cluster)
+            .and_then(|c| c.nav.get(&Page::Pods).copied());
+        assert_eq!(nav, Some(Counts::total(412).with_err(5)));
+        let rows: Vec<&fleet_core::pods::Pod> = snapshot
+            .pods
+            .iter()
+            .filter(|p| p.cluster == cluster)
+            .collect();
+        let counts = filter_counts(&rows);
+        let phases = snapshot.details.get(&cluster).map(|d| d.overview.pods);
+        let phases = phases.map(|p| (p.running, p.pending, p.failing));
+        let expected = [
+            (PodFilter::Running, 398),
+            (PodFilter::Pending, 9),
+            (PodFilter::Failing, 5),
+        ];
+        assert_eq!(counts[1..], expected);
+        assert_eq!(phases, Some((398, 9, 5)));
+    }
 
     #[test]
     fn sample_matches_design_rollups() {

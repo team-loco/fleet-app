@@ -111,9 +111,12 @@ impl Shell {
     }
 
     fn page_header(&self, palette: &Palette, cx: &App) -> impl IntoElement {
-        let note = self
-            .pages
-            .header_note(self.state.page, self.has_detail(), cx);
+        let note = if self.state.page == Page::Pods {
+            Some(self.pods.read(cx).header_note())
+        } else {
+            self.pages
+                .header_note(self.state.page, self.has_detail(), cx)
+        };
         let status = match (self.selected_cluster(), note) {
             (Some(_), Some((Status::Ok, text))) => Some((text, palette.mute)),
             (Some(_), Some((status, text))) => {

@@ -343,6 +343,14 @@ pub struct Commit {
     pub subject: String,
 }
 
+impl Commit {
+    pub fn label(&self, workload: &str) -> String {
+        let scope = format!("{workload}: ");
+        let subject = self.subject.strip_prefix(&scope).unwrap_or(&self.subject);
+        format!("{} {subject}", self.sha)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContainerSpec {
     pub name: String,
@@ -737,6 +745,19 @@ mod tests {
         }
         assert_eq!(WorkloadKind::from_kind("Job"), None);
         assert!(!WorkloadKind::DaemonSet.scalable());
+    }
+
+    #[test]
+    fn commit_labels_drop_the_workload_scope() {
+        let commit = Commit {
+            sha: "a41e07c".into(),
+            subject: "checkout-api: bump to 2.14.0".into(),
+        };
+        assert_eq!(commit.label("checkout-api"), "a41e07c bump to 2.14.0");
+        assert_eq!(
+            commit.label("payments-worker"),
+            "a41e07c checkout-api: bump to 2.14.0"
+        );
     }
 
     #[test]

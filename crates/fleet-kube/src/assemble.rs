@@ -129,7 +129,7 @@ pub fn cluster(
     if selection.is_some() {
         summary
             .nav
-            .insert(Page::Pods, crate::pods::counts(&pod_rows));
+            .insert(Page::Pods, fleet_core::pods::nav_counts(&pod_rows, id));
     }
     let detail = selection.map(|selection| {
         let detail = cluster_detail(handle, extras, &pods, &nodes, selection, now);

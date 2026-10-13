@@ -80,6 +80,18 @@ impl LogLine {
         }
     }
 
+    pub fn text(&self) -> String {
+        let level = self.level.map(Level::label);
+        let parts: Vec<&str> = self
+            .timestamp
+            .as_deref()
+            .into_iter()
+            .chain(level)
+            .chain(std::iter::once(self.message.as_ref()))
+            .collect();
+        parts.join(" ")
+    }
+
     pub fn parse(raw: &str) -> Self {
         let clean = strip_ansi(raw);
         let (timestamp, rest) = split_timestamp(&clean);
@@ -349,6 +361,19 @@ impl LogView {
         cx.notify();
     }
 
+    pub fn timestamps(&self) -> bool {
+        self.timestamps
+    }
+
+    pub fn export(&self) -> String {
+        let mut out = String::new();
+        for line in &self.buffer.lines {
+            out.push_str(&line.text());
+            out.push('\n');
+        }
+        out
+    }
+
     pub fn set_timestamps(&mut self, show: bool, cx: &mut Context<Self>) {
         self.timestamps = show;
         cx.notify();
@@ -512,6 +537,16 @@ impl Render for LogView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lines_export_as_plain_text() {
+        let full = LogLine::new(Some("21:12:20.231"), Some(Level::Fatal), "exit 1");
+        assert_eq!(full.text(), "21:12:20.231 FATAL exit 1");
+        assert_eq!(
+            LogLine::new(None, None, "── exited ──").text(),
+            "── exited ──"
+        );
+    }
 
     #[test]
     fn strips_colour_cursor_and_title_sequences() {

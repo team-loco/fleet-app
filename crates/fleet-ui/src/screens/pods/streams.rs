@@ -1,15 +1,18 @@
-use fleet_core::pods::Pod;
+use fleet_core::pods::{Container, ContainerState, Pod};
 use fleet_core::{
     Command, ExecEvent, ExecRequest, ExecTarget, LogRequest, ResourceRef, Sender, Sink, Source,
     Status,
 };
 use gpui::{
     AppContext as _, Context, Focusable, IntoElement, ParentElement, Styled, Subscription, Task,
-    Window, div, prelude::FluentBuilder,
+    Window, div,
 };
 
 use super::PodsScreen;
-use crate::kit::{Button, Dock, DockTab, LogView, Terminal, TerminalEvent, TextField};
+use crate::assets::{DOWNLOAD, PLUS};
+use crate::kit::{
+    Button, Dock, DockTab, IconButton, LogView, Terminal, TerminalEvent, TextField, Toast, toast,
+};
 use crate::screens::workload::kit_line;
 use crate::theme::SPACE_3;
 
@@ -22,7 +25,13 @@ const TERMINAL_LABEL: &str = "Terminal";
 const PREVIOUS: &str = "previous";
 const FOLLOW: &str = "follow";
 const WRAP: &str = "wrap";
-const RECONNECT: &str = "reconnect";
+const TIMESTAMPS: &str = "timestamps";
+const DEBUG: &str = "debug";
+const DOWNLOAD_TOOLTIP: &str = "Download logs";
+const NEW_TERMINAL_TOOLTIP: &str = "New terminal";
+const DOWNLOADS: &str = "Downloads";
+const SAVE_FAILED: &str = "Could not save the logs";
+const SAVED: &str = "Saved logs";
 const PREVIOUS_TOOLTIP: &str = "Logs of the container instance before the last restart";
 const NO_PREVIOUS_TOOLTIP: &str = "This container has not restarted";
 const DEBUG_IMAGE: &str = "busybox:1.36";
@@ -47,6 +56,7 @@ pub struct LogSession {
 
 pub struct ShellSession {
     key: ShellKey,
+    debug: bool,
     input: Sender<Vec<u8>>,
     open: bool,
     _task: Task<()>,
@@ -65,6 +75,22 @@ pub fn has_previous(pod: &Pod, container: &str) -> bool {
         .iter()
         .find(|c| c.name == container)
         .is_some_and(|c| c.restarts > 0)
+}
+
+pub fn crash_looping(container: &Container) -> bool {
+    container.restarts > 0 && container.state != ContainerState::Running
+}
+
+pub fn debug_reason(container: &str, other: Option<&str>) -> String {
+    let debug = format!("start a debug container that shares {container}’s process namespace");
+    match other {
+        Some(other) => format!("{container} is restarting. Attach to {other} instead, or {debug}."),
+        None => format!("{container} is restarting, so Fleet will {debug}."),
+    }
+}
+
+pub fn log_file_name(pod: &str, container: &str) -> String {
+    format!("{pod}-{container}.log")
 }
 
 pub fn exit_note(code: Option<i32>) -> String {
@@ -148,7 +174,18 @@ impl PodsScreen {
         };
         let terminal = cx.new(|cx| Terminal::new(TERMINAL_ID, cx));
         let command_line = target.command_line();
+        let other = self.selected_pod().and_then(|pod| {
+            pod.containers
+                .iter()
+                .find(|c| c.name != key.container && c.state == ContainerState::Running)
+                .map(|c| c.name.clone())
+        });
+        let reason = debug.then(|| debug_reason(&key.container, other.as_deref()));
         terminal.update(cx, |terminal, cx| {
+            if let Some(reason) = reason {
+                terminal.note(reason, cx);
+                terminal.note(String::new(), cx);
+            }
             terminal.note(command_line, cx);
             terminal.set_open(true, cx);
         });
@@ -176,6 +213,7 @@ impl PodsScreen {
         });
         self.shell = Some(ShellSession {
             key,
+            debug,
             input,
             open: true,
             _task: task,
@@ -204,6 +242,37 @@ impl PodsScreen {
         }
     }
 
+    fn new_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.shell = None;
+        self.show_terminal(window, cx);
+    }
+
+    fn download_logs(&self, cx: &mut Context<Self>) {
+        let text = self.logs.read(cx).export();
+        let name = match (self.selected_pod(), self.container_name()) {
+            (Some(pod), Some(container)) => log_file_name(&pod.name, &container),
+            (Some(pod), None) => log_file_name(&pod.name, LOGS_LABEL),
+            (None, _) => return,
+        };
+        let directory = std::env::home_dir().unwrap_or_default().join(DOWNLOADS);
+        let chosen = cx.prompt_for_new_path(&directory, Some(&name));
+        cx.spawn(async move |_, cx| {
+            let Ok(Ok(Some(path))) = chosen.await else {
+                return;
+            };
+            let detail = path.display().to_string();
+            let result = std::fs::write(&path, text);
+            cx.update(|cx| {
+                let message = match result {
+                    Ok(()) => Toast::new(Status::Ok, SAVED).detail(detail),
+                    Err(error) => Toast::new(Status::Err, SAVE_FAILED).detail(error.to_string()),
+                };
+                toast(message, cx);
+            });
+        })
+        .detach();
+    }
+
     pub fn show_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.shell.as_ref().is_some_and(|s| !s.open) {
             self.shell = None;
@@ -225,6 +294,7 @@ impl PodsScreen {
     fn log_tools(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let follow = self.logs.read(cx).follow();
         let wrap = self.logs.read(cx).wrap();
+        let timestamps = self.logs.read(cx).timestamps();
         let container = self.container_name().unwrap_or_default();
         let can_previous = self
             .selected_pod()
@@ -262,6 +332,16 @@ impl PodsScreen {
                     })),
             )
             .child(
+                Button::new("pod-logs-timestamps", TIMESTAMPS)
+                    .small()
+                    .selected(timestamps)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.logs
+                            .update(cx, |logs, cx| logs.set_timestamps(!timestamps, cx));
+                        cx.notify();
+                    })),
+            )
+            .child(
                 Button::new("pod-logs-wrap", WRAP)
                     .small()
                     .selected(wrap)
@@ -270,24 +350,18 @@ impl PodsScreen {
                         cx.notify();
                     })),
             )
+            .child(
+                IconButton::svg("pod-logs-download", DOWNLOAD, DOWNLOAD_TOOLTIP)
+                    .on_click(cx.listener(|this, _, _, cx| this.download_logs(cx))),
+            )
     }
 
-    fn terminal_tools(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let ended = self.shell.as_ref().is_some_and(|s| !s.open);
+    fn terminal_tools(&self) -> impl IntoElement + use<> {
         div()
             .flex()
             .items_center()
             .gap(SPACE_3)
             .child(self.containers.clone())
-            .when(ended, |tools| {
-                tools.child(
-                    Button::new("pod-terminal-reconnect", RECONNECT)
-                        .small()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.show_terminal(window, cx);
-                        })),
-                )
-            })
     }
 
     pub(super) fn dock_view(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -296,7 +370,15 @@ impl PodsScreen {
             (Some(pod), None) => pod.short_name().to_owned(),
             (None, _) => String::new(),
         };
+        let terminal_detail = if self.shell.as_ref().is_some_and(|s| s.debug) {
+            DEBUG.to_owned()
+        } else {
+            detail.clone()
+        };
+        let new_terminal = IconButton::svg("pod-new-terminal", PLUS, NEW_TERMINAL_TOOLTIP)
+            .on_click(cx.listener(|this, _, window, cx| this.new_terminal(window, cx)));
         Dock::new(&self.dock)
+            .after_tabs(new_terminal)
             .tab(
                 DockTab::new(LOGS_LABEL)
                     .detail(detail.clone())
@@ -305,8 +387,8 @@ impl PodsScreen {
             )
             .tab(
                 DockTab::new(TERMINAL_LABEL)
-                    .detail(detail)
-                    .tools(self.terminal_tools(cx))
+                    .detail(terminal_detail)
+                    .tools(self.terminal_tools())
                     .content(self.terminal.clone()),
             )
     }
@@ -314,8 +396,6 @@ impl PodsScreen {
 
 #[cfg(test)]
 mod tests {
-    use fleet_core::pods::{Container, ContainerState};
-
     use super::*;
 
     fn pod(status: Status, restarts: u32) -> Pod {
@@ -343,6 +423,32 @@ mod tests {
     fn previous_logs_need_a_restart() {
         assert!(has_previous(&pod(Status::Err, 14), "api"));
         assert!(!has_previous(&pod(Status::Ok, 0), "api"));
+    }
+
+    #[test]
+    fn crash_looping_containers_open_on_previous_logs() {
+        let crashing = pod(Status::Err, 14);
+        assert!(crash_looping(&crashing.containers[0]));
+        let mut restarted = pod(Status::Ok, 1);
+        restarted.containers[0].state = ContainerState::Running;
+        assert!(!crash_looping(&restarted.containers[0]));
+        assert!(!crash_looping(&pod(Status::Warn, 0).containers[0]));
+    }
+
+    #[test]
+    fn debug_sessions_explain_why_and_logs_save_per_container() {
+        assert_eq!(
+            debug_reason("api", Some("envoy")),
+            "api is restarting. Attach to envoy instead, or start a debug container that shares api’s process namespace."
+        );
+        assert_eq!(
+            debug_reason("api", None),
+            "api is restarting, so Fleet will start a debug container that shares api’s process namespace."
+        );
+        assert_eq!(
+            log_file_name("checkout-api-7f9c6d-x2lqp", "api"),
+            "checkout-api-7f9c6d-x2lqp-api.log"
+        );
     }
 
     #[test]

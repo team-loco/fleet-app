@@ -43,6 +43,7 @@ pub fn apply(snapshot: &mut Snapshot, command: &Command) -> Option<Settle> {
             Some(Settle::Drained(target.clone()))
         }
         Command::Delete(target) if crate::pods::terminate(&mut snapshot.pods, target) => {
+            recount_pods(snapshot, &target.cluster);
             Some(Settle::PodReplaced(target.clone()))
         }
         Command::Delete(target) => {
@@ -116,15 +117,28 @@ pub fn settle(snapshot: &mut Snapshot, settle: &Settle) -> Option<Settle> {
         Settle::Connected(cluster) => sim::connected(snapshot, cluster),
         Settle::RolledOut(target) => sim::rolled_out(snapshot, target),
         Settle::PodReplaced(target) => {
-            return crate::pods::replace(&mut snapshot.pods, target).map(Settle::PodStarted);
+            let next = crate::pods::replace(&mut snapshot.pods, target).map(Settle::PodStarted);
+            recount_pods(snapshot, &target.cluster);
+            return next;
         }
-        Settle::PodStarted(target) => crate::pods::start(&mut snapshot.pods, target),
+        Settle::PodStarted(target) => {
+            crate::pods::start(&mut snapshot.pods, target);
+            recount_pods(snapshot, &target.cluster);
+        }
     }
     if let Settle::Cordoned(target) | Settle::Uncordoned(target) | Settle::Drained(target) = settle
     {
         recount_nodes(snapshot, target);
     }
     None
+}
+
+pub fn recount_pods(snapshot: &mut Snapshot, cluster: &ClusterId) {
+    let counts = fleet_core::pods::nav_counts(&snapshot.pods, cluster);
+    let summary = snapshot.clusters.iter_mut().find(|c| &c.id == cluster);
+    if let Some(summary) = summary {
+        summary.nav.insert(Page::Pods, counts);
+    }
 }
 
 fn recount_nodes(snapshot: &mut Snapshot, target: &ResourceRef) {

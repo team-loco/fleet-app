@@ -14,7 +14,7 @@ use gpui::{
 use crate::kit::{
     ActionMenu, CodeView, Column, ConfirmDialog, DockState, KeyValue, Link, LogView, MenuItem,
     PageHeader, Rule, SectionHeader, SectionLabel, Segmented, StatusText, Table, TableEvent,
-    Terminal, TextFieldState, Toast, confirm, toast,
+    Terminal, TextFieldState, Toast, Width, confirm, min_row_width, toast,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, LINE_PROSE, Palette, RADIUS, ROW_TABLE, RULE, SPACE_1, SPACE_2,
@@ -47,7 +47,6 @@ const LOADING: &str = "Loading…";
 const MANAGED_BY: &str = "managed by";
 const META_SEPARATOR: &str = " · ";
 
-const PODS_MIN_WIDTH: Pixels = px(820.);
 const NAME_WEIGHT: f32 = 1.5;
 const NAME_MIN: Pixels = px(210.);
 const READY_WIDTH: Pixels = px(44.);
@@ -344,14 +343,8 @@ impl WorkloadScreen {
             .flex()
             .flex_col()
             .child(SectionHeader::new(PODS).count(count))
-            .child(
-                div().id("pods-scroll").overflow_x_scroll().child(
-                    div()
-                        .min_w(PODS_MIN_WIDTH)
-                        .child(Rule::horizontal())
-                        .child(self.pods.clone()),
-                ),
-            )
+            .child(Rule::horizontal())
+            .child(self.pods.clone())
     }
 
     fn history(workload: &Workload, cx: &mut Context<Self>) -> impl IntoElement {
@@ -359,7 +352,7 @@ impl WorkloadScreen {
         let rows: Vec<AnyElement> = workload
             .revisions
             .iter()
-            .map(|revision| Self::revision_row(revision, &palette, cx))
+            .map(|revision| Self::revision_row(&workload.target.name, revision, &palette, cx))
             .collect();
         div()
             .flex()
@@ -369,16 +362,22 @@ impl WorkloadScreen {
                 div()
                     .id("history-scroll")
                     .overflow_x_scroll()
-                    .child(div().min_w(PODS_MIN_WIDTH).children(rows)),
+                    .restrict_scroll_to_axis()
+                    .child(div().min_w(history_min_width()).children(rows)),
             )
     }
 
-    fn revision_row(revision: &Revision, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn revision_row(
+        workload: &str,
+        revision: &Revision,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let pods_color = revision
             .status()
             .map_or(palette.mute, |status| palette.status(status));
         let commit = revision.commit.as_ref().map(|commit| {
-            let text = format!("{} {}", commit.sha, commit.subject);
+            let text = commit.label(workload);
             let id = SharedString::from(format!("commit-{}", revision.number));
             let sha = commit.sha.clone();
             Link::new(id, text).on_click(cx.listener(move |_, _, _, cx| {
@@ -549,6 +548,22 @@ impl WorkloadScreen {
             .border_color(palette.line)
             .child(grid)
     }
+}
+
+fn history_min_width() -> Pixels {
+    let widths = [
+        Width::Fixed(REV_WIDTH),
+        Width::Fixed(RS_WIDTH),
+        Width::Flex {
+            weight: 1.,
+            min: IMAGE_MIN,
+        },
+        Width::Fixed(REV_PODS_WIDTH),
+        Width::Fixed(REV_AGE_WIDTH),
+        Width::Fixed(COMMIT_WIDTH),
+        Width::Fixed(NOTE_WIDTH),
+    ];
+    min_row_width(widths.into_iter(), SPACE_6, SPACE_8 + SPACE_8)
 }
 
 fn fixed(width: Pixels) -> gpui::Div {

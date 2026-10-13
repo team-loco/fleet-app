@@ -7,6 +7,8 @@ pub const CHEVRON_RIGHT: &str = "icons/chevron-right.svg";
 pub const CHEVRON_DOWN: &str = "icons/chevron-down.svg";
 pub const CHEVRON_UP: &str = "icons/chevron-up.svg";
 pub const CHECK: &str = "icons/check.svg";
+pub const DOWNLOAD: &str = "icons/download.svg";
+pub const PLUS: &str = "icons/plus.svg";
 
 const ICONS: &[(&str, &[u8])] = &[
     (
@@ -23,6 +25,8 @@ const ICONS: &[(&str, &[u8])] = &[
     ),
     (CHEVRON_UP, include_bytes!("../assets/icons/chevron-up.svg")),
     (CHECK, include_bytes!("../assets/icons/check.svg")),
+    (DOWNLOAD, include_bytes!("../assets/icons/download.svg")),
+    (PLUS, include_bytes!("../assets/icons/plus.svg")),
 ];
 
 pub(crate) const PLEX_SANS_SEMIBOLD: &[u8] =
