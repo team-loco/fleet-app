@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 
 use fleet_core::filter::StatusFilter;
-use fleet_core::resources::{Resource, filter_counts, filter_resources, namespaces_of, sentence};
+use fleet_core::resources::{
+    Resource, filter_counts, filter_resources, namespace_choices, namespaces_of, sentence,
+};
+use fleet_core::settings::NamespaceSelection;
 use fleet_core::time::age;
 use fleet_core::{
-    ClusterDetail, ClusterId, ClusterSummary, Command, Counts, ResourceKind, ResourceRef, Seen,
-    Status,
+    ClusterDetail, ClusterId, ClusterSummary, Command, Counts, Preferences, ResourceKind,
+    ResourceRef, Seen, Status,
 };
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
@@ -103,6 +106,7 @@ pub struct ResourcesScreen {
     sentence: String,
     confirm_destructive: bool,
     namespace: Option<String>,
+    preferences: Preferences,
     selected: Option<(String, String)>,
     revealed: Option<(ResourceKind, String, String)>,
     tables: HashMap<ResourceKind, Entity<Table<Resource>>>,
@@ -143,10 +147,10 @@ impl ResourcesScreen {
         let subscriptions = vec![
             cx.subscribe(&namespaces, |this, select, _: &SelectEvent, cx| {
                 let label = select.read(cx).selected_label().cloned();
-                this.namespace = label
+                let choice = label
                     .filter(|l| l.as_ref() != ALL_NAMESPACES)
                     .map(|l| l.to_string());
-                this.refresh(cx);
+                this.choose_namespace(choice, cx);
             }),
             cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
                 this.refresh(cx);
@@ -160,6 +164,7 @@ impl ResourcesScreen {
             sentence: String::new(),
             confirm_destructive: true,
             namespace: None,
+            preferences: Preferences::default(),
             selected: None,
             revealed: None,
             tables: HashMap::new(),
@@ -177,31 +182,44 @@ impl ResourcesScreen {
         kind: ResourceKind,
         detail: &ClusterDetail,
         confirm_destructive: bool,
+        preferences: &Preferences,
         cx: &mut Context<Self>,
     ) {
         let rows = detail.resources(kind);
+        self.preferences = preferences.clone();
+        let namespace = preferences
+            .namespace_selection(kind.name())
+            .namespace()
+            .map(str::to_owned);
+        let rescoped = self.namespace != namespace;
+        self.namespace = namespace;
         if self.confirm_destructive != confirm_destructive {
             self.confirm_destructive = confirm_destructive;
             self.refresh_menu(cx);
         }
         let switched = self.kind != kind || self.cluster.as_ref() != Some(&cluster.id);
-        if !switched && self.rows == rows {
+        if !switched && !rescoped && self.rows == rows {
             return;
         }
         if switched {
             self.selected = None;
-            self.namespace = None;
-        }
-        if let Some((_, namespace, name)) = self.revealed.take_if(|(k, _, _)| *k == kind) {
-            self.selected = Some((namespace, name));
         }
         self.cluster = Some(cluster.id.clone());
         self.kind = kind;
+        if let Some((_, namespace, name)) = self.revealed.take_if(|(k, _, _)| *k == kind) {
+            self.show_namespace_of(&namespace, cx);
+            self.selected = Some((namespace, name));
+        }
         self.rows = rows.to_vec();
         self.sentence = sentence(kind, &self.rows);
+        let known = detail
+            .namespaces
+            .iter()
+            .map(|n| n.name.clone())
+            .chain(namespaces_of(&self.rows));
         let mut options: Vec<SharedString> = vec![ALL_NAMESPACES.into()];
         options.extend(
-            namespaces_of(&self.rows)
+            namespace_choices(known, self.namespace.as_deref())
                 .into_iter()
                 .map(SharedString::from),
         );
@@ -224,11 +242,31 @@ impl ResourcesScreen {
         cx: &mut Context<Self>,
     ) {
         if kind == self.kind && self.cluster.is_some() {
+            self.show_namespace_of(&namespace, cx);
             self.selected = Some((namespace, name));
             self.refresh(cx);
         } else {
             self.revealed = Some((kind, namespace, name));
         }
+    }
+
+    fn show_namespace_of(&mut self, namespace: &str, cx: &mut Context<Self>) {
+        if self.namespace.as_ref().is_some_and(|ns| ns != namespace) {
+            self.choose_namespace(Some(namespace.to_owned()), cx);
+        }
+    }
+
+    fn choose_namespace(&mut self, choice: Option<String>, cx: &mut Context<Self>) {
+        let Some(cluster) = self.cluster.clone() else {
+            return;
+        };
+        let selection = NamespaceSelection::of(choice.as_deref());
+        self.preferences
+            .select_namespace(self.kind.name(), selection);
+        self.namespace = choice;
+        self.refresh(cx);
+        let command = Command::SetPreferences(cluster, self.preferences.clone());
+        cx.emit(ScreenEvent::Command(command));
     }
 
     pub fn filter_bar(&self) -> &Entity<FilterBar> {

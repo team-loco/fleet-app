@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::{ClusterId, Status};
 
 const DEFAULT_NAMESPACE: &str = "default";
@@ -45,7 +47,7 @@ pub enum Auth {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Preferences {
-    pub namespace_selection: Option<NamespaceSelection>,
+    pub namespaces: BTreeMap<String, NamespaceSelection>,
     pub default_namespace: Option<String>,
     pub metrics: MetricsSource,
     pub confirm_destructive: bool,
@@ -72,7 +74,7 @@ pub enum ClusterAction {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            namespace_selection: None,
+            namespaces: BTreeMap::new(),
             default_namespace: None,
             metrics: MetricsSource::default(),
             confirm_destructive: true,
@@ -89,6 +91,10 @@ pub enum NamespaceSelection {
 }
 
 impl NamespaceSelection {
+    pub fn of(namespace: Option<&str>) -> Self {
+        namespace.map_or(Self::All, |namespace| Self::Named(namespace.to_owned()))
+    }
+
     pub fn namespace(&self) -> Option<&str> {
         match self {
             Self::All => None,
@@ -98,11 +104,15 @@ impl NamespaceSelection {
 }
 
 impl Preferences {
-    pub fn namespace_selection(&self) -> NamespaceSelection {
-        self.namespace_selection.clone().unwrap_or_else(|| {
+    pub fn namespace_selection(&self, list: &str) -> NamespaceSelection {
+        self.namespaces.get(list).cloned().unwrap_or_else(|| {
             let namespace = self.default_namespace.as_deref().and_then(parse_namespace);
             NamespaceSelection::Named(namespace.unwrap_or_else(|| DEFAULT_NAMESPACE.into()))
         })
+    }
+
+    pub fn select_namespace(&mut self, list: &str, selection: NamespaceSelection) {
+        self.namespaces.insert(list.to_owned(), selection);
     }
 }
 
@@ -270,21 +280,28 @@ mod tests {
     }
 
     #[test]
-    fn namespace_memory_overrides_preferred_default_and_keeps_all_explicit() {
+    fn namespace_memory_is_per_list_over_the_preferred_default() {
         let mut preferences = Preferences::default();
         assert_eq!(
-            preferences.namespace_selection().namespace(),
+            preferences.namespace_selection("Event").namespace(),
             Some("default")
         );
         preferences.default_namespace = Some("payments".into());
         assert_eq!(
-            preferences.namespace_selection().namespace(),
+            preferences.namespace_selection("Event").namespace(),
             Some("payments")
         );
-        preferences.namespace_selection = Some(NamespaceSelection::All);
-        assert_eq!(preferences.namespace_selection().namespace(), None);
-        preferences.namespace_selection = Some(NamespaceSelection::Named("web".into()));
-        assert_eq!(preferences.namespace_selection().namespace(), Some("web"));
+        preferences.select_namespace("Event", NamespaceSelection::All);
+        assert_eq!(preferences.namespace_selection("Event").namespace(), None);
+        preferences.select_namespace("Pod", NamespaceSelection::of(Some("loco-system")));
+        assert_eq!(
+            preferences.namespace_selection("Pod").namespace(),
+            Some("loco-system")
+        );
+        assert_eq!(
+            preferences.namespace_selection("Deployment").namespace(),
+            Some("payments")
+        );
     }
 
     #[test]

@@ -73,3 +73,4 @@ Spec column points at `design/`.
 | SAFE2 | cluster identity pinned (server + CA), Context changed prompt, disconnect tears down forwards/streams/supervisor, credential/CA rotation reconnects (#105, #106, #108) | claude | cluster-identity | done |
 | CXC | Overview resource visuals and navigation; full nav selection (#125, #126, #122) | claude | overview-visuals | done |
 | CXB | Repair terminal TTY, rendering and explicit shell lifecycle; remove previous container logs (#128, #129) | claude | terminal-fix | done |
+| TBL2b | one namespace memory per cluster and list in cluster preferences; pods and resource lists scoped again after #146 (#117) | claude | tables-namespace-unify | done |
