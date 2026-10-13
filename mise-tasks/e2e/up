@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+#MISE description="Create Fleet's two local kind clusters and apply triage scenarios"
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CLUSTERS=(fleet-a fleet-b)
+WAIT_TIMEOUT=300s
+
+mise exec -- docker info >/dev/null
+existing_clusters="$(mise exec -- kind get clusters)"
+for cluster in "${CLUSTERS[@]}"; do
+  context="kind-${cluster}"
+  if ! [[ $'\n'"${existing_clusters}"$'\n' == *$'\n'"${cluster}"$'\n'* ]]; then
+    mise exec -- kind create cluster --name "${cluster}" --wait "${WAIT_TIMEOUT}"
+  else
+    mise exec -- kind export kubeconfig --name "${cluster}"
+  fi
+  mise exec -- kubectl --context "${context}" apply -k "${ROOT}/e2e/metrics-server"
+  mise exec -- kubectl --context "${context}" -n kube-system rollout status deployment/metrics-server --timeout="${WAIT_TIMEOUT}"
+  mise exec -- flux install --context "${context}" --timeout "${WAIT_TIMEOUT}"
+  mise exec -- kubectl --context "${context}" apply -f "${ROOT}/e2e/scenarios/common/namespaces.yaml"
+  mise exec -- kubectl --context "${context}" apply -k "${ROOT}/e2e/scenarios/${cluster}"
+done
+
+"${ROOT}/e2e/verify"

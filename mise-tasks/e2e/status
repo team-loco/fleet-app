@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+#MISE description="Show all Flux scenario objects in both Fleet clusters"
+set -euo pipefail
+
+CLUSTERS=(fleet-a fleet-b)
+result=0
+
+for cluster in "${CLUSTERS[@]}"; do
+  context="kind-${cluster}"
+  printf '\n%s\n' "${context}"
+  if ! mise exec -- kubectl --context "${context}" get namespace flux-system -o name >/dev/null; then
+    result=1
+    continue
+  fi
+  if ! mise exec -- flux get all -A --context "${context}"; then
+    result=1
+  fi
+done
+exit "${result}"
