@@ -4,11 +4,18 @@ pub mod client;
 pub mod discovery;
 pub mod error;
 pub mod failure;
+pub mod live;
+pub mod manager;
+pub mod metrics;
+pub mod ops;
 pub mod probe;
 pub mod provider;
+pub mod resources;
 pub mod settings;
 pub mod shell_env;
+pub mod snapshot;
 pub mod task;
 pub mod watch;
 
 pub use error::{Error, Result};
+pub use live::LiveBackend;

@@ -23,7 +23,7 @@ name = "fleet"
 path = "src/main.rs"
 
 [features]
-loco = ["dep:fleet-loco", "fleet-core/loco", "fleet-demo/loco", "fleet-ui/loco"]
+loco = ["dep:fleet-loco", "fleet-core/loco", "fleet-demo/loco", "fleet-kube/loco", "fleet-ui/loco"]
 
 [dependencies]
 anyhow.workspace = true
@@ -31,6 +31,7 @@ async-channel.workspace = true
 clap.workspace = true
 fleet-core.workspace = true
 fleet-demo.workspace = true
+fleet-kube.workspace = true
 fleet-loco = { workspace = true, optional = true }
 fleet-ui.workspace = true
 gpui.workspace = true
