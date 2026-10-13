@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -48,7 +49,7 @@ impl Pin {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SavedPreferences {
-    pub namespace_selection: Option<SavedNamespace>,
+    pub namespaces: BTreeMap<String, SavedNamespace>,
     pub default_namespace: Option<String>,
     pub metrics: SavedMetrics,
     pub confirm_destructive: bool,
@@ -72,6 +73,24 @@ pub enum SavedNamespace {
     Named(String),
 }
 
+impl From<&NamespaceSelection> for SavedNamespace {
+    fn from(selection: &NamespaceSelection) -> Self {
+        match selection {
+            NamespaceSelection::All => Self::All,
+            NamespaceSelection::Named(namespace) => Self::Named(namespace.clone()),
+        }
+    }
+}
+
+impl From<&SavedNamespace> for NamespaceSelection {
+    fn from(saved: &SavedNamespace) -> Self {
+        match saved {
+            SavedNamespace::All => Self::All,
+            SavedNamespace::Named(namespace) => Self::Named(namespace.clone()),
+        }
+    }
+}
+
 impl Default for SavedPreferences {
     fn default() -> Self {
         Self::from(&Preferences::default())
@@ -86,14 +105,11 @@ impl From<&Preferences> for SavedPreferences {
             MetricsSource::Prometheus => SavedMetrics::Prometheus,
         };
         Self {
-            namespace_selection: preferences.namespace_selection.as_ref().map(
-                |scope| match scope {
-                    NamespaceSelection::All => SavedNamespace::All,
-                    NamespaceSelection::Named(namespace) => {
-                        SavedNamespace::Named(namespace.clone())
-                    }
-                },
-            ),
+            namespaces: preferences
+                .namespaces
+                .iter()
+                .map(|(list, selection)| (list.clone(), SavedNamespace::from(selection)))
+                .collect(),
             default_namespace: preferences.default_namespace.clone(),
             metrics,
             confirm_destructive: preferences.confirm_destructive,
@@ -111,10 +127,11 @@ impl From<&SavedPreferences> for Preferences {
             SavedMetrics::Prometheus => MetricsSource::Prometheus,
         };
         Self {
-            namespace_selection: saved.namespace_selection.as_ref().map(|scope| match scope {
-                SavedNamespace::All => NamespaceSelection::All,
-                SavedNamespace::Named(namespace) => NamespaceSelection::Named(namespace.clone()),
-            }),
+            namespaces: saved
+                .namespaces
+                .iter()
+                .map(|(list, saved)| (list.clone(), NamespaceSelection::from(saved)))
+                .collect(),
             default_namespace: saved.default_namespace.clone(),
             metrics,
             confirm_destructive: saved.confirm_destructive,
@@ -410,7 +427,7 @@ mod tests {
         let mut store = ClusterStore::empty(dir.path());
         assert!(store.add(&[new_cluster("kind-fleet-a", "fleet-a")]).is_ok());
         let preferences = Preferences {
-            namespace_selection: Some(NamespaceSelection::All),
+            namespaces: BTreeMap::from([("Event".to_owned(), NamespaceSelection::All)]),
             default_namespace: Some("payments".to_owned()),
             metrics: MetricsSource::Prometheus,
             confirm_destructive: false,
@@ -429,10 +446,8 @@ mod tests {
         let saved = reopened.get(&id).map(|c| Preferences::from(&c.preferences));
         assert_eq!(saved, Some(preferences.clone()));
         let mut reopened = reopened;
-        let named = Preferences {
-            namespace_selection: Some(NamespaceSelection::Named("web".into())),
-            ..preferences
-        };
+        let mut named = preferences;
+        named.select_namespace("Pod", NamespaceSelection::Named("web".into()));
         assert!(reopened.set_preferences(&id, &named).is_ok());
         let reopened = ClusterStore::open_at(dir.path(), now())
             .unwrap_or_else(|error| panic!("reopen: {error}"));

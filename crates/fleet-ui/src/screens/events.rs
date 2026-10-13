@@ -1,4 +1,5 @@
 use fleet_core::events::{self, Event, EventFilter, filter_counts, filter_events};
+use fleet_core::resources::EVENT_LIST;
 use fleet_core::settings::NamespaceSelection;
 use fleet_core::time::age;
 use fleet_core::{ClusterDetail, ClusterId, ClusterSummary, Command, Counts, Preferences, Status};
@@ -88,7 +89,7 @@ impl EventsScreen {
             } else {
                 NamespaceSelection::Named(label.to_string())
             };
-            this.preferences.namespace_selection = Some(scope);
+            this.preferences.select_namespace(EVENT_LIST, scope);
             this.selected = None;
             this.refresh(cx);
             if let Some(cluster) = &this.cluster {
@@ -134,7 +135,7 @@ impl EventsScreen {
         self.cluster = Some(cluster.id.clone());
         self.preferences = preferences.clone();
         self.events.clone_from(&detail.events);
-        let scope = self.preferences.namespace_selection();
+        let scope = self.preferences.namespace_selection(EVENT_LIST);
         let mut names = std::collections::BTreeSet::new();
         names.extend(detail.namespaces.iter().map(|ns| ns.name.clone()));
         names.extend(
@@ -159,14 +160,14 @@ impl EventsScreen {
     }
 
     pub fn header_note(&self) -> (Counts, String) {
-        let scope = self.preferences.namespace_selection();
+        let scope = self.preferences.namespace_selection(EVENT_LIST);
         let events = events::in_namespace(&self.events, scope.namespace());
         let counts = events::counts(&events);
         (counts, format!("{} events", events.len()))
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let scope = self.preferences.namespace_selection();
+        let scope = self.preferences.namespace_selection(EVENT_LIST);
         let scoped = events::in_namespace(&self.events, scope.namespace());
         self.sentence = events::sentence(&scoped);
         let (query, chip) = {

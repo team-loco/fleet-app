@@ -62,6 +62,21 @@ pub enum ClusterEvent {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WatchKey {
+    pub kind: WatchKind,
+    pub namespace: Option<String>,
+}
+
+impl WatchKey {
+    fn all(kind: WatchKind) -> Self {
+        Self {
+            kind,
+            namespace: None,
+        }
+    }
+}
+
 struct WatchEntry {
     refs: usize,
     resource: Option<ApiResource>,
@@ -76,8 +91,7 @@ pub(crate) struct Shared {
     status: Mutex<ConnectionStatus>,
     info: Mutex<ClusterInfo>,
     client: Mutex<Option<Client>>,
-    watches: Mutex<HashMap<WatchKind, WatchEntry>>,
-    event_namespace: Mutex<fleet_core::settings::NamespaceSelection>,
+    watches: Mutex<HashMap<WatchKey, WatchEntry>>,
     signals: mpsc::UnboundedSender<Signal>,
     pub(crate) resources: Mutex<HashMap<(String, String), ApiResource>>,
     pub(crate) forwards: Mutex<BTreeMap<u64, crate::ops::ActiveForward>>,
@@ -97,8 +111,9 @@ impl Shared {
         lock(&self.client).clone()
     }
 
-    fn start(&self, kind: &WatchKind, entry: &mut WatchEntry, client: &Client) {
+    fn start(&self, key: &WatchKey, entry: &mut WatchEntry, client: &Client) {
         let signals = self.signals.clone();
+        let kind = &key.kind;
         entry.running = match (kind, &entry.resource) {
             (WatchKind::Custom(custom), Some(resource)) => Some(spawn_custom(
                 &self.runtime,
@@ -108,16 +123,13 @@ impl Shared {
                 signals,
             )),
             (WatchKind::Custom(_), None) => None,
-            (builtin, _) => {
-                let scope = lock(&self.event_namespace).clone();
-                spawn_builtin(
-                    builtin,
-                    &self.runtime,
-                    client.clone(),
-                    signals,
-                    scope.namespace(),
-                )
-            }
+            (builtin, _) => spawn_builtin(
+                builtin,
+                key.namespace.as_deref(),
+                &self.runtime,
+                client.clone(),
+                signals,
+            ),
         };
     }
 
@@ -127,10 +139,10 @@ impl Shared {
         }
         *lock(&self.client) = client.cloned();
         let mut watches = lock(&self.watches);
-        for (kind, entry) in watches.iter_mut() {
+        for (key, entry) in watches.iter_mut() {
             entry.running = None;
             if let Some(client) = client {
-                self.start(kind, entry, client);
+                self.start(key, entry, client);
             }
         }
     }
@@ -153,10 +165,10 @@ impl Shared {
         lock(&self.resources).clear();
     }
 
-    fn subscribe(&self, kind: &WatchKind, resource: Option<ApiResource>) {
+    fn subscribe(&self, key: &WatchKey, resource: Option<ApiResource>) {
         let client = lock(&self.client).clone();
         let mut watches = lock(&self.watches);
-        let entry = watches.entry(kind.clone()).or_insert_with(|| WatchEntry {
+        let entry = watches.entry(key.clone()).or_insert_with(|| WatchEntry {
             refs: 0,
             resource,
             running: None,
@@ -165,37 +177,41 @@ impl Shared {
         if entry.running.is_none()
             && let Some(client) = client
         {
-            self.start(kind, entry, &client);
+            self.start(key, entry, &client);
         }
     }
 
-    fn unsubscribe(&self, kind: &WatchKind) {
+    fn unsubscribe(&self, key: &WatchKey) {
         let mut watches = lock(&self.watches);
-        let remove = watches.get_mut(kind).is_some_and(|entry| {
+        let remove = watches.get_mut(key).is_some_and(|entry| {
             entry.refs = entry.refs.saturating_sub(1);
             entry.refs == 0
         });
         if remove {
-            watches.remove(kind);
+            watches.remove(key);
         }
     }
 }
 
 pub struct Subscription {
     shared: Weak<Shared>,
-    kind: WatchKind,
+    key: WatchKey,
 }
 
 impl Subscription {
     pub fn kind(&self) -> &WatchKind {
-        &self.kind
+        &self.key.kind
+    }
+
+    pub fn namespace(&self) -> Option<&str> {
+        self.key.namespace.as_deref()
     }
 }
 
 impl Drop for Subscription {
     fn drop(&mut self) {
         if let Some(shared) = self.shared.upgrade() {
-            shared.unsubscribe(&self.kind);
+            shared.unsubscribe(&self.key);
         }
     }
 }
@@ -207,25 +223,6 @@ pub struct ClusterHandle {
 }
 
 impl ClusterHandle {
-    pub fn set_event_namespace(&self, scope: fleet_core::settings::NamespaceSelection) {
-        let client = lock(&self.shared.client).clone();
-        let mut watches = lock(&self.shared.watches);
-        {
-            let mut current = lock(&self.shared.event_namespace);
-            if *current == scope {
-                return;
-            }
-            *current = scope;
-        }
-        if let Some(entry) = watches.get_mut(&WatchKind::FilteredEvents) {
-            entry.running = None;
-            if let Some(client) = client {
-                self.shared
-                    .start(&WatchKind::FilteredEvents, entry, &client);
-            }
-        }
-    }
-
     pub fn close(&self) {
         self.shared.close();
     }
@@ -262,50 +259,29 @@ impl ClusterHandle {
     }
 
     pub fn subscribe(&self, kind: WatchKind) -> Subscription {
-        self.shared.subscribe(&kind, None);
+        self.subscribe_key(WatchKey::all(kind))
+    }
+
+    pub fn subscribe_in(&self, kind: WatchKind, namespace: Option<String>) -> Subscription {
+        self.subscribe_key(WatchKey { kind, namespace })
+    }
+
+    fn subscribe_key(&self, key: WatchKey) -> Subscription {
+        self.shared.subscribe(&key, None);
         Subscription {
             shared: Arc::downgrade(&self.shared),
-            kind,
+            key,
         }
     }
 
     pub async fn subscribe_custom(&self, kind: CustomKind) -> Result<Subscription> {
         let resource = self.resolve_custom(&kind).await?;
-        let watch_kind = WatchKind::Custom(kind);
-        self.shared.subscribe(&watch_kind, Some(resource));
+        let key = WatchKey::all(WatchKind::Custom(kind));
+        self.shared.subscribe(&key, Some(resource));
         Ok(Subscription {
             shared: Arc::downgrade(&self.shared),
-            kind: watch_kind,
+            key,
         })
-    }
-
-    pub fn event_objects(&self) -> Vec<Arc<k8s_openapi::api::core::v1::Event>> {
-        use k8s_openapi::api::core::v1::Event;
-        let mut events: BTreeMap<_, _> = self
-            .objects::<Event>()
-            .into_iter()
-            .map(|event| {
-                let key = (
-                    event.metadata.namespace.clone(),
-                    event.metadata.name.clone(),
-                );
-                (key, event)
-            })
-            .collect();
-        let watches = lock(&self.shared.watches);
-        if let Some(running) = watches
-            .get(&WatchKind::FilteredEvents)
-            .and_then(|entry| entry.running.as_ref())
-        {
-            for event in snapshot::<Event>(running) {
-                let key = (
-                    event.metadata.namespace.clone(),
-                    event.metadata.name.clone(),
-                );
-                events.insert(key, event);
-            }
-        }
-        events.into_values().collect()
     }
 
     pub fn objects<K: Watched>(&self) -> Vec<Arc<K>>
@@ -313,23 +289,43 @@ impl ClusterHandle {
         K::DynamicType: Eq + std::hash::Hash + Clone,
     {
         let watches = lock(&self.shared.watches);
+        if let Some(all) = watches.get(&WatchKey::all(K::KIND)) {
+            return all.running.as_ref().map(snapshot::<K>).unwrap_or_default();
+        }
         watches
-            .get(&K::KIND)
-            .and_then(|entry| entry.running.as_ref())
-            .map(snapshot::<K>)
-            .unwrap_or_default()
+            .iter()
+            .filter(|(key, _)| key.kind == K::KIND)
+            .filter_map(|(_, entry)| entry.running.as_ref())
+            .flat_map(snapshot::<K>)
+            .collect()
     }
 
     pub fn custom_objects(&self, kind: &CustomKind) -> Vec<Arc<DynamicObject>> {
         let watches = lock(&self.shared.watches);
         watches
-            .get(&WatchKind::Custom(kind.clone()))
+            .get(&WatchKey::all(WatchKind::Custom(kind.clone())))
             .and_then(|entry| entry.running.as_ref())
             .map(custom_snapshot)
             .unwrap_or_default()
     }
 
     pub fn watched_kinds(&self) -> Vec<WatchKind> {
+        let kinds: BTreeSet<WatchKind> = lock(&self.shared.watches)
+            .keys()
+            .map(|key| key.kind.clone())
+            .collect();
+        kinds.into_iter().collect()
+    }
+
+    pub fn cluster_wide_kinds(&self) -> Vec<WatchKind> {
+        lock(&self.shared.watches)
+            .keys()
+            .filter(|key| key.namespace.is_none())
+            .map(|key| key.kind.clone())
+            .collect()
+    }
+
+    pub fn watched_keys(&self) -> Vec<WatchKey> {
         lock(&self.shared.watches).keys().cloned().collect()
     }
 }
@@ -545,7 +541,6 @@ impl ClusterManager {
             runtime: self.runtime.clone(),
             env: self.env.clone(),
             settings: self.settings.clone(),
-            event_namespace: Mutex::new(fleet_core::Preferences::default().namespace_selection()),
             status: Mutex::new(ConnectionStatus::Connecting),
             info: Mutex::new(info),
             client: Mutex::new(None),
@@ -595,58 +590,46 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn event_scope_is_per_cluster_and_preserves_other_subscriptions() {
+    async fn namespaced_watches_are_separate_from_cluster_wide_ones() {
         let runtime = Handle::current();
         let env = Arc::new(ShellEnv::from_process(String::new()));
         let (manager, _) = ClusterManager::new(runtime, KubeSettings::default(), env);
-        let context = |name: &str| KubeContext {
+        let handle = manager.connect(KubeContext {
             trust: crate::discovery::Fingerprint::default(),
             credentials: crate::discovery::Fingerprint::default(),
             id: ContextRef {
                 file: std::path::PathBuf::from("/missing/test-kubeconfig"),
-                context: name.into(),
+                context: "first".into(),
             },
-            cluster: name.into(),
+            cluster: "first".into(),
             user: None,
             namespace: None,
             server: None,
             provider: Provider::Generic,
             auth: crate::provider::AuthKind::None,
             is_current: false,
+        });
+        let scoped = handle.subscribe_in(WatchKind::Events, Some("payments".into()));
+        let again = handle.subscribe_in(WatchKind::Events, Some("payments".into()));
+        let everywhere = handle.subscribe(WatchKind::Events);
+        let refs = |namespace: Option<&str>| {
+            lock(&handle.shared.watches)
+                .get(&WatchKey {
+                    kind: WatchKind::Events,
+                    namespace: namespace.map(str::to_owned),
+                })
+                .map(|entry| entry.refs)
         };
-        let first = manager.connect(context("first"));
-        let second = manager.connect(context("second"));
-        let filtered = first.subscribe(WatchKind::FilteredEvents);
-        let unfiltered = first.subscribe(WatchKind::Events);
-        first.set_event_namespace(fleet_core::settings::NamespaceSelection::Named(
-            "payments".into(),
-        ));
-        assert_eq!(
-            lock(&first.shared.event_namespace).namespace(),
-            Some("payments")
-        );
-        assert_eq!(
-            lock(&second.shared.event_namespace).namespace(),
-            Some("default")
-        );
-        assert_eq!(
-            lock(&first.shared.watches)
-                .get(&WatchKind::Events)
-                .map(|entry| entry.refs),
-            Some(1)
-        );
-        assert_eq!(
-            lock(&first.shared.watches)
-                .get(&WatchKind::FilteredEvents)
-                .map(|entry| entry.refs),
-            Some(1)
-        );
-        first.set_event_namespace(fleet_core::settings::NamespaceSelection::All);
-        assert_eq!(lock(&first.shared.event_namespace).namespace(), None);
-        drop(filtered);
-        assert!(!lock(&first.shared.watches).contains_key(&WatchKind::FilteredEvents));
-        assert!(lock(&first.shared.watches).contains_key(&WatchKind::Events));
-        drop(unfiltered);
+        assert_eq!(refs(Some("payments")), Some(2));
+        assert_eq!(refs(None), Some(1));
+        assert_eq!(scoped.namespace(), Some("payments"));
+        assert_eq!(handle.watched_kinds(), [WatchKind::Events]);
+        assert_eq!(handle.cluster_wide_kinds(), [WatchKind::Events]);
+        drop(everywhere);
+        assert_eq!(handle.cluster_wide_kinds(), Vec::<WatchKind>::new());
+        drop(scoped);
+        drop(again);
+        assert_eq!(handle.watched_kinds(), Vec::<WatchKind>::new());
     }
 
     #[test]

@@ -101,7 +101,7 @@ impl ClusterPages {
             other => {
                 if let Some(kind) = ResourceKind::for_page(other) {
                     self.resources.update(cx, |screen, cx| {
-                        screen.set(cluster, kind, detail, confirm_destructive, cx);
+                        screen.set(cluster, kind, detail, confirm_destructive, preferences, cx);
                     });
                 }
             }

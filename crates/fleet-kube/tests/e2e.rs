@@ -308,6 +308,13 @@ fn live_backend_publishes_kind_cluster() {
     let (updates_tx, updates) = async_channel::unbounded();
     let (commands, commands_rx) = async_channel::unbounded();
     Box::new(backend).start(updates_tx, commands_rx);
+    let mut everywhere = fleet_core::Preferences::default();
+    everywhere.select_namespace(
+        fleet_core::ResourceKind::Deployment.name(),
+        fleet_core::settings::NamespaceSelection::All,
+    );
+    let all_namespaces = Command::SetPreferences(ClusterId::new(CONTEXT), everywhere);
+    assert!(commands.send_blocking(all_namespaces).is_ok());
     let select = Command::SelectCluster(Some(ClusterId::new(CONTEXT)));
     assert!(commands.send_blocking(select).is_ok());
     let page = Command::SelectPage(Page::Deployments);
@@ -335,4 +342,141 @@ fn live_backend_publishes_kind_cluster() {
             return;
         }
     }
+}
+
+const SCOPED_NAMESPACE: &str = "kube-system";
+const OTHER_NAMESPACE: &str = "flux-system";
+
+fn deployment_namespaces(snapshot: &fleet_core::Snapshot) -> Vec<String> {
+    let mut namespaces: Vec<String> = snapshot
+        .detail(&ClusterId::new(CONTEXT))
+        .map(|detail| detail.resources(fleet_core::ResourceKind::Deployment))
+        .unwrap_or_default()
+        .iter()
+        .map(|row| row.namespace.clone())
+        .collect();
+    namespaces.sort();
+    namespaces.dedup();
+    namespaces
+}
+
+fn wait_for(
+    updates: &async_channel::Receiver<Update>,
+    what: &str,
+    done: impl Fn(&[String]) -> bool,
+) {
+    let deadline = std::time::Instant::now() + WAIT;
+    let mut last = Vec::new();
+    while std::time::Instant::now() < deadline {
+        let Ok(Update::Snapshot(snapshot)) = updates.recv_blocking() else {
+            panic!("backend stopped");
+        };
+        last = deployment_namespaces(&snapshot);
+        if done(&last) {
+            return;
+        }
+    }
+    panic!("{what}; last deployment namespaces: {last:?}");
+}
+
+#[test]
+fn live_backend_watches_only_the_chosen_namespace() {
+    if !enabled() {
+        return;
+    }
+    let Some(context) = kind_context() else {
+        return;
+    };
+    let home = kind_only_home(&context);
+    let sources = DiscoverySources {
+        kubeconfig_env: None,
+        home: Some(home.path().to_path_buf()),
+        folders: Vec::new(),
+    };
+    let mut store = ClusterStore::empty(&home.path().join(SUPPORT_DIR));
+    let added = NewCluster {
+        context: ContextRef {
+            file: home.path().join(".kube").join("config"),
+            context: CONTEXT.to_owned(),
+        },
+        name: CONTEXT.to_owned(),
+    };
+    assert!(store.add(&[added]).is_ok());
+    let backend = LiveBackend::new(KubeSettings::default(), sources, store);
+    let (updates_tx, updates) = async_channel::unbounded();
+    let (commands, commands_rx) = async_channel::unbounded();
+    Box::new(backend).start(updates_tx, commands_rx);
+    let cluster = ClusterId::new(CONTEXT);
+    let choose = |namespace: Option<&str>| {
+        let mut preferences = fleet_core::Preferences::default();
+        preferences.select_namespace(
+            fleet_core::ResourceKind::Deployment.name(),
+            fleet_core::settings::NamespaceSelection::of(namespace),
+        );
+        Command::SetPreferences(cluster.clone(), preferences)
+    };
+    for command in [
+        choose(Some(SCOPED_NAMESPACE)),
+        Command::SelectCluster(Some(cluster.clone())),
+        Command::SelectPage(Page::Deployments),
+    ] {
+        assert!(commands.send_blocking(command).is_ok());
+    }
+    wait_for(&updates, "only kube-system deployments", |namespaces| {
+        namespaces == [SCOPED_NAMESPACE]
+    });
+    assert!(commands.send_blocking(choose(None)).is_ok());
+    wait_for(&updates, "deployments from every namespace", |namespaces| {
+        namespaces.iter().any(|ns| ns == OTHER_NAMESPACE)
+            && namespaces.iter().any(|ns| ns == SCOPED_NAMESPACE)
+    });
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn namespaced_watches_list_one_namespace_beside_cluster_wide_ones() {
+    if !enabled() {
+        return;
+    }
+    let Some(context) = kind_context() else {
+        return;
+    };
+    let env = Arc::new(ShellEnv::from_process(String::new()));
+    let runtime = tokio::runtime::Handle::current();
+    let (manager, _events) = ClusterManager::new(runtime, KubeSettings::default(), env);
+    let handle = connected(&manager, context).await;
+    let scoped = handle.subscribe_in(WatchKind::Deployments, Some(SCOPED_NAMESPACE.to_owned()));
+    assert_eq!(scoped.namespace(), Some(SCOPED_NAMESPACE));
+    let namespaces = || {
+        let mut found: Vec<String> = handle
+            .objects::<k8s_openapi::api::apps::v1::Deployment>()
+            .iter()
+            .filter_map(|d| d.metadata.namespace.clone())
+            .collect();
+        found.sort();
+        found.dedup();
+        found
+    };
+    eventually(
+        "scoped deployments",
+        || async { namespaces() },
+        |found| found == &[SCOPED_NAMESPACE],
+    )
+    .await;
+    assert_eq!(handle.cluster_wide_kinds(), Vec::<WatchKind>::new());
+    let everywhere = handle.subscribe(WatchKind::Deployments);
+    eventually(
+        "every deployment",
+        || async { namespaces() },
+        |found| found.iter().any(|ns| ns == OTHER_NAMESPACE),
+    )
+    .await;
+    drop(everywhere);
+    eventually(
+        "back to one namespace",
+        || async { namespaces() },
+        |found| found == &[SCOPED_NAMESPACE],
+    )
+    .await;
+    drop(scoped);
+    assert_eq!(handle.watched_kinds(), Vec::<WatchKind>::new());
 }

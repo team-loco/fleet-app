@@ -8,6 +8,7 @@ use fleet_core::add_cluster::home_relative;
 use fleet_core::app_settings::DEFAULT_SNAPSHOTS;
 use fleet_core::home::problems_badge;
 use fleet_core::resource::page_for_kind;
+use fleet_core::resources::namespaced_list;
 use fleet_core::settings::{Auth, ClusterSettings, Connection, ContextChange};
 use fleet_core::stream::Sink;
 use fleet_core::{
@@ -38,7 +39,7 @@ use crate::provider::AuthKind;
 use crate::resources::WatchKind;
 use crate::settings::KubeSettings;
 use crate::shell_env::{ShellEnv, capture, user_shell};
-use crate::snapshot::page_kinds;
+use crate::snapshot::page_watches;
 use crate::store::{ClusterStore, Pin, SavedCluster, SavedPreferences};
 use crate::task::TaskGuard;
 use crate::throttle::Throttle;
@@ -309,29 +310,35 @@ impl Live {
             .map(|(key, _)| key.clone())
     }
 
-    fn resubscribe_page(&mut self) {
-        if let Some(handle) = self.selected_handle() {
-            let saved = self
-                .navigation
-                .selected
-                .as_ref()
-                .and_then(|id| self.store.get(id));
-            let mut preferences = saved
-                .map(|cluster| Preferences::from(&cluster.preferences))
-                .unwrap_or_default();
-            if preferences.default_namespace.is_none() {
-                preferences
-                    .default_namespace
-                    .clone_from(&handle.context().namespace);
-            }
-            handle.set_event_namespace(preferences.namespace_selection());
+    fn list_namespace(&self, handle: &ClusterHandle) -> Option<String> {
+        let list = namespaced_list(self.navigation.page)?;
+        let saved = self
+            .navigation
+            .selected
+            .as_ref()
+            .and_then(|id| self.store.get(id));
+        let mut preferences = saved
+            .map(|cluster| Preferences::from(&cluster.preferences))
+            .unwrap_or_default();
+        if preferences.default_namespace.is_none() {
+            preferences
+                .default_namespace
+                .clone_from(&handle.context().namespace);
         }
+        preferences
+            .namespace_selection(list)
+            .namespace()
+            .map(str::to_owned)
+    }
+
+    fn resubscribe_page(&mut self) {
         let subscriptions = self
             .selected_handle()
             .map(|handle| {
-                page_kinds(self.navigation.page)
+                let namespace = self.list_namespace(handle);
+                page_watches(self.navigation.page, namespace.as_deref())
                     .into_iter()
-                    .map(|kind| handle.subscribe(kind))
+                    .map(|(kind, namespace)| handle.subscribe_in(kind, namespace))
                     .collect()
             })
             .unwrap_or_default();
@@ -842,8 +849,8 @@ impl Live {
     fn set_preferences(&mut self, id: &ClusterId, preferences: &Preferences) -> bool {
         match self.store.set_preferences(id, preferences) {
             Ok(changed) => {
-                if changed && let Some(handle) = self.handle(id) {
-                    handle.set_event_namespace(preferences.namespace_selection());
+                if changed {
+                    self.for_each_window(Self::resubscribe_page);
                 }
                 changed
             }

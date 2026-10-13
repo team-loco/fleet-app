@@ -326,16 +326,20 @@ impl Shell {
             .update(cx, |switcher, cx| switcher.show(window, cx));
     }
 
+    fn cluster_preferences(&self) -> fleet_core::Preferences {
+        self.selected_cluster()
+            .and_then(|cluster| self.state.snapshot.catalog.get(&cluster.id))
+            .map(|settings| settings.preferences.clone())
+            .unwrap_or_default()
+    }
+
     fn sync_pages(&self, cx: &mut Context<Self>) {
         let cluster = self.selected_cluster();
         let detail = cluster.and_then(|c| self.state.snapshot.detail(&c.id));
         let confirm_destructive = cluster
             .and_then(|c| self.state.snapshot.catalog.get(&c.id))
             .is_none_or(|settings| settings.preferences.confirm_destructive);
-        let preferences = cluster
-            .and_then(|cluster| self.state.snapshot.catalog.get(&cluster.id))
-            .map(|settings| settings.preferences.clone())
-            .unwrap_or_default();
+        let preferences = self.cluster_preferences();
         self.pages.sync(
             self.state.page,
             cluster,
@@ -495,8 +499,10 @@ impl Shell {
         });
         let cluster = self.state.cluster.as_ref();
         let resource = self.state.resource.as_ref();
-        self.pods
-            .update(cx, |pods, cx| pods.set_context(cluster, resource, cx));
+        let preferences = self.cluster_preferences();
+        self.pods.update(cx, |pods, cx| {
+            pods.set_context(cluster, resource, &preferences, cx);
+        });
         if let Some((screen, _)) = &self.workload {
             self.sync_workload_yaml(screen, cx);
         }
