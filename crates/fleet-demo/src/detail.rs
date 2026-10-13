@@ -4,7 +4,7 @@ use fleet_core::cluster::Namespace;
 use fleet_core::events::Event;
 use fleet_core::nodes::{CONDITION_TRUE, Node, NodeCondition, READY_CONDITION, Usage};
 use fleet_core::overview::{Commitment, Overview, PodPhases, TimeRange, Utilization};
-use fleet_core::{ClusterDetail, Counts, Status};
+use fleet_core::{ClusterDetail, Counts, Status, Uid};
 
 use crate::lists;
 
@@ -283,6 +283,7 @@ fn node(seed: &NodeSeed) -> Node {
     };
     let internal_ip = seed.name.trim_start_matches("ip-").replace('-', ".");
     Node {
+        uid: Uid::default(),
         name: seed.name.into(),
         status,
         state: state.into(),

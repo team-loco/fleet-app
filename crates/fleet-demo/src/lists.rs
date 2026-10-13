@@ -3,6 +3,7 @@ use std::fmt::Write as _;
 use std::time::Duration;
 
 use fleet_core::Status;
+use fleet_core::Uid;
 use fleet_core::resources::{Resource, ResourceKind};
 use fleet_core::time::age;
 
@@ -992,6 +993,7 @@ fn row(
     body: &str,
 ) -> Resource {
     Resource {
+        uid: Uid::default(),
         namespace: ns.into(),
         name: name.into(),
         status,

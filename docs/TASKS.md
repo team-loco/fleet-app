@@ -67,3 +67,4 @@ Spec column points at `design/`.
 | SET1 | app settings ⌘, : theme, data refresh, notifications (#112) | claude | settings-and-keys | done |
 | TBL1 | resizable table columns remembered per cluster, one FilterBar on every list, popovers occlude hover (#115, #116, #118) | claude | tables-and-filters | done |
 | KEYS1 | VS Code-familiar bindings, one binding table, history, full keyboard navigation (#114) | claude | keyboard | done |
+| SAFE1 | confirmed mutations carry the UID of the object the user saw; drain evicts by UID (#103, #104) | claude | mutation-safety | done |

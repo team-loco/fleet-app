@@ -4,7 +4,7 @@ use fleet_core::flux::{
     FluxDetail, HelmDetail, HelmRevision, HistoryEntry, ManagedObject, Phase, Revision, Sentence,
     SourceDetail, SpecRow,
 };
-use fleet_core::{ClusterId, FluxKey, FluxKind, FluxObject, Status};
+use fleet_core::{ClusterId, FluxKey, FluxKind, FluxObject, Status, Uid};
 use fleet_flux::revision::{self, short};
 use fleet_flux::{GitOpsObject, InventoryEntry, ObjectKind, Summary, redact, summarize};
 use jiff::Timestamp;
@@ -20,6 +20,7 @@ const VALUES_MAX: usize = 40;
 const DEFAULT_BRANCH: &str = "master";
 const DEPLOYED: &str = "deployed";
 const SUCCEEDED_SUFFIX: &str = "Succeeded";
+const UID_POINTER: &str = "/metadata/uid";
 const SUSPENDED_SENTENCE: &str =
     "Reconciliation is suspended, so Flux applies nothing here until it is resumed.";
 
@@ -198,8 +199,15 @@ pub fn flux_object(parsed: &Parsed, inputs: Inputs<'_>) -> Option<FluxObject> {
         .unwrap_or_else(|| reconcile_history(parsed, now));
     let sentence = sentence(parsed, &summary, applied.as_ref());
     let detail = detail(parsed, now, inputs.releases);
+    let uid = parsed
+        .raw
+        .pointer(UID_POINTER)
+        .and_then(Value::as_str)
+        .map(Uid::new)
+        .unwrap_or_default();
     Some(FluxObject {
         key,
+        uid,
         phase,
         sentence,
         applied,

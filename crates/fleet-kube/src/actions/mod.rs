@@ -58,14 +58,14 @@ pub fn cluster_of(command: &Command) -> Option<&ClusterId> {
         Command::StreamLogs(request) => Some(&request.pod.cluster),
         Command::Exec(request) => Some(&request.target.pod.cluster),
         Command::PortForward { service, .. } => Some(&service.cluster),
-        Command::Cordon(target) => Some(&target.cluster),
-        Command::Uncordon(target) => Some(&target.cluster),
-        Command::Drain(target) => Some(&target.cluster),
-        Command::Delete(target) => Some(&target.cluster),
-        Command::RestartRollout(target) => Some(&target.cluster),
-        Command::Scale { target, .. } => Some(&target.cluster),
-        Command::Rollback { target, .. } => Some(&target.cluster),
-        Command::Flux(key, _) => Some(&key.cluster),
+        Command::Cordon(seen) => Some(&seen.target.cluster),
+        Command::Uncordon(seen) => Some(&seen.target.cluster),
+        Command::Drain(seen) => Some(&seen.target.cluster),
+        Command::Delete(seen) => Some(&seen.target.cluster),
+        Command::RestartRollout(seen) => Some(&seen.target.cluster),
+        Command::Scale { target, .. } => Some(&target.target.cluster),
+        Command::Rollback { target, .. } => Some(&target.target.cluster),
+        Command::Flux(key, ..) => Some(&key.cluster),
         _ => None,
     }
 }
@@ -260,34 +260,36 @@ impl Actions {
 
 async fn perform(handle: &ClusterHandle, mutation: &Mutation) -> Result<Vec<drain::Blocked>> {
     match mutation {
-        Mutation::Cordon(target) => mutate::cordon(handle, target, true).await?,
-        Mutation::Uncordon(target) => mutate::cordon(handle, target, false).await?,
-        Mutation::Drain(target) => {
-            mutate::cordon(handle, target, true).await?;
-            return drain::drain(handle, &target.name).await;
+        Mutation::Cordon(seen) => mutate::cordon(handle, seen, true).await?,
+        Mutation::Uncordon(seen) => mutate::cordon(handle, seen, false).await?,
+        Mutation::Drain(seen) => {
+            mutate::cordon(handle, seen, true).await?;
+            return drain::drain(handle, &seen.target.name).await;
         }
-        Mutation::Delete(target) => mutate::delete(handle, target).await?,
-        Mutation::Restart(target) => mutate::restart(handle, target).await?,
-        Mutation::Scale(target, replicas) => mutate::scale(handle, target, *replicas).await?,
-        Mutation::Rollback(target, revision) => {
+        Mutation::Delete(seen) => mutate::delete(handle, seen).await?,
+        Mutation::Restart(seen) => mutate::restart(handle, seen).await?,
+        Mutation::Scale(seen, replicas) => mutate::scale(handle, seen, *replicas).await?,
+        Mutation::Rollback(seen, revision) => {
+            let target = &seen.target;
             let namespace = target
                 .namespace
                 .as_deref()
                 .ok_or(Error::MissingField("metadata.namespace"))?;
             if target.kind == rollout::DEPLOYMENT {
-                rollout::rollback(handle, namespace, &target.name, *revision).await?;
+                rollout::rollback(handle, namespace, &target.name, &seen.uid, *revision).await?;
             } else {
                 rollout::rollback_controller(
                     handle,
                     &target.kind,
                     namespace,
                     &target.name,
+                    &seen.uid,
                     *revision,
                 )
                 .await?;
             }
         }
-        Mutation::Flux(key, action) => mutate::flux(handle, key, *action).await?,
+        Mutation::Flux(key, uid, action) => mutate::flux(handle, key, uid, *action).await?,
         Mutation::CopySpec {
             target, template, ..
         } => mutate::replace_template(handle, target, template).await?,

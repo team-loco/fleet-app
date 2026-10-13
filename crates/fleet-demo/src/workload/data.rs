@@ -4,7 +4,7 @@ use fleet_core::workload::{
     Commit, ContainerSpec, ContainerStatus, EnvResolution, EnvSource, EnvVar, Event, Exit, Pod,
     Port, Probe, ProbeAction, Resources, Revision,
 };
-use fleet_core::{ClusterId, ResourceRef, Status, Workload, WorkloadKind};
+use fleet_core::{ClusterId, ResourceRef, Status, Uid, Workload, WorkloadKind};
 
 pub const CLUSTER: &str = "prod-us-east";
 pub const NAMESPACE: &str = "payments";
@@ -41,6 +41,7 @@ pub fn target() -> ResourceRef {
 
 pub fn checkout_api() -> Workload {
     Workload {
+        uid: Uid::default(),
         target: target(),
         kind: WorkloadKind::Deployment,
         desired: DESIRED,

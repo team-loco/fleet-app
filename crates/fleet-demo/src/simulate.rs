@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use fleet_core::nodes::Node;
 use fleet_core::{
-    ClusterDetail, ClusterId, Command, Counts, Forward, Page, ResourceKind, ResourceRef, Snapshot,
-    Status,
+    ClusterDetail, ClusterId, Command, Counts, Forward, Page, ResourceKind, ResourceRef, Seen,
+    Snapshot, Status,
 };
 
 use crate::detail::{READY, SCHEDULING_DISABLED};
@@ -30,23 +30,25 @@ pub enum Settle {
 
 pub fn apply(snapshot: &mut Snapshot, command: &Command) -> Option<Settle> {
     match command {
-        Command::Cordon(target) => {
+        Command::Cordon(Seen { target, .. }) => {
             mark_node(snapshot, target, "Cordoning")?;
             Some(Settle::Cordoned(target.clone()))
         }
-        Command::Uncordon(target) => {
+        Command::Uncordon(Seen { target, .. }) => {
             mark_node(snapshot, target, "Uncordoning")?;
             Some(Settle::Uncordoned(target.clone()))
         }
-        Command::Drain(target) => {
+        Command::Drain(Seen { target, .. }) => {
             mark_node(snapshot, target, "Draining")?;
             Some(Settle::Drained(target.clone()))
         }
-        Command::Delete(target) if crate::pods::terminate(&mut snapshot.pods, target) => {
+        Command::Delete(Seen { target, .. })
+            if crate::pods::terminate(&mut snapshot.pods, target) =>
+        {
             recount_pods(snapshot, &target.cluster);
             Some(Settle::PodReplaced(target.clone()))
         }
-        Command::Delete(target) => {
+        Command::Delete(Seen { target, .. }) => {
             let resource = find_resource(snapshot, target)?;
             resource.status = Status::Progress;
             Some(Settle::Deleted(target.clone()))
@@ -244,7 +246,7 @@ fn remove_resource(snapshot: &mut Snapshot, target: &ResourceRef) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fleet_core::ClusterId;
+    use fleet_core::{ClusterId, Uid};
 
     const CLUSTER: &str = "prod-us-east";
 
@@ -257,6 +259,10 @@ mod tests {
         }
     }
 
+    fn seen(target: ResourceRef) -> Seen {
+        Seen::new(target, Uid::default())
+    }
+
     fn node(snapshot: &Snapshot, name: &str) -> Node {
         let detail = snapshot.detail(&ClusterId::new(CLUSTER));
         let found = detail.and_then(|d| d.nodes.iter().find(|n| n.name == name).cloned());
@@ -267,7 +273,7 @@ mod tests {
     fn cordon_goes_through_progress_then_disables_scheduling() {
         let mut snapshot = crate::snapshot();
         let target = node_ref("ip-10-4-12-87");
-        let pending = apply(&mut snapshot, &Command::Cordon(target.clone()));
+        let pending = apply(&mut snapshot, &Command::Cordon(seen(target.clone())));
         assert_eq!(pending, Some(Settle::Cordoned(target.clone())));
         assert_eq!(node(&snapshot, "ip-10-4-12-87").status, Status::Progress);
         settle(&mut snapshot, &Settle::Cordoned(target));
@@ -282,7 +288,7 @@ mod tests {
     fn uncordon_restores_ready() {
         let mut snapshot = crate::snapshot();
         let target = node_ref("ip-10-4-31-12");
-        let pending = apply(&mut snapshot, &Command::Uncordon(target.clone()));
+        let pending = apply(&mut snapshot, &Command::Uncordon(seen(target.clone())));
         let Some(pending) = pending else {
             panic!("uncordon should settle");
         };
@@ -301,7 +307,7 @@ mod tests {
     fn drain_evicts_all_but_daemon_pods() {
         let mut snapshot = crate::snapshot();
         let target = node_ref("ip-10-4-30-5");
-        apply(&mut snapshot, &Command::Drain(target.clone()));
+        apply(&mut snapshot, &Command::Drain(seen(target.clone())));
         settle(&mut snapshot, &Settle::Drained(target));
         let node = node(&snapshot, "ip-10-4-30-5");
         assert_eq!(node.pods, DAEMON_PODS);
@@ -318,7 +324,7 @@ mod tests {
             namespace: Some("payments".into()),
             name: "checkout-api-config".into(),
         };
-        let pending = apply(&mut snapshot, &Command::Delete(target.clone()));
+        let pending = apply(&mut snapshot, &Command::Delete(seen(target.clone())));
         assert_eq!(pending, Some(Settle::Deleted(target.clone())));
         settle(&mut snapshot, &Settle::Deleted(target));
         let rows = snapshot
@@ -365,7 +371,7 @@ mod tests {
         let mut snapshot = crate::snapshot();
         let before = snapshot.clone();
         assert_eq!(
-            apply(&mut snapshot, &Command::Cordon(node_ref("nope"))),
+            apply(&mut snapshot, &Command::Cordon(seen(node_ref("nope")))),
             None
         );
         assert_eq!(apply(&mut snapshot, &Command::ToggleSidebar), None);

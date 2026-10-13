@@ -6,6 +6,8 @@ pub enum Error {
     Kubeconfig { path: PathBuf, reason: String },
     #[error(transparent)]
     Kube(#[from] kube::Error),
+    #[error("request: {0}")]
+    Http(#[from] http::Error),
     #[error("watching kubeconfig files: {0}")]
     Notify(#[from] notify::Error),
     #[error("cluster is not connected")]
@@ -50,6 +52,10 @@ pub enum Error {
     KubeconfigExists(String),
     #[error("{0} is not a folder.")]
     NotAFolder(PathBuf),
+    #[error(
+        "{kind}/{name} was replaced after you confirmed, so nothing was changed. Review the new one and try again."
+    )]
+    Replaced { kind: String, name: String },
     #[error("debug container {name} did not start: {reason}")]
     DebugContainer { name: String, reason: String },
 }

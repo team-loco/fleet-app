@@ -2,7 +2,9 @@ use fleet_core::filter::StatusFilter;
 use fleet_core::nodes::{Node, NodeSummary, Usage, sentence};
 use fleet_core::overview::{number, percent};
 use fleet_core::time::age;
-use fleet_core::{ClusterDetail, ClusterId, ClusterSummary, Command, Counts, ResourceRef, Status};
+use fleet_core::{
+    ClusterDetail, ClusterId, ClusterSummary, Command, Counts, ResourceRef, Seen, Status,
+};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, Hsla, IntoElement, ParentElement,
     Pixels, Render, SharedString, Styled, WeakEntity, Window, div, px,
@@ -217,14 +219,15 @@ impl NodesScreen {
         self.nodes.iter().find(|n| &n.name == name)
     }
 
-    fn target(&self, node: &Node) -> Option<ResourceRef> {
+    fn target(&self, node: &Node) -> Option<Seen> {
         let cluster = self.cluster.clone()?;
-        Some(ResourceRef {
+        let target = ResourceRef {
             cluster,
             kind: NODE_KIND.into(),
             namespace: None,
             name: node.name.clone(),
-        })
+        };
+        Some(Seen::new(target, node.uid.clone()))
     }
 
     fn refresh_menu(&mut self, cx: &mut Context<Self>) {
@@ -374,11 +377,11 @@ impl Render for NodesScreen {
 }
 
 fn drain_items(
-    target: ResourceRef,
+    target: Seen,
     confirm_destructive: bool,
     screen: WeakEntity<NodesScreen>,
 ) -> Vec<MenuItem> {
-    let detail = format!("{} · {}", target.cluster, target.name);
+    let detail = format!("{} · {}", target.target.cluster, target.target.name);
     vec![
         MenuItem::new("Drain…", move |window, cx| {
             let screen = screen.clone();

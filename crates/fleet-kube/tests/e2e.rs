@@ -210,13 +210,13 @@ async fn check_patch_yaml_apply(handle: &ClusterHandle) {
     let configmap = object_ref::<ConfigMap>(Some(NAMESPACE), CONFIGMAP);
     assert!(
         handle
-            .delete(&configmap, PropagationPolicy::Background)
+            .delete(&configmap, PropagationPolicy::Background, None)
             .await
             .is_ok()
     );
     assert!(
         handle
-            .delete(&target, PropagationPolicy::Background)
+            .delete(&target, PropagationPolicy::Background, None)
             .await
             .is_ok()
     );

@@ -39,6 +39,31 @@ impl fmt::Display for ResourceRef {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Uid(String);
+
+impl Uid {
+    pub fn new(uid: impl Into<String>) -> Self {
+        Self(uid.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Seen {
+    pub target: ResourceRef,
+    pub uid: Uid,
+}
+
+impl Seen {
+    pub fn new(target: ResourceRef, uid: Uid) -> Self {
+        Self { target, uid }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

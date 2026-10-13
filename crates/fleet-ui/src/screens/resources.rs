@@ -4,7 +4,8 @@ use fleet_core::filter::StatusFilter;
 use fleet_core::resources::{Resource, filter_counts, filter_resources, namespaces_of, sentence};
 use fleet_core::time::age;
 use fleet_core::{
-    ClusterDetail, ClusterId, ClusterSummary, Command, Counts, ResourceKind, ResourceRef, Status,
+    ClusterDetail, ClusterId, ClusterSummary, Command, Counts, ResourceKind, ResourceRef, Seen,
+    Status,
 };
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
@@ -377,21 +378,17 @@ impl ResourcesScreen {
                 namespace: Some(row.namespace.clone()),
                 name: row.name.clone(),
             };
-            delete_items(kind, target, confirm_destructive, screen.clone())
+            let seen = Seen::new(target, row.uid.clone());
+            delete_items(kind, seen, confirm_destructive, screen.clone())
         }
     }
 
     fn refresh_menu(&mut self, cx: &mut Context<Self>) {
-        let target = self.selected_row().and_then(|r| self.target(r));
-        let items = target
-            .map(|target| {
-                delete_items(
-                    self.kind,
-                    target,
-                    self.confirm_destructive,
-                    cx.weak_entity(),
-                )
-            })
+        let seen = self
+            .selected_row()
+            .and_then(|r| Some(Seen::new(self.target(r)?, r.uid.clone())));
+        let items = seen
+            .map(|seen| delete_items(self.kind, seen, self.confirm_destructive, cx.weak_entity()))
             .unwrap_or_default();
         self.menu.update(cx, |menu, cx| menu.set_items(items, cx));
     }
@@ -453,18 +450,18 @@ impl Render for ResourcesScreen {
 
 fn delete_items(
     kind: ResourceKind,
-    target: ResourceRef,
+    seen: Seen,
     confirm_destructive: bool,
     screen: WeakEntity<ResourcesScreen>,
 ) -> Vec<MenuItem> {
     let title = format!("Delete {}", kind.name());
-    let detail = format!("{} · {}", target.cluster, target);
+    let detail = format!("{} · {}", seen.target.cluster, seen.target);
     vec![
         MenuItem::new("Delete…", move |window, cx| {
             let screen = screen.clone();
-            let target = target.clone();
+            let seen = seen.clone();
             if !confirm_destructive {
-                let command = Command::Delete(target);
+                let command = Command::Delete(seen);
                 let _ = screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
                 return;
             }
@@ -473,7 +470,7 @@ fn delete_items(
                 "It is removed from the cluster now. If Flux or another controller manages it, it comes back on the next reconcile.",
                 title.clone(),
                 move |_, cx| {
-                    let command = Command::Delete(target.clone());
+                    let command = Command::Delete(seen.clone());
                     let _ = screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
                 },
             )

@@ -1,7 +1,7 @@
 use fleet_core::action::Notice;
 use fleet_core::compare::short_names;
 use fleet_core::flux::{FluxAction, FluxKey, Phase};
-use fleet_core::{ClusterId, Command, ResourceKind, ResourceRef, Snapshot, Status};
+use fleet_core::{ClusterId, Command, ResourceKind, ResourceRef, Seen, Snapshot, Status, Uid};
 use serde_json::Value;
 
 const POD: &str = "Pod";
@@ -9,14 +9,14 @@ const APPLYING: &str = "Applying";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Mutation {
-    Cordon(ResourceRef),
-    Uncordon(ResourceRef),
-    Drain(ResourceRef),
-    Delete(ResourceRef),
-    Restart(ResourceRef),
-    Scale(ResourceRef, u32),
-    Rollback(ResourceRef, u64),
-    Flux(FluxKey, FluxAction),
+    Cordon(Seen),
+    Uncordon(Seen),
+    Drain(Seen),
+    Delete(Seen),
+    Restart(Seen),
+    Scale(Seen, u32),
+    Rollback(Seen, u64),
+    Flux(FluxKey, Uid, FluxAction),
     CopySpec {
         target: ResourceRef,
         from: ClusterId,
@@ -35,7 +35,7 @@ impl Mutation {
             Command::RestartRollout(target) => Self::Restart(target.clone()),
             Command::Scale { target, replicas } => Self::Scale(target.clone(), *replicas),
             Command::Rollback { target, revision } => Self::Rollback(target.clone(), *revision),
-            Command::Flux(key, action) => Self::Flux(key.clone(), *action),
+            Command::Flux(key, uid, action) => Self::Flux(key.clone(), uid.clone(), *action),
             _ => return None,
         };
         Some(mutation)
@@ -43,15 +43,15 @@ impl Mutation {
 
     pub fn target(&self) -> ResourceRef {
         match self {
-            Self::Cordon(target) => target.clone(),
-            Self::Uncordon(target) => target.clone(),
-            Self::Drain(target) => target.clone(),
-            Self::Delete(target) => target.clone(),
-            Self::Restart(target) => target.clone(),
-            Self::Scale(target, _) => target.clone(),
-            Self::Rollback(target, _) => target.clone(),
+            Self::Cordon(seen) => seen.target.clone(),
+            Self::Uncordon(seen) => seen.target.clone(),
+            Self::Drain(seen) => seen.target.clone(),
+            Self::Delete(seen) => seen.target.clone(),
+            Self::Restart(seen) => seen.target.clone(),
+            Self::Scale(seen, _) => seen.target.clone(),
+            Self::Rollback(seen, _) => seen.target.clone(),
             Self::CopySpec { target, .. } => target.clone(),
-            Self::Flux(key, _) => ResourceRef {
+            Self::Flux(key, ..) => ResourceRef {
                 cluster: key.cluster.clone(),
                 kind: key.kind.label().to_owned(),
                 namespace: Some(key.namespace.clone()),
@@ -70,11 +70,11 @@ impl Mutation {
             Self::Scale(..) => "Scale",
             Self::Rollback(..) => "Roll back",
             Self::CopySpec { .. } => "Apply",
-            Self::Flux(_, FluxAction::Reconcile) => "Reconcile",
-            Self::Flux(_, FluxAction::ReconcileWithSource) => "Reconcile",
-            Self::Flux(_, FluxAction::Force) => "Force",
-            Self::Flux(_, FluxAction::Suspend) => "Suspend",
-            Self::Flux(_, FluxAction::Resume) => "Resume",
+            Self::Flux(.., FluxAction::Reconcile) => "Reconcile",
+            Self::Flux(.., FluxAction::ReconcileWithSource) => "Reconcile",
+            Self::Flux(.., FluxAction::Force) => "Force",
+            Self::Flux(.., FluxAction::Suspend) => "Suspend",
+            Self::Flux(.., FluxAction::Resume) => "Resume",
         }
     }
 
@@ -185,7 +185,7 @@ pub fn mark(snapshot: &mut Snapshot, mutation: &Mutation) {
         mark_node(snapshot, &mutation.target(), state);
         return;
     }
-    if let Mutation::Flux(key, _) = mutation {
+    if let Mutation::Flux(key, ..) = mutation {
         mark_flux(snapshot, key);
         return;
     }
@@ -213,6 +213,7 @@ mod tests {
         let mut snapshot = Snapshot::default();
         let detail = snapshot.details.entry(ClusterId::new("a")).or_default();
         detail.nodes.push(Node {
+            uid: Uid::default(),
             name: "n1".into(),
             status: Status::Ok,
             state: "Ready".into(),
@@ -235,6 +236,7 @@ mod tests {
         detail.resources.insert(
             ResourceKind::Deployment,
             vec![Resource {
+                uid: Uid::default(),
                 namespace: "web".into(),
                 name: "podinfo".into(),
                 status: Status::Ok,
@@ -246,11 +248,15 @@ mod tests {
         snapshot
     }
 
+    fn seen(target: ResourceRef) -> Seen {
+        Seen::new(target, Uid::new("u1"))
+    }
+
     #[test]
     fn commands_become_mutations_with_targets() {
         let node = target("Node", None, "n1");
-        let mutation = Mutation::from_command(&Command::Drain(node.clone()));
-        assert_eq!(mutation, Some(Mutation::Drain(node.clone())));
+        let mutation = Mutation::from_command(&Command::Drain(seen(node.clone())));
+        assert_eq!(mutation, Some(Mutation::Drain(seen(node.clone()))));
         assert_eq!(
             mutation.map(|m| (m.target(), m.verb())),
             Some((node, "Drain"))
@@ -261,7 +267,10 @@ mod tests {
     #[test]
     fn pending_node_actions_show_progress_and_their_verb() {
         let mut snapshot = snapshot();
-        mark(&mut snapshot, &Mutation::Cordon(target("Node", None, "n1")));
+        mark(
+            &mut snapshot,
+            &Mutation::Cordon(seen(target("Node", None, "n1"))),
+        );
         let node = snapshot
             .detail(&ClusterId::new("a"))
             .and_then(|detail| detail.nodes.first().cloned());
@@ -275,7 +284,7 @@ mod tests {
     fn pending_workload_actions_mark_the_row() {
         let mut snapshot = snapshot();
         let deployment = target("Deployment", Some("web"), "podinfo");
-        mark(&mut snapshot, &Mutation::Scale(deployment, 3));
+        mark(&mut snapshot, &Mutation::Scale(seen(deployment), 3));
         let status = snapshot
             .detail(&ClusterId::new("a"))
             .map(|detail| detail.resources(ResourceKind::Deployment)[0].status);

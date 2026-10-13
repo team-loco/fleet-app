@@ -1,14 +1,14 @@
 use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 
-use fleet_core::TermSize;
+use fleet_core::{TermSize, Uid};
 use fleet_flux::redact;
 use futures::{AsyncBufReadExt, SinkExt, StreamExt};
 use k8s_openapi::api::core::v1::Pod;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Status;
 use kube::api::{
     Api, AttachParams, AttachedProcess, DeleteParams, DynamicObject, LogParams, Patch, PatchParams,
-    PropagationPolicy, TerminalSize,
+    Preconditions, PropagationPolicy, TerminalSize,
 };
 use kube::core::{ApiResource, GroupVersionKind};
 use kube::{Client, Resource};
@@ -30,6 +30,9 @@ const EXEC_READ_BUFFER: usize = 8192;
 const LOOPBACK: &str = "127.0.0.1";
 const EXIT_SUCCESS: &str = "Success";
 const EXIT_CODE_CAUSE: &str = "ExitCode";
+const METADATA: &str = "metadata";
+const UID: &str = "uid";
+const UID_POINTER: &str = "/metadata/uid";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ObjectRef {
@@ -72,6 +75,32 @@ pub enum PatchBody {
     Merge(Value),
     Json(Value),
     Strategic(Value),
+}
+
+impl PatchBody {
+    pub fn guarded(self, uid: &Uid) -> Self {
+        match self {
+            Self::Merge(value) => Self::Merge(with_uid(value, uid)),
+            Self::Strategic(value) => Self::Strategic(with_uid(value, uid)),
+            Self::Json(value) => Self::Json(with_uid_test(&value, uid)),
+        }
+    }
+}
+
+pub(crate) fn with_uid(mut value: Value, uid: &Uid) -> Value {
+    if let Some(object) = value.as_object_mut() {
+        let metadata = object.entry(METADATA).or_insert_with(|| json!({}));
+        if let Some(metadata) = metadata.as_object_mut() {
+            metadata.insert(UID.to_owned(), json!(uid.as_str()));
+        }
+    }
+    value
+}
+
+pub(crate) fn with_uid_test(value: &Value, uid: &Uid) -> Value {
+    let test = json!({ "op": "test", "path": UID_POINTER, "value": uid.as_str() });
+    let operations = value.as_array().into_iter().flatten().cloned();
+    Value::Array(std::iter::once(test).chain(operations).collect())
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -270,13 +299,13 @@ impl ClusterHandle {
         Ok(patched)
     }
 
-    pub async fn scale(&self, target: &ObjectRef, replicas: i32) -> Result<()> {
+    pub async fn scale(&self, target: &ObjectRef, replicas: i32, uid: &Uid) -> Result<()> {
         let (_, api) = self.dynamic_api(target).await?;
         let params = PatchParams {
             field_manager: Some(FIELD_MANAGER.to_owned()),
             ..PatchParams::default()
         };
-        let body = json!({ "spec": { "replicas": replicas } });
+        let body = with_uid(json!({ "spec": { "replicas": replicas } }), uid);
         api.patch_scale(&target.name, &params, &Patch::Merge(&body))
             .await?;
         Ok(())
@@ -287,10 +316,20 @@ impl ClusterHandle {
         self.patch(target, PatchBody::Merge(body)).await
     }
 
-    pub async fn delete(&self, target: &ObjectRef, propagation: PropagationPolicy) -> Result<()> {
+    pub async fn delete(
+        &self,
+        target: &ObjectRef,
+        propagation: PropagationPolicy,
+        uid: Option<&Uid>,
+    ) -> Result<()> {
         let (_, api) = self.dynamic_api(target).await?;
+        let preconditions = uid.map(|uid| Preconditions {
+            uid: Some(uid.as_str().to_owned()),
+            resource_version: None,
+        });
         let params = DeleteParams {
             propagation_policy: Some(propagation),
+            preconditions,
             ..DeleteParams::default()
         };
         api.delete(&target.name, &params).await?;
@@ -514,6 +553,25 @@ mod tests {
         assert_eq!(
             patch["spec"]["template"]["metadata"]["annotations"][RESTARTED_AT_ANNOTATION],
             json!("2026-10-12T10:00:00Z")
+        );
+    }
+
+    #[test]
+    fn guarded_patches_pin_the_uid() {
+        let uid = Uid::new("u1");
+        let merge = PatchBody::Merge(json!({"spec": {"suspend": true}})).guarded(&uid);
+        assert_eq!(
+            merge,
+            PatchBody::Merge(json!({"metadata": {"uid": "u1"}, "spec": {"suspend": true}}))
+        );
+        let json_patch = PatchBody::Json(json!([{"op": "replace", "path": "/spec/x", "value": 1}]))
+            .guarded(&uid);
+        assert_eq!(
+            json_patch,
+            PatchBody::Json(json!([
+                {"op": "test", "path": "/metadata/uid", "value": "u1"},
+                {"op": "replace", "path": "/spec/x", "value": 1}
+            ]))
         );
     }
 

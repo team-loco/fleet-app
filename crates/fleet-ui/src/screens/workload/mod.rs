@@ -4,7 +4,7 @@ pub(crate) use dock::kit_line;
 
 use fleet_core::palette::COMPARE_KEY;
 use fleet_core::workload::{ContainerSpec, EnvVar, Pod, Revision, short_image, short_pod_name};
-use fleet_core::{Command, ResourceRef, Sink, Status, Workload};
+use fleet_core::{Command, ResourceRef, Seen, Sink, Status, Workload};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
     InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
@@ -744,7 +744,7 @@ fn restart_handler(
     this: WeakEntity<WorkloadScreen>,
     workload: &Workload,
 ) -> impl Fn(&mut Window, &mut gpui::App) + 'static {
-    let target = workload.target.clone();
+    let target = Seen::new(workload.target.clone(), workload.uid.clone());
     let detail = detail_line(workload);
     move |window, cx| {
         let this = this.clone();
@@ -762,7 +762,7 @@ fn scale_handler(
     this: WeakEntity<WorkloadScreen>,
     workload: &Workload,
 ) -> impl Fn(&mut Window, &mut gpui::App) + 'static {
-    let target = workload.target.clone();
+    let target = Seen::new(workload.target.clone(), workload.uid.clone());
     let detail = detail_line(workload);
     let desired = workload.desired.to_string();
     move |window, cx| {
@@ -770,7 +770,7 @@ fn scale_handler(
         let target = target.clone();
         let field = cx.new(|cx| TextFieldState::new(window, cx).default_value(desired.clone()));
         let value = field.clone();
-        let title = format!("{SCALE_TITLE} {}", target.name);
+        let title = format!("{SCALE_TITLE} {}", target.target.name);
         let dialog = ConfirmDialog::new(title, SCALE_BODY, SCALE_CONFIRM, move |_, cx| {
             let text = value.read(cx).value();
             let Some(replicas) = parse_replicas(&text) else {
@@ -798,12 +798,12 @@ fn rollback_handler(
     workload: &Workload,
     revision: &Revision,
 ) -> impl Fn(&mut Window, &mut gpui::App) + 'static {
-    let target = workload.target.clone();
+    let target = Seen::new(workload.target.clone(), workload.uid.clone());
     let number = revision.number;
     let title = format!("Roll back to revision {number}");
     let body = format!(
         "{} goes back to {} ({}). New pods replace the current ones.",
-        target.name,
+        target.target.name,
         short_image(&revision.image),
         revision.owner
     );

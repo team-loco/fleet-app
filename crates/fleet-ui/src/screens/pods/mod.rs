@@ -1,7 +1,7 @@
 use fleet_core::pods::{
     Container, Pod, PodFilter, PodQuery, filter_counts, namespaces, nav_counts,
 };
-use fleet_core::{ClusterId, Command, Counts, ResourceRef, Snapshot, Status};
+use fleet_core::{ClusterId, Command, Counts, ResourceRef, Seen, Snapshot, Status};
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, InteractiveElement,
     IntoElement, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled,
@@ -690,6 +690,7 @@ fn menu_items(pod: &Pod, cx: &mut Context<PodsScreen>) -> Vec<MenuItem> {
         );
     }
     let target = pod.resource();
+    let seen = Seen::new(target.clone(), pod.uid.clone());
     let replaced = pod.owner.is_some();
     let consequence = if replaced {
         "Its controller creates a replacement within seconds; logs from its containers are lost."
@@ -699,14 +700,14 @@ fn menu_items(pod: &Pod, cx: &mut Context<PodsScreen>) -> Vec<MenuItem> {
     let detail = format!("{} · {}", target.cluster, target);
     items.push(
         MenuItem::new("Delete pod…", move |window, cx| {
-            let target = target.clone();
+            let seen = seen.clone();
             let screen = screen.clone();
             let dialog = ConfirmDialog::new(
                 "Delete pod",
                 format!("The pod is deleted now. {consequence}"),
                 "Delete pod",
                 move |_, cx| {
-                    let command = Command::Delete(target.clone());
+                    let command = Command::Delete(seen.clone());
                     let _ = screen.update(cx, |_, cx| cx.emit(command));
                 },
             )

@@ -5,7 +5,7 @@ use fleet_core::flux::{
     FluxDetail, HelmDetail, HelmRevision, HistoryEntry, ManagedObject, Phase, Revision, Sentence,
     SourceDetail, Span, SpecRow,
 };
-use fleet_core::{FluxAction, FluxKey, FluxKind, FluxObject, Snapshot, Status};
+use fleet_core::{FluxAction, FluxKey, FluxKind, FluxObject, Snapshot, Status, Uid};
 
 const MINUTE: u64 = 60;
 const HOUR: u64 = 60 * MINUTE;
@@ -244,6 +244,7 @@ fn kustomization(
         &sentence,
     );
     FluxObject {
+        uid: Uid::default(),
         source: Some(fleet_infra(cluster)),
         key,
         phase,
@@ -425,6 +426,7 @@ fn git_source(cluster: &str) -> FluxObject {
         &sentence,
     );
     FluxObject {
+        uid: Uid::default(),
         key,
         phase,
         sentence,
@@ -485,6 +487,7 @@ fn helm_source(cluster: &str) -> FluxObject {
         &sentence,
     );
     FluxObject {
+        uid: Uid::default(),
         key,
         phase,
         sentence,
@@ -654,6 +657,7 @@ fn helm_release(cluster: &str, version: &str, phase: Phase, sentence: Sentence) 
         &sentence,
     );
     FluxObject {
+        uid: Uid::default(),
         key,
         phase,
         sentence,

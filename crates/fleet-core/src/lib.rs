@@ -45,7 +45,7 @@ pub use fleet::{ClusterSummary, Snapshot};
 pub use flux::{FluxAction, FluxKey, FluxKind, FluxObject, FluxPage};
 pub use gitops::GitOps;
 pub use home::FleetHome;
-pub use id::{ClusterId, ResourceRef};
+pub use id::{ClusterId, ResourceRef, Seen, Uid};
 pub use nav::{CLUSTER_NAV, FLEET_NAV, NavSection, Page};
 pub use resource::ResourceSummary;
 pub use resources::ResourceKind;

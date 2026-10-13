@@ -61,6 +61,7 @@ impl Requests {
 
 #[cfg(test)]
 mod tests {
+    use fleet_core::Uid;
     use fleet_core::flux::FluxDetail;
 
     use super::*;
@@ -71,6 +72,7 @@ mod tests {
 
     fn object(phase: Phase) -> FluxObject {
         FluxObject {
+            uid: Uid::default(),
             key: FluxKey::new(
                 "a",
                 fleet_core::FluxKind::Kustomization,
