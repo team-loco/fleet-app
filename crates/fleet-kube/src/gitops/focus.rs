@@ -344,7 +344,7 @@ mod tests {
             [
                 (3, Status::Err, true),
                 (2, Status::Ok, false),
-                (1, Status::Offline, true),
+                (1, Status::Ok, true),
             ]
         );
         assert!(stored[1].revision.diff.contains("+port: 80"));

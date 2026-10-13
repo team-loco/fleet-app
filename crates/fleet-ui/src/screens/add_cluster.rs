@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use fleet_core::{
     AddClusterFlow, AddClusterStep, Candidate, CheckLine, CheckStatus, Command, ContextChoice,
@@ -6,17 +7,20 @@ use fleet_core::{
 };
 use gpui::{
     AnyElement, App, AppContext, ClipboardItem, Context, ElementId, Entity, EventEmitter,
-    FocusHandle, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div,
-    prelude::FluentBuilder, relative,
+    FocusHandle, Focusable, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement,
+    PathPromptOptions, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
+    Window, div, prelude::FluentBuilder, relative,
 };
 
-use crate::kit::{Button, Checkbox, InputEvent, Modal, TextField, TextFieldState, Toast, toast};
+use crate::kit::{
+    Button, Checkbox, InputEvent, Modal, TextArea, TextAreaState, TextField, TextFieldState, Toast,
+    toast,
+};
 use crate::theme::{
     ActiveTheme, CHECK_GLYPH_COLUMN, CODE_PAD_Y, DIALOG_WIDE, EMPTY_WIDTH, FONT_MONO, LINE_PROSE,
-    PICK_CHECK_COLUMN, PICK_NAME_COLUMN, PICK_ROW_PAD_Y, Palette, RADIUS, RULE, SPACE_1, SPACE_2,
-    SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_CONTROL, TEXT_GLYPH,
-    TEXT_HEADING, TEXT_MONO, TEXT_SMALL,
+    PASTE_AREA_HEIGHT, PICK_CHECK_COLUMN, PICK_NAME_COLUMN, PICK_ROW_PAD_Y, Palette, RADIUS, RULE,
+    SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY,
+    TEXT_CONTROL, TEXT_GLYPH, TEXT_HEADING, TEXT_MONO, TEXT_SMALL,
 };
 
 const SUBTITLE: &str = "Contexts in your kubeconfig files that aren't in Fleet yet.";
@@ -26,7 +30,13 @@ const NOTHING_LEFT: &str =
 const NAME_LABEL: &str = "name";
 const PASTE: &str = "Paste kubeconfig…";
 const WATCH_FOLDER: &str = "Watch a folder…";
-const NOT_YET: &str = "Not available yet";
+const PASTE_TITLE: &str = "Paste kubeconfig";
+const PASTE_SUBTITLE: &str =
+    "Fleet saves the pasted text in its own folder and lists its contexts here.";
+const PASTE_NAME_PLACEHOLDER: &str = "file name, e.g. lab";
+const PASTE_PLACEHOLDER: &str = "apiVersion: v1\nkind: Config\n…";
+const SAVE: &str = "Save";
+const WATCH_PROMPT: &str = "Watch folder";
 const CANCEL: &str = "Cancel";
 const BACK: &str = "Back";
 const COPY: &str = "Copy";
@@ -40,8 +50,18 @@ pub enum AddClusterEvent {
     Close,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum View {
+    Flow,
+    Paste,
+}
+
 pub struct AddClusterDialog {
     flow: AddClusterFlow,
+    view: View,
+    paste_name: Entity<TextFieldState>,
+    paste_text: Entity<TextAreaState>,
+    paste_error: Option<String>,
     fields: BTreeMap<ContextRef, Entity<TextFieldState>>,
     focus: FocusHandle,
     subscriptions: Vec<Subscription>,
@@ -58,23 +78,94 @@ impl AddClusterDialog {
     ) -> Self {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
+        let paste_name =
+            cx.new(|cx| TextFieldState::new(window, cx).placeholder(PASTE_NAME_PLACEHOLDER));
+        let paste_text = cx.new(|cx| TextAreaState::new(window, cx).placeholder(PASTE_PLACEHOLDER));
+        let subscriptions = vec![
+            cx.subscribe(&paste_name, |this, _, _: &InputEvent, cx| {
+                this.paste_error = None;
+                cx.notify();
+            }),
+            cx.subscribe(&paste_text, |this, _, _: &InputEvent, cx| {
+                this.paste_error = None;
+                cx.notify();
+            }),
+        ];
         Self {
             flow: AddClusterFlow::new(step, existing),
+            view: View::Flow,
+            paste_name,
+            paste_text,
+            paste_error: None,
             fields: BTreeMap::new(),
             focus,
-            subscriptions: Vec::new(),
+            subscriptions,
         }
     }
 
     pub fn receive(&mut self, update: &Update, window: &mut Window, cx: &mut Context<Self>) {
         match update {
-            Update::Contexts(files) => self.load(files.clone(), window, cx),
+            Update::Contexts(files) => {
+                self.leave_paste(window, cx);
+                self.load(files.clone(), window, cx);
+            }
+            Update::KubeconfigRejected(reason) => self.reject(reason, cx),
             Update::Check(id, line) => self.flow.record(id, line.clone()),
             Update::Checked(id, verdict) => self.flow.finish(id, *verdict),
             Update::Snapshot(_) => return,
             Update::Notice(_) => return,
         }
         cx.notify();
+    }
+
+    fn leave_paste(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.view != View::Paste {
+            return;
+        }
+        self.view = View::Flow;
+        self.paste_error = None;
+        self.paste_name
+            .update(cx, |field, cx| field.set_value("", window, cx));
+        self.paste_text
+            .update(cx, |field, cx| field.set_value("", window, cx));
+        window.focus(&self.focus, cx);
+    }
+
+    fn reject(&mut self, reason: &str, cx: &mut Context<Self>) {
+        match self.view {
+            View::Paste => self.paste_error = Some(reason.to_owned()),
+            View::Flow => toast(Toast::new(Status::Err, reason.to_owned()), cx),
+        }
+    }
+
+    fn save_paste(&mut self, cx: &mut Context<Self>) {
+        let name = self.paste_name.read(cx).value().to_string();
+        let yaml = self.paste_text.read(cx).value().to_string();
+        cx.emit(AddClusterEvent::Send(Command::SaveKubeconfig {
+            name,
+            yaml,
+        }));
+    }
+
+    fn pick_folder(cx: &mut Context<Self>) {
+        let options = PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(WATCH_PROMPT.into()),
+        };
+        let chosen = cx.prompt_for_paths(options);
+        cx.spawn(async move |this, cx| {
+            let folder = chosen.await.ok().and_then(Result::ok).flatten();
+            let folder: Option<PathBuf> = folder.and_then(|paths| paths.into_iter().next());
+            if let Some(folder) = folder {
+                this.update(cx, |_, cx| {
+                    cx.emit(AddClusterEvent::Send(Command::WatchFolder(folder)));
+                })
+                .ok();
+            }
+        })
+        .detach();
     }
 
     fn load(&mut self, files: Vec<KubeconfigFile>, window: &mut Window, cx: &mut Context<Self>) {
@@ -161,17 +252,17 @@ impl AddClusterDialog {
         let footer = footer(palette)
             .border_t(RULE)
             .border_color(palette.line)
-            .child(
-                Button::new("paste", PASTE)
-                    .ghost()
-                    .disabled(true)
-                    .tooltip(NOT_YET),
-            )
+            .child(Button::new("paste", PASTE).ghost().on_click(cx.listener(
+                |this, _, window, cx| {
+                    this.view = View::Paste;
+                    window.focus(&this.paste_name.focus_handle(cx), cx);
+                    cx.notify();
+                },
+            )))
             .child(
                 Button::new("watch-folder", WATCH_FOLDER)
                     .ghost()
-                    .disabled(true)
-                    .tooltip(NOT_YET),
+                    .on_click(cx.listener(|_, _, _, cx| Self::pick_folder(cx))),
             )
             .child(div().flex_1())
             .child(Button::new("cancel", CANCEL).on_click(close))
@@ -195,6 +286,54 @@ impl AddClusterDialog {
                             .child(SUBTITLE),
                     )
                     .children(list),
+            )
+            .child(footer)
+            .into_any_element()
+    }
+
+    fn paste(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let name = self.paste_name.read(cx).value();
+        let text = self.paste_text.read(cx).value();
+        let empty = name.trim().is_empty() || text.trim().is_empty();
+        let back = Button::new("paste-back", BACK).on_click(cx.listener(|this, _, window, cx| {
+            this.view = View::Flow;
+            this.paste_error = None;
+            window.focus(&this.focus, cx);
+            cx.notify();
+        }));
+        let save = Button::new("paste-save", SAVE)
+            .primary()
+            .disabled(empty)
+            .on_click(cx.listener(|this, _, _, cx| this.save_paste(cx)));
+        let footer = footer(palette)
+            .child(back)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(TEXT_CONTROL)
+                    .text_color(palette.err)
+                    .children(self.paste_error.clone()),
+            )
+            .child(save);
+        body()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .gap(SPACE_4)
+                    .px(SPACE_7)
+                    .py(SPACE_6)
+                    .child(
+                        div()
+                            .text_size(TEXT_BODY)
+                            .text_color(palette.fg2)
+                            .child(PASTE_SUBTITLE),
+                    )
+                    .child(TextField::new(&self.paste_name))
+                    .child(TextArea::new(&self.paste_text, PASTE_AREA_HEIGHT)),
             )
             .child(footer)
             .into_any_element()
@@ -325,7 +464,6 @@ impl AddClusterDialog {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let status = candidate.verdict.status();
-        let verdict = format!("{} {}", status.glyph(), candidate.verdict.label());
         let header = div()
             .flex()
             .items_baseline()
@@ -339,9 +477,18 @@ impl AddClusterDialog {
             .child(
                 div()
                     .flex_none()
+                    .flex()
+                    .items_baseline()
+                    .gap(SPACE_2)
                     .text_size(TEXT_BODY)
                     .text_color(palette.status(status))
-                    .child(verdict),
+                    .child(
+                        div()
+                            .font_family(FONT_MONO)
+                            .text_size(TEXT_GLYPH)
+                            .child(status.glyph()),
+                    )
+                    .child(candidate.verdict.label()),
             )
             .child(div().flex_1())
             .child(
@@ -376,12 +523,17 @@ impl AddClusterDialog {
 impl Render for AddClusterDialog {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
-        let content = match self.flow.step {
-            AddClusterStep::Pick => self.pick(&palette, cx),
-            AddClusterStep::Check => self.check(&palette, cx),
+        let content = match (self.view, self.flow.step) {
+            (View::Paste, _) => self.paste(&palette, cx),
+            (View::Flow, AddClusterStep::Pick) => self.pick(&palette, cx),
+            (View::Flow, AddClusterStep::Check) => self.check(&palette, cx),
+        };
+        let title = match self.view {
+            View::Paste => PASTE_TITLE.to_owned(),
+            View::Flow => self.flow.title(),
         };
         let this = cx.entity().downgrade();
-        Modal::new("add-cluster", self.flow.title(), DIALOG_WIDE)
+        Modal::new("add-cluster", title, DIALOG_WIDE)
             .focus(&self.focus)
             .on_close(move |_, cx| {
                 this.update(cx, |_, cx| cx.emit(AddClusterEvent::Close))

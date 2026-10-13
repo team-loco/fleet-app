@@ -6,6 +6,7 @@ pub const CHEVRON_LEFT: &str = "icons/chevron-left.svg";
 pub const CHEVRON_RIGHT: &str = "icons/chevron-right.svg";
 pub const CHEVRON_DOWN: &str = "icons/chevron-down.svg";
 pub const CHEVRON_UP: &str = "icons/chevron-up.svg";
+pub const CHECK: &str = "icons/check.svg";
 
 const ICONS: &[(&str, &[u8])] = &[
     (
@@ -21,6 +22,7 @@ const ICONS: &[(&str, &[u8])] = &[
         include_bytes!("../assets/icons/chevron-down.svg"),
     ),
     (CHEVRON_UP, include_bytes!("../assets/icons/chevron-up.svg")),
+    (CHECK, include_bytes!("../assets/icons/check.svg")),
 ];
 
 const FONTS: &[&[u8]] = &[

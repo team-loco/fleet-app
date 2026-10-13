@@ -26,6 +26,10 @@ const GLYPH_COLUMN: Pixels = px(14.);
 const KIND_COLUMN: Pixels = px(170.);
 const NAME_MIN: Pixels = px(200.);
 const DETAIL_MIN: Pixels = px(160.);
+const NAME_WEIGHT: f32 = 3.;
+const DETAIL_WEIGHT: f32 = 1.;
+const PHRASE_SEPARATOR: &str = " · ";
+const PHRASE_BREAK: &str = " ·\u{a0}";
 const AGE_COLUMN: Pixels = px(40.);
 const REVISION_COLUMN: Pixels = px(70.);
 const COUNT_COLUMN: Pixels = px(34.);
@@ -352,6 +356,14 @@ impl FluxObjectPage {
             .iter()
             .fold(Prose::new("flux-sentence"), |prose, span| match span {
                 Span::Text(text) => prose.text(text.clone()),
+                Span::Revision(id) => {
+                    let sha = id.clone();
+                    let this = this.clone();
+                    prose.link(id.clone(), move |_, cx| {
+                        let command = Command::OpenCommit(sha.clone());
+                        this.update(cx, |_, cx| cx.emit(command)).ok();
+                    })
+                }
                 Span::Object(name) => {
                     let target = object
                         .inventory
@@ -467,7 +479,7 @@ impl FluxObjectPage {
             .release
             .and_then(|r| detail.releases.iter().find(|x| x.revision == r));
         div()
-            .child(SectionHeader::new("Helm releases").count(count))
+            .child(SectionHeader::new("History").count(count))
             .child(ruled(self.releases.clone(), palette))
             .children(selected.map(|release| revision_diff(detail, release, palette)))
             .into_any_element()
@@ -786,9 +798,29 @@ fn aside_label(text: &'static str) -> impl IntoElement {
         .child(SectionLabel::new(text))
 }
 
+fn wrappable(value: &str) -> String {
+    let phrases: Vec<String> = value
+        .split(PHRASE_SEPARATOR)
+        .map(|phrase| phrase.replace(' ', "\u{a0}"))
+        .collect();
+    phrases.join(PHRASE_BREAK)
+}
+
+fn spec_value(value: &str) -> AnyElement {
+    if !value.contains('/') {
+        return wrappable(value).into_any_element();
+    }
+    let segments: Vec<String> = value.split_inclusive('/').map(str::to_owned).collect();
+    div()
+        .flex()
+        .flex_wrap()
+        .children(segments)
+        .into_any_element()
+}
+
 fn spec_list(rows: &[SpecRow], label_width: Pixels) -> impl IntoElement {
     let list = rows.iter().fold(KeyValue::new(), |list, row| {
-        list.row(row.label.clone(), row.value.clone())
+        list.row(row.label.clone(), spec_value(&row.value))
     });
     div()
         .px(SPACE_6)
@@ -921,7 +953,7 @@ fn inventory_columns() -> Vec<Column<ManagedObject>> {
         .fixed(KIND_COLUMN),
         Column::text("Name", |o: &ManagedObject| o.path().into())
             .mono()
-            .flex(1., NAME_MIN),
+            .flex(NAME_WEIGHT, NAME_MIN),
         Column::new("Detail", |o: &ManagedObject, palette| {
             let color = if o.status == Status::Ok {
                 palette.mute
@@ -936,7 +968,7 @@ fn inventory_columns() -> Vec<Column<ManagedObject>> {
                 .child(SharedString::from(o.detail.clone()))
                 .into_any_element()
         })
-        .flex(1., DETAIL_MIN),
+        .flex(DETAIL_WEIGHT, DETAIL_MIN),
     ]
 }
 
@@ -1049,5 +1081,13 @@ mod tests {
         assert!(fetch_label(FluxKind::Kustomization).is_some());
         assert!(fetch_label(FluxKind::HelmRelease).is_some());
         assert!(fetch_label(FluxKind::GitRepository).is_none());
+    }
+
+    #[test]
+    fn spec_values_keep_phrases_together() {
+        let chart = wrappable("kube-prometheus-stack · 62.7.0");
+        assert_eq!(chart, "kube-prometheus-stack ·\u{a0}62.7.0");
+        let timing = wrappable("30m · timeout 10m");
+        assert_eq!(timing, "30m ·\u{a0}timeout\u{a0}10m");
     }
 }

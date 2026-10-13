@@ -19,6 +19,9 @@ const KUBE_PROMETHEUS_STACK: &str = "kube-prometheus-stack";
 const APPS_PAYMENTS: &str = "apps-payments";
 const INFRA_CONTROLLERS: &str = "infra-controllers";
 const INFRA_CONFIGS: &str = "infra-configs";
+const EAST_APPS: [&str; 3] = ["apps-web", "apps-search", "apps-ml"];
+const RETRY_LEAD: &str = "Retrying in ";
+const RETRY_INTERVAL: &str = "2m";
 
 const PROD_US_EAST: &str = "prod-us-east";
 const PROD_EU_WEST: &str = "prod-eu-west";
@@ -120,6 +123,13 @@ pub fn objects() -> Vec<FluxObject> {
         objects.push(infra(cluster, INFRA_CONFIGS, "./infrastructure/configs"));
         objects.push(git_source(cluster));
         objects.push(helm_source(cluster));
+    }
+    for name in EAST_APPS {
+        let path = format!(
+            "./apps/{}/overlays/{PROD_US_EAST}",
+            name.trim_start_matches("apps-")
+        );
+        objects.push(infra(PROD_US_EAST, name, &path));
     }
     objects.push(prometheus_staging());
     for cluster in [PROD_US_EAST, PROD_EU_WEST, DEV_KIND] {
@@ -392,9 +402,11 @@ fn infra(cluster: &str, name: &str, path: &str) -> FluxObject {
 fn git_source(cluster: &str) -> FluxObject {
     let key = fleet_infra(cluster);
     let phase = Phase::Ready;
-    let sentence = Sentence::text(format!(
-        "Fetched main at {HEAD} 4m ago. The next fetch is due in 1m."
-    ));
+    let sentence = Sentence(vec![
+        Span::Text("Fetched main at ".into()),
+        Span::Revision(HEAD.into()),
+        Span::Text(" 4m ago. The next fetch is due in 1m.".into()),
+    ]);
     let url = "ssh://git@github.com/acme/fleet-infra";
     let spec = vec![
         SpecRow::new("url", url),
@@ -669,7 +681,7 @@ fn helm_release(cluster: &str, version: &str, phase: Phase, sentence: Sentence) 
                 ),
                 release(
                     13,
-                    Status::Offline,
+                    Status::Ok,
                     "superseded",
                     ("61.3.2", "v0.75.0"),
                     "Upgrade complete",
@@ -877,6 +889,7 @@ pub fn finish(before: &FluxObject) -> FluxObject {
         .as_ref()
         .map(|r| r.id.clone())
         .unwrap_or_default();
+    next.sentence = restart_countdown(&before.sentence);
     let top = next.history.first_mut();
     match top {
         Some(top) if !outcome_ok || top.message == NO_CHANGES => {
@@ -887,6 +900,18 @@ pub fn finish(before: &FluxObject) -> FluxObject {
         None => next.history.push(no_changes(revision)),
     }
     next
+}
+
+fn restart_countdown(sentence: &Sentence) -> Sentence {
+    let spans = sentence.0.iter().map(|span| match span {
+        Span::Text(text) => match text.find(RETRY_LEAD) {
+            Some(at) => Span::Text(format!("{}{RETRY_LEAD}{RETRY_INTERVAL}.", &text[..at])),
+            None => span.clone(),
+        },
+        Span::Object(_) => span.clone(),
+        Span::Revision(_) => span.clone(),
+    });
+    Sentence(spans.collect())
 }
 
 const NO_CHANGES: &str = "applied · no changes";
@@ -984,6 +1009,10 @@ mod tests {
         assert_eq!(done.history.len(), before.history.len());
         assert_eq!(done.history[0].count, 19);
         assert_eq!(done.history[0].age, Some(Duration::ZERO));
+        assert_eq!(
+            done.sentence.plain(),
+            "checkout-api did not become ready within the 5m health check. Retrying in 2m."
+        );
     }
 
     #[test]

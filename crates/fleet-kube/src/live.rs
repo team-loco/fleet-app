@@ -32,6 +32,7 @@ use crate::manager::{
     COALESCE_INTERVAL, ClusterEvent, ClusterHandle, ClusterManager, ConnectionStatus, Subscription,
 };
 use crate::metrics::{NodeUsage, PodUsage};
+use crate::paste;
 use crate::probe::find_prometheus;
 use crate::problems::order;
 use crate::provider::AuthKind;
@@ -56,7 +57,8 @@ pub struct LiveBackend {
 }
 
 impl LiveBackend {
-    pub fn new(settings: KubeSettings, sources: DiscoverySources, store: ClusterStore) -> Self {
+    pub fn new(settings: KubeSettings, mut sources: DiscoverySources, store: ClusterStore) -> Self {
+        sources.folders = scan_folders(&store);
         Self {
             settings,
             sources,
@@ -117,6 +119,8 @@ struct Live {
     manager: ClusterManager,
     store: ClusterStore,
     discovery: Discovery,
+    sources: DiscoverySources,
+    sources_changed: bool,
     env: Arc<ShellEnv>,
     settings: KubeSettings,
     updates: Sender<Update>,
@@ -449,10 +453,9 @@ impl Live {
             Command::Uncordon(_) => self.act(command),
             Command::Drain(_) => self.act(command),
             Command::Delete(_) => self.act(command),
-            Command::OpenAddCluster(_) => {
-                let files = kubeconfig_files(&self.discovery, &self.store, self.home.as_deref());
-                self.publish(Update::Contexts(files));
-            }
+            Command::OpenAddCluster(_) => self.publish_contexts(),
+            Command::SaveKubeconfig { name, yaml } => self.save_kubeconfig(name, yaml),
+            Command::WatchFolder(folder) => self.watch_folder(folder),
             Command::CheckContexts(ids) => self.check(ids),
             Command::AddClusters(added) => {
                 self.add(added);
@@ -489,6 +492,45 @@ impl Live {
     fn publish(&self, update: Update) {
         if self.updates.try_send(update).is_err() {
             tracing::debug!("UI stopped listening for updates");
+        }
+    }
+
+    async fn rescan_sources(
+        &mut self,
+    ) -> Option<(Option<KubeconfigWatcher>, Receiver<DiscoveryEvent>)> {
+        if !std::mem::take(&mut self.sources_changed) {
+            return None;
+        }
+        self.discovery = scan(&self.sources).await;
+        self.reconcile();
+        self.publish_contexts();
+        Some(watch_kubeconfigs(
+            &self.sources,
+            &self.discovery,
+            &self.settings,
+        ))
+    }
+
+    fn publish_contexts(&self) {
+        let files = kubeconfig_files(&self.discovery, &self.store, self.home.as_deref());
+        self.publish(Update::Contexts(files));
+    }
+
+    fn save_kubeconfig(&mut self, name: &str, yaml: &str) {
+        let dir = self.store.kubeconfigs_dir();
+        match paste::save(&dir, name, yaml) {
+            Ok(_) => self.sources_changed = true,
+            Err(error) => self.publish(Update::KubeconfigRejected(error.to_string())),
+        }
+    }
+
+    fn watch_folder(&mut self, folder: &Path) {
+        match self.store.add_folder(folder) {
+            Ok(_) => {
+                self.sources.folders = scan_folders(&self.store);
+                self.sources_changed = true;
+            }
+            Err(error) => self.publish(Update::KubeconfigRejected(error.to_string())),
         }
     }
 
@@ -694,6 +736,13 @@ pub fn cluster_settings(
     }
 }
 
+fn scan_folders(store: &ClusterStore) -> Vec<PathBuf> {
+    let managed = store.kubeconfigs_dir();
+    std::iter::once(managed)
+        .chain(store.folders().iter().cloned())
+        .collect()
+}
+
 fn watch_kubeconfigs(
     sources: &DiscoverySources,
     discovery: &Discovery,
@@ -734,7 +783,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
     } = backend;
     let env = Arc::new(capture(&user_shell(), settings.shell_env_timeout).await);
     let discovery = scan(&sources).await;
-    let (_watcher, discovery_events) = watch_kubeconfigs(&sources, &discovery, &settings);
+    let (mut _watcher, mut discovery_events) = watch_kubeconfigs(&sources, &discovery, &settings);
     let runtime = tokio::runtime::Handle::current();
     let (fetched, fetched_events) = async_channel::unbounded();
     let [mut usage_tick, mut prometheus_tick] =
@@ -742,14 +791,17 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
     let (manager, cluster_events) = ClusterManager::new(runtime, settings.clone(), env.clone());
     let (actions, action_changes) = Actions::new(updates.clone());
     let gitops = GitOpsState::new(settings.git_timeout);
+    let home = sources.home.clone();
     let mut live = Live {
         manager,
         store,
         discovery,
+        sources,
+        sources_changed: false,
         env,
         settings,
         updates: updates.clone(),
-        home: sources.home.clone(),
+        home,
         clusters: BTreeMap::new(),
         selected: None,
         page: Page::Overview,
@@ -800,6 +852,9 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
             command = commands.recv() => {
                 let Ok(command) = command else { return };
                 live.apply(&command);
+                if let Some(restarted) = live.rescan_sources().await {
+                    (_watcher, discovery_events) = restarted;
+                }
                 dirty = true;
             }
             _ = publish.tick() => {

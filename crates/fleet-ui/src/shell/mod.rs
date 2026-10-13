@@ -327,6 +327,8 @@ impl Shell {
             Command::OpenAddCluster(_) => {}
             Command::CheckContexts(_) => {}
             Command::AddClusters(_) => {}
+            Command::SaveKubeconfig { .. } => {}
+            Command::WatchFolder(_) => {}
             Command::RemoveCluster(_) => {}
             Command::WatchWorkload { .. } => {}
             Command::StreamLogs(_) => {}

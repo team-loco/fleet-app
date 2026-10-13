@@ -114,6 +114,7 @@ impl Harness {
         let sources = DiscoverySources {
             kubeconfig_env: None,
             home: Some(home.path().to_path_buf()),
+            folders: Vec::new(),
         };
         let mut store = ClusterStore::empty(&home.path().join(SUPPORT_DIR));
         let added = NewCluster {

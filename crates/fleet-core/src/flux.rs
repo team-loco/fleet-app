@@ -156,6 +156,7 @@ impl Revision {
 pub enum Span {
     Text(String),
     Object(String),
+    Revision(String),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -172,6 +173,7 @@ impl Sentence {
             .map(|span| match span {
                 Span::Text(text) => text.as_str(),
                 Span::Object(name) => name.as_str(),
+                Span::Revision(id) => id.as_str(),
             })
             .collect()
     }
@@ -357,6 +359,7 @@ impl FluxObject {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PeerVerdict {
     HealthyElsewhere,
+    HealthyAtAnotherRevision,
     FailingEverywhere,
 }
 
@@ -364,6 +367,7 @@ impl PeerVerdict {
     pub const fn sentence(self) -> &'static str {
         match self {
             Self::HealthyElsewhere => "Healthy elsewhere at the same revision.",
+            Self::HealthyAtAnotherRevision => "Healthy elsewhere, at a different revision.",
             Self::FailingEverywhere => "Failing on every cluster at this revision.",
         }
     }
@@ -451,7 +455,11 @@ impl Snapshot {
             .filter(|peer| peer.applied.as_ref().map(|r| &r.id) == Some(&applied.id))
             .collect();
         if same_revision.is_empty() {
-            return None;
+            let healthy_elsewhere = self
+                .flux_peers(key)
+                .iter()
+                .any(|peer| peer.status() == Status::Ok);
+            return healthy_elsewhere.then_some(PeerVerdict::HealthyAtAnotherRevision);
         }
         if same_revision.iter().any(|peer| peer.status() == Status::Ok) {
             Some(PeerVerdict::HealthyElsewhere)
@@ -639,7 +647,15 @@ pub(crate) mod tests {
             object("east", Phase::Failing, "a41e07c"),
             object("west", Phase::Ready, "7c2d9e0"),
         ]);
-        assert_eq!(alone.peer_verdict(&east), None);
+        assert_eq!(
+            alone.peer_verdict(&east),
+            Some(PeerVerdict::HealthyAtAnotherRevision)
+        );
+        let nobody_healthy = fleet(vec![
+            object("east", Phase::Failing, "a41e07c"),
+            object("west", Phase::Failing, "7c2d9e0"),
+        ]);
+        assert_eq!(nobody_healthy.peer_verdict(&east), None);
     }
 
     #[test]

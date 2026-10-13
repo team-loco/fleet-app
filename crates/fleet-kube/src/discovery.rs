@@ -31,6 +31,7 @@ pub struct KubeContext {
 pub struct DiscoverySources {
     pub kubeconfig_env: Option<OsString>,
     pub home: Option<PathBuf>,
+    pub folders: Vec<PathBuf>,
 }
 
 impl DiscoverySources {
@@ -38,6 +39,7 @@ impl DiscoverySources {
         Self {
             kubeconfig_env: std::env::var_os(KUBECONFIG_VAR),
             home: std::env::home_dir(),
+            folders: Vec::new(),
         }
     }
 
@@ -66,6 +68,7 @@ impl DiscoverySources {
             .filter_map(|file| file.parent().map(Path::to_path_buf))
             .collect();
         roots.extend(self.kube_dir());
+        roots.extend(self.folders.iter().cloned());
         roots.into_iter().filter(|root| root.is_dir()).collect()
     }
 }
@@ -98,9 +101,9 @@ pub fn discover(sources: &DiscoverySources) -> Discovery {
         }
         load_file(&file, true, &mut seen, &mut discovery);
     }
-    if let Some(dir) = sources.kube_dir() {
+    for dir in sources.kube_dir().iter().chain(&sources.folders) {
         let mut scanned = Vec::new();
-        scan_dir(&dir, 0, &mut scanned);
+        scan_dir(dir, 0, &mut scanned);
         scanned.sort();
         for file in scanned {
             load_file(&file, false, &mut seen, &mut discovery);
@@ -154,7 +157,7 @@ fn load_file(file: &Path, explicit: bool, seen: &mut BTreeSet<PathBuf>, out: &mu
     }
 }
 
-fn looks_like_kubeconfig(config: &Kubeconfig) -> bool {
+pub(crate) fn looks_like_kubeconfig(config: &Kubeconfig) -> bool {
     let declared = config.kind.as_deref() == Some("Config");
     let has_parts = !config.clusters.is_empty() || !config.auth_infos.is_empty();
     !config.contexts.is_empty() && (declared || has_parts)
@@ -276,6 +279,7 @@ users:
         DiscoverySources {
             kubeconfig_env: kubeconfig,
             home: Some(home.to_path_buf()),
+            folders: Vec::new(),
         }
     }
 
@@ -333,6 +337,30 @@ users:
         assert_eq!(sandbox.namespace.as_deref(), Some("apps"));
         assert_eq!(sandbox.id.file, kube.join("eks/sandbox.yaml"));
         assert!(sandbox.is_current);
+    }
+
+    #[test]
+    fn scans_added_folders_outside_kube_dir() {
+        let Ok(home) = tempfile::tempdir() else {
+            panic!("tempdir");
+        };
+        let watched = home.path().join("clusters/team");
+        write(
+            &watched.join("one.yaml"),
+            &kubeconfig("team-one", "https://127.0.0.1:1"),
+        );
+        write(
+            &watched.join("sub/two.yaml"),
+            &kubeconfig("team-two", "https://127.0.0.1:2"),
+        );
+        write(&watched.join("readme.txt"), "not a kubeconfig\n");
+        let mut src = sources(home.path(), None);
+        src.folders = vec![watched.clone()];
+
+        let discovery = discover(&src);
+
+        assert_eq!(names(&discovery), vec!["team-one", "team-two"]);
+        assert!(src.watch_roots().contains(&watched));
     }
 
     #[test]

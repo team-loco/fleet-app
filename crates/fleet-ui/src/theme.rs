@@ -90,6 +90,7 @@ pub const TOGGLE_WIDTH: Pixels = px(28.);
 pub const TOGGLE_HEIGHT: Pixels = px(16.);
 pub const TOGGLE_KNOB: Pixels = px(12.);
 pub const CHECKBOX: Pixels = px(14.);
+pub const CHECKBOX_TICK: Pixels = px(10.);
 
 pub const KV_LABEL: Pixels = px(72.);
 pub const INSPECTOR: Pixels = px(360.);
@@ -121,6 +122,7 @@ pub const LEGEND_SWATCH: Pixels = px(10.);
 pub const DIALOG_WIDE: Pixels = px(720.);
 pub const PICK_CHECK_COLUMN: Pixels = px(20.);
 pub const PICK_NAME_COLUMN: Pixels = px(180.);
+pub const PASTE_AREA_HEIGHT: Pixels = px(260.);
 pub const PICK_ROW_PAD_Y: Pixels = px(7.);
 pub const CHECK_GLYPH_COLUMN: Pixels = px(14.);
 pub const CODE_PAD_Y: Pixels = px(3.);

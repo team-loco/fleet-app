@@ -156,16 +156,7 @@ pub fn snapshot() -> Snapshot {
                 nodes: Some(11),
                 problems: Counts::default().with_sus(1).with_warn(1),
             }),
-            cluster(ClusterSeed {
-                name: "staging",
-                status: Status::Warn,
-                state: "Warnings",
-                distro: "EKS",
-                region: "us-east-2",
-                version: Some("v1.30.5"),
-                nodes: Some(6),
-                problems: Counts::default().with_warn(2),
-            }),
+            staging(),
             cluster(ClusterSeed {
                 name: "dev-kind",
                 status: Status::Ok,
@@ -243,6 +234,39 @@ fn cluster(seed: ClusterSeed) -> ClusterSummary {
         nav,
         metrics: home::metrics(seed.name),
     }
+}
+
+fn staging() -> ClusterSummary {
+    let mut summary = cluster(ClusterSeed {
+        name: "staging",
+        status: Status::Warn,
+        state: "Warnings",
+        distro: "EKS",
+        region: "us-east-2",
+        version: Some("v1.30.5"),
+        nodes: Some(6),
+        problems: Counts::default().with_warn(2),
+    });
+    summary.nav = BTreeMap::from([
+        (Page::Nodes, Counts::total(6)),
+        (Page::Namespaces, Counts::total(14)),
+        (Page::Events, Counts::default().with_warn(3)),
+        (Page::Pods, Counts::total(187).with_warn(1)),
+        (Page::Deployments, Counts::total(31)),
+        (Page::StatefulSets, Counts::total(7)),
+        (Page::DaemonSets, Counts::total(9)),
+        (Page::Jobs, Counts::total(12)),
+        (Page::CronJobs, Counts::total(5)),
+        (Page::Kustomizations, Counts::total(3)),
+        (Page::HelmReleases, Counts::total(9).with_warn(1)),
+        (Page::Sources, Counts::total(4)),
+        (Page::Services, Counts::total(38)),
+        (Page::Ingresses, Counts::total(6)),
+        (Page::ConfigMaps, Counts::total(54)),
+        (Page::Secrets, Counts::total(40)),
+        (Page::Pvcs, Counts::total(11)),
+    ]);
+    summary
 }
 
 fn prod_us_east() -> ClusterSummary {

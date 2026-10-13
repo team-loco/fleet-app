@@ -46,6 +46,14 @@ pub enum Error {
     Paused(String),
     #[error("Flux object: {0}")]
     Flux(#[from] fleet_flux::ObjectError),
+    #[error("Not a kubeconfig: {0}")]
+    InvalidKubeconfig(String),
+    #[error("The name can only use letters, digits, - _ and ., and cannot start with a dot.")]
+    InvalidKubeconfigName,
+    #[error("A pasted kubeconfig named {0} already exists.")]
+    KubeconfigExists(String),
+    #[error("{0} is not a folder.")]
+    NotAFolder(PathBuf),
     #[error("debug container {name} did not start: {reason}")]
     DebugContainer { name: String, reason: String },
 }
