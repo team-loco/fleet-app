@@ -5,7 +5,7 @@ use fleet_core::pods::{
     Condition, Container, ContainerPort, ContainerState, Pod, PodEvent, PodPhase, Qos, Usage,
     Volume,
 };
-use fleet_core::{ClusterId, Counts, ResourceRef, Status};
+use fleet_core::{ClusterId, ResourceRef, Status};
 use jiff::Timestamp;
 use k8s_openapi::api::core::v1::{self as core, ContainerStatus};
 
@@ -325,27 +325,18 @@ pub fn pods(
     rows
 }
 
-pub fn counts(pods: &[Pod]) -> Counts {
-    let total = u32::try_from(pods.len()).unwrap_or(u32::MAX);
-    let tally = |status: Status| {
-        let matching = pods.iter().filter(|p| p.status == status).count();
-        u32::try_from(matching).unwrap_or(u32::MAX)
-    };
-    Counts::total(total)
-        .with_err(tally(Status::Err))
-        .with_warn(tally(Status::Warn))
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
     use serde_json::{Value, json};
 
+    use fleet_core::Counts;
+    use fleet_core::pods::{PodFilter, PodQuery, nav_counts};
+
     use super::*;
     use crate::metrics;
     use crate::problems::tests::{at, crash_status, now, parse, ready_status, replica_pod};
-    use crate::snapshot::pod_counts;
 
     fn cluster() -> ClusterId {
         ClusterId::new("kind-fleet-a")
@@ -453,7 +444,11 @@ mod tests {
             replica_pod("a-1-z", "a", "1", &json!({ "phase": "Pending" })),
         ];
         let rows = pods(&cluster(), &raw, &[], &[], now());
-        assert_eq!(counts(&rows), pod_counts(&raw));
-        assert_eq!(counts(&rows), Counts::total(3).with_err(1).with_warn(1));
+        let failing = PodQuery {
+            filter: PodFilter::Failing,
+            ..PodQuery::default()
+        };
+        assert_eq!(nav_counts(&rows, &cluster()), Counts::total(3).with_err(1));
+        assert_eq!(failing.apply(&rows, &cluster()).len(), 1);
     }
 }

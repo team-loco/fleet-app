@@ -20,6 +20,7 @@ use crate::theme::{
 const SORT_ASCENDING: &str = "↑";
 const SORT_DESCENDING: &str = "↓";
 const FLASH_STRENGTH: f32 = 0.35;
+const TRAILING: Pixels = SPACE_8;
 
 pub type CellRenderer<R> = Rc<dyn Fn(&R, &Palette) -> AnyElement>;
 pub type Comparator<R> = Rc<dyn Fn(&R, &R) -> Ordering>;
@@ -350,7 +351,7 @@ impl<R: 'static> Table<R> {
 
     pub fn min_width(&self) -> Pixels {
         let widths = self.columns.iter().map(|c| c.width);
-        min_row_width(widths, self.column_gap, self.inset + SPACE_8)
+        min_row_width(widths, self.column_gap, self.inset + TRAILING)
     }
 
     pub fn row(&self, index: usize) -> Option<&R> {
@@ -515,7 +516,7 @@ impl<R: 'static> Table<R> {
             .gap(self.column_gap)
             .h(ROW_TABLE_MIN)
             .pl(self.inset)
-            .pr(SPACE_8)
+            .pr(TRAILING)
             .border_b(RULE)
             .border_color(palette.line)
             .text_size(TEXT_SMALL)
@@ -584,7 +585,7 @@ impl<R: 'static> Table<R> {
             .gap(self.column_gap)
             .h(self.row_height)
             .pl(self.inset)
-            .pr(SPACE_8)
+            .pr(TRAILING)
             .when(self.rules, |row| {
                 row.border_b(RULE).border_color(palette.line)
             })
@@ -681,16 +682,23 @@ impl<R: 'static> Render for Table<R> {
                 list.flex_1().min_h_0().into_any_element()
             }
         };
+        let content = div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .min_w(self.min_width())
+            .when(!self.fit, Styled::h_full)
+            .children(header)
+            .child(body);
         div()
             .id(ElementId::NamedInteger(self.id.clone(), 0))
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
-            .flex()
-            .flex_col()
+            .overflow_x_scroll()
+            .restrict_scroll_to_axis()
             .when(!self.fit, Styled::size_full)
             .when(self.fit, Styled::w_full)
-            .children(header)
-            .child(body)
+            .child(content)
     }
 }
 

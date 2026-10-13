@@ -7,8 +7,8 @@ use gpui::{
 use super::button::IconButton;
 use crate::assets::{CHEVRON_DOWN, CHEVRON_UP};
 use crate::theme::{
-    ActiveTheme, COLLAPSE, DOCK_BAR, DOCK_HEIGHT, FONT_MONO, Palette, RULE, SPACE_3, SPACE_4,
-    SPACE_6, TEXT_CONTROL, TEXT_LABEL,
+    ActiveTheme, COLLAPSE, DOCK_BAR, DOCK_HEIGHT, FONT_MONO, Palette, RULE, SPACE_2, SPACE_3,
+    SPACE_4, SPACE_6, TEXT_CONTROL, TEXT_LABEL,
 };
 
 const COLLAPSE_TOOLTIP: &str = "Hide dock";
@@ -103,6 +103,7 @@ impl DockTab {
 pub struct Dock {
     state: Entity<DockState>,
     tabs: Vec<DockTab>,
+    after_tabs: Option<AnyElement>,
     height: Pixels,
 }
 
@@ -111,8 +112,14 @@ impl Dock {
         Self {
             state: state.clone(),
             tabs: Vec::new(),
+            after_tabs: None,
             height: DOCK_HEIGHT,
         }
+    }
+
+    pub fn after_tabs(mut self, element: impl IntoElement) -> Self {
+        self.after_tabs = Some(element.into_any_element());
+        self
     }
 
     pub fn tab(mut self, tab: DockTab) -> Self {
@@ -205,6 +212,15 @@ impl RenderOnce for Dock {
             .bg(palette.chrome)
             .text_size(TEXT_CONTROL)
             .children(tabs)
+            .children(self.after_tabs.map(|element| {
+                div()
+                    .flex()
+                    .items_center()
+                    .px(SPACE_2)
+                    .border_b(RULE)
+                    .border_color(palette.line)
+                    .child(element)
+            }))
             .child(
                 div()
                     .flex()

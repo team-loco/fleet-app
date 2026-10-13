@@ -50,6 +50,8 @@ pub const ASIDE_WIDTH: Pixels = px(300.);
 pub const ICON: Pixels = px(11.);
 pub const ICON_BUTTON: Pixels = px(22.);
 pub const GLYPH_SLOT: Pixels = px(10.);
+pub const CONTAINER_SQUARE: Pixels = px(8.);
+pub const CONTAINER_SQUARE_GAP: Pixels = px(3.);
 pub const TRAFFIC_LIGHT_X: Pixels = px(10.);
 pub const TRAFFIC_LIGHT_Y: Pixels = px(8.);
 

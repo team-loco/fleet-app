@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use crate::{ClusterId, ResourceRef, Status};
+use crate::{ClusterId, Counts, ResourceRef, Status};
 
 pub const POD_KIND: &str = "Pod";
 const RESTARTS_ERR: u32 = 5;
@@ -287,6 +287,15 @@ pub fn filter_counts(pods: &[&Pod]) -> Vec<(PodFilter, usize)> {
         .collect()
 }
 
+pub fn nav_counts(pods: &[Pod], cluster: &ClusterId) -> Counts {
+    let rows: Vec<&Pod> = pods.iter().filter(|pod| &pod.cluster == cluster).collect();
+    let tally = |filter: PodFilter| {
+        let matching = rows.iter().filter(|pod| filter.keeps(pod)).count();
+        u32::try_from(matching).unwrap_or(u32::MAX)
+    };
+    Counts::total(tally(PodFilter::All)).with_err(tally(PodFilter::Failing))
+}
+
 pub fn matches_query(pod: &Pod, query: &str) -> bool {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
@@ -490,6 +499,15 @@ mod tests {
         let refs: Vec<&Pod> = pods.iter().collect();
         let counts: Vec<usize> = filter_counts(&refs).into_iter().map(|(_, n)| n).collect();
         assert_eq!(counts, [3, 1, 1, 1]);
+    }
+
+    #[test]
+    fn nav_counts_are_the_all_and_failing_filters_of_one_cluster() {
+        let mut other = crashing();
+        other.cluster = ClusterId::new("staging");
+        let pods = [crashing(), healthy("a", "web"), pending(), other];
+        let prod = ClusterId::new("prod");
+        assert_eq!(nav_counts(&pods, &prod), Counts::total(3).with_err(1));
     }
 
     #[test]

@@ -204,13 +204,9 @@ pub fn summarize(
     let context = handle.context();
     let info = handle.info();
     let connection = handle.status();
-    let pods = handle.objects::<Pod>();
     let nodes = handle.objects::<Node>();
     let (status, state) = cluster_state(&connection, problems);
-    let mut nav = BTreeMap::from([
-        (Page::Pods, pod_counts(&pods)),
-        (Page::Nodes, node_counts(&nodes)),
-    ]);
+    let mut nav = BTreeMap::from([(Page::Nodes, node_counts(&nodes))]);
     for kind in handle.watched_kinds() {
         let page = kind_page(&kind);
         let total = kind_total(handle, &kind);

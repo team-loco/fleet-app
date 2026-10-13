@@ -224,9 +224,10 @@ rows are otherwise Sans 12.5), `.sortable(cmp)` / `.sort_by_key(key)`. Table opt
 element across the full width instead of cells (group headers). `set_columns(columns, cx)` swaps
 columns at runtime (e.g. one per cluster).
 Column widths are design values; define them as `const`s at the top of your screen file.
-`table.read(cx).min_width()` is the narrowest row that fits every column (fixed widths, flex minimums,
-gaps and padding); wrap a `fit_content` table in an `overflow_x_scroll` box with that `min_w` so it
-scrolls inside its section instead of overflowing the page.
+When the box is narrower than the columns' minimum widths (fixed widths, flex minimums, gaps and
+padding), the table scrolls horizontally inside its box; header and rows move together.
+`table.read(cx).min_width()` is that minimum; `min_row_width(widths, gap, padding)` gives the same
+for hand-built rows.
 
 ## Matrix
 
@@ -270,6 +271,7 @@ Dock::new(&self.dock)
     .tab(DockTab::new("Events").detail("7").content(self.events.clone()))
     .tab(DockTab::new("Terminal").detail("debug").content(terminal))
     .height(px)                                    // default DOCK_HEIGHT 250
+    .after_tabs(IconButton::svg("new", assets::PLUS, "New terminal"))   // optional, right after the tabs
 dock.update(cx, |d, cx| d.select(0, cx));          // e.g. clicking a pod opens its logs
 ```
 
@@ -287,7 +289,8 @@ logs.update(cx, |l, cx| l.extend(lines, cx));
 LogLine::new(Some("21:12:20.231"), Some(Level::Error), "open /etc/checkout/stripe.env: …")
 l.set_follow(bool, cx)       // follow tail; scrolling up turns it off
 l.set_query(text, cx)        // case-insensitive highlight, jumps to first match
-l.set_timestamps(bool, cx)
+l.set_timestamps(bool, cx)   // l.timestamps() reads it
+l.export()                   // plain text of the buffer, one line per entry (for downloads)
 l.set_wrap(bool, cx)         // wrap long lines (switches to a variable-height list)
 l.clear(cx)
 ```

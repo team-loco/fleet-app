@@ -92,12 +92,19 @@ impl LineDiscipline {
     }
 }
 
+pub fn opening(debug: bool) -> String {
+    if debug { history() } else { PROMPT.to_owned() }
+}
+
 pub fn run(request: &ExecRequest) {
-    let note = started_note(&request.target.container);
-    if !request.output.send_blocking(ExecEvent::Started { note }) {
-        return;
+    let debug = request.target.is_debug();
+    if debug {
+        let note = started_note(&request.target.container);
+        if !request.output.send_blocking(ExecEvent::Started { note }) {
+            return;
+        }
     }
-    let transcript = history().into_bytes();
+    let transcript = opening(debug).into_bytes();
     if !request.output.send_blocking(ExecEvent::Output(transcript)) {
         return;
     }
@@ -156,6 +163,12 @@ mod tests {
         let steps = discipline.feed(b"exit\r");
         assert_eq!(steps.last(), Some(&Step::Exit));
         assert_eq!(discipline.feed(&[CTRL_D]), [Step::Exit]);
+    }
+
+    #[test]
+    fn plain_exec_opens_on_a_fresh_prompt() {
+        assert_eq!(opening(false), PROMPT);
+        assert_eq!(opening(true), history());
     }
 
     #[test]

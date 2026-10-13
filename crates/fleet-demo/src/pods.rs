@@ -7,6 +7,8 @@ use fleet_core::pods::{
 };
 use fleet_core::{ClusterId, ResourceRef, Status};
 
+mod fill;
+
 const CLUSTER: &str = "prod-us-east";
 const MINUTE: u64 = 60;
 const HOUR: u64 = 60 * MINUTE;
@@ -526,12 +528,18 @@ pub fn pods() -> Vec<Pod> {
             (187, 288),
         ),
     ];
+    let nodes: Vec<String> = crate::detail::nodes()
+        .into_iter()
+        .filter(|node| node.schedulable)
+        .map(|node| node.name)
+        .collect();
     checkout
         .into_iter()
         .chain(workload_seeds())
         .chain(problem_seeds())
         .chain(platform_seeds())
         .map(pod)
+        .chain(fill::pods(&nodes))
         .collect()
 }
 
@@ -667,10 +675,26 @@ mod tests {
 
     use super::*;
 
+    const DESIGN_ROWS: usize = 13;
+
+    #[test]
+    fn names_are_unique() {
+        let pods = pods();
+        let names: std::collections::BTreeSet<(&str, &str)> = pods
+            .iter()
+            .map(|p| (p.namespace.as_str(), p.name.as_str()))
+            .collect();
+        assert_eq!(names.len(), pods.len());
+    }
+
     #[test]
     fn dataset_matches_the_design_rows() {
         let pods = pods();
-        let names: Vec<&str> = pods.iter().map(|p| p.name.as_str()).collect();
+        let names: Vec<&str> = pods
+            .iter()
+            .take(DESIGN_ROWS)
+            .map(|p| p.name.as_str())
+            .collect();
         assert_eq!(
             names,
             [
@@ -689,7 +713,7 @@ mod tests {
                 "aws-node-7kx2p",
             ]
         );
-        let restarts: Vec<u32> = pods.iter().map(Pod::restarts).collect();
+        let restarts: Vec<u32> = pods.iter().take(DESIGN_ROWS).map(Pod::restarts).collect();
         assert_eq!(restarts, [14, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0]);
     }
 
@@ -701,10 +725,10 @@ mod tests {
         assert_eq!(
             counts,
             [
-                (PodFilter::All, 13),
-                (PodFilter::Running, 10),
-                (PodFilter::Pending, 2),
-                (PodFilter::Failing, 1),
+                (PodFilter::All, 412),
+                (PodFilter::Running, 398),
+                (PodFilter::Pending, 9),
+                (PodFilter::Failing, 5),
             ]
         );
     }
