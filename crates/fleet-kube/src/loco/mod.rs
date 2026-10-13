@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use fleet_core::Update;
 use fleet_core::action::Notice;
 use fleet_core::loco::{LocoCluster, LocoCommand};
-use fleet_core::{ClusterId, ClusterSummary, Page, ResourceRef, Sender};
+use fleet_core::{ClusterId, ClusterSummary, Page, ResourceRef, Seen, Sender, Uid};
 use fleet_loco::platform::{
     Observation, WorkloadHealth, agent_sync, component_catalog, deployment_health,
 };
@@ -27,10 +27,10 @@ use kube::api::{DynamicObject, PartialObjectMeta, PropagationPolicy};
 use kube::{Api, Client, Resource};
 use serde::de::DeserializeOwned;
 
-use crate::actions::failed_notice;
+use crate::actions::{failed_notice, mutate};
 use crate::error::Error;
 use crate::manager::{ClusterHandle, Shared, Subscription, lock};
-use crate::ops::{LogRequest, ObjectRef};
+use crate::ops::{LogRequest, ObjectRef, PatchBody, restart_patch};
 use crate::resources::{CustomKind, WatchKind, Watched};
 use crate::task::TaskGuard;
 
@@ -344,7 +344,8 @@ impl LocoBackend {
         }
     }
 
-    fn restart(&self, application: &ResourceRef, handle: &ClusterHandle) {
+    fn restart(&self, seen: &Seen, handle: &ClusterHandle) {
+        let application = &seen.target;
         let found = handle
             .custom_objects(&application_kind())
             .into_iter()
@@ -379,8 +380,9 @@ impl LocoBackend {
         let changed = self.changed.clone();
         let updates = self.updates.clone();
         let application = application.clone();
+        let uid = seen.uid.clone();
         tokio::spawn(async move {
-            if let Err(error) = handle.rollout_restart(&target).await {
+            if let Err(error) = restart_workload(&handle, &target, &uid).await {
                 tracing::warn!(%error, application = %application, "restart failed");
                 lock(&pending).remove(&application);
                 changed.store(true, Ordering::Relaxed);
@@ -392,7 +394,8 @@ impl LocoBackend {
         });
     }
 
-    fn cancel(&self, build: &ResourceRef, handle: &ClusterHandle) {
+    fn cancel(&self, seen: &Seen, handle: &ClusterHandle) {
+        let build = &seen.target;
         let target = ObjectRef {
             api_version: "batch/v1".to_owned(),
             kind: "Job".to_owned(),
@@ -405,10 +408,9 @@ impl LocoBackend {
         let pending = self.pending.clone();
         let changed = self.changed.clone();
         let build = build.clone();
+        let uid = seen.uid.clone();
         tokio::spawn(async move {
-            let outcome = handle
-                .delete(&target, PropagationPolicy::Background, None)
-                .await;
+            let outcome = cancel_job(&handle, &target, &uid).await;
             let Err(error) = outcome else {
                 return;
             };
@@ -419,6 +421,30 @@ impl LocoBackend {
             lock(&pending).insert(build, Pending::CancelFailed(error.to_string()));
             changed.store(true, Ordering::Relaxed);
         });
+    }
+}
+
+async fn restart_workload(
+    handle: &ClusterHandle,
+    target: &ObjectRef,
+    uid: &Uid,
+) -> Result<(), Error> {
+    let uid = mutate::known(uid)?;
+    let body = PatchBody::Merge(restart_patch(Timestamp::now())).guarded(uid);
+    match handle.patch(target, body).await {
+        Ok(_) => Ok(()),
+        Err(error) => Err(mutate::explain(handle, target, uid, error).await),
+    }
+}
+
+async fn cancel_job(handle: &ClusterHandle, target: &ObjectRef, uid: &Uid) -> Result<(), Error> {
+    let uid = mutate::known(uid)?;
+    match handle
+        .delete(target, PropagationPolicy::Background, Some(uid))
+        .await
+    {
+        Ok(()) => Ok(()),
+        Err(error) => Err(mutate::explain(handle, target, uid, error).await),
     }
 }
 
@@ -710,5 +736,68 @@ mod tests {
         assert!(started.elapsed() < ROUND_TRIP * 2);
         assert_eq!(traffic.peak(), 2);
         assert_eq!(observed.map(|o| o.installed), Some(true));
+    }
+
+    fn target(kind: &str, api_version: &str) -> ObjectRef {
+        ObjectRef {
+            api_version: api_version.to_owned(),
+            kind: kind.to_owned(),
+            namespace: Some("apps".to_owned()),
+            name: "podinfo".to_owned(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_restart_never_touches_a_recreated_workload() {
+        let (_manager, handle, traffic, changed) = crate::fake::recreated("Deployment");
+        let deployment = target("Deployment", "apps/v1");
+        let outcome = restart_workload(&handle, &deployment, &Uid::new(crate::fake::SEEN)).await;
+        assert!(
+            matches!(outcome, Err(Error::Replaced { .. })),
+            "{outcome:?}"
+        );
+        assert!(!*lock(&changed));
+        let sent: Vec<Option<String>> = traffic
+            .bodies(
+                &http::Method::PATCH,
+                "/apis/apps/v1/namespaces/apps/deployments/podinfo",
+            )
+            .iter()
+            .map(|body| crate::fake::sent_uid(body, "/metadata/uid"))
+            .collect();
+        assert_eq!(sent, [Some(crate::fake::SEEN.to_owned())]);
+    }
+
+    #[tokio::test]
+    async fn a_cancel_never_deletes_a_recreated_job() {
+        let (_manager, handle, traffic, changed) = crate::fake::recreated("Job");
+        let job = target("Job", "batch/v1");
+        let outcome = cancel_job(&handle, &job, &Uid::new(crate::fake::SEEN)).await;
+        assert!(
+            matches!(outcome, Err(Error::Replaced { .. })),
+            "{outcome:?}"
+        );
+        assert!(!*lock(&changed));
+        let sent: Vec<Option<String>> = traffic
+            .bodies(
+                &http::Method::DELETE,
+                "/apis/batch/v1/namespaces/apps/jobs/podinfo",
+            )
+            .iter()
+            .map(|body| crate::fake::sent_uid(body, "/preconditions/uid"))
+            .collect();
+        assert_eq!(sent, [Some(crate::fake::SEEN.to_owned())]);
+    }
+
+    #[tokio::test]
+    async fn loco_writes_without_a_uid_are_refused_before_any_request() {
+        let (_manager, handle, traffic, _) = crate::fake::recreated("Job");
+        let job = target("Job", "batch/v1");
+        let deployment = target("Deployment", "apps/v1");
+        let cancel = cancel_job(&handle, &job, &Uid::default()).await;
+        let restart = restart_workload(&handle, &deployment, &Uid::default()).await;
+        assert!(matches!(cancel, Err(Error::MissingField("metadata.uid"))));
+        assert!(matches!(restart, Err(Error::MissingField("metadata.uid"))));
+        assert_eq!(traffic.requests(), Vec::new());
     }
 }

@@ -6,8 +6,12 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use http::{Method, Request, Response, StatusCode};
+use k8s_openapi::api::apps::v1::Deployment;
+use k8s_openapi::api::batch::v1::Job;
+use k8s_openapi::api::core::v1::ConfigMap;
 use kube::Client;
 use kube::client::Body;
+use kube::core::ApiResource;
 use serde_json::Value;
 use tower_service::Service;
 
@@ -152,4 +156,65 @@ pub fn supervised(
     let handle = manager.connect(context);
     handle.shared.set_client(Some(client));
     (manager, handle, events)
+}
+
+pub const SEEN: &str = "seen-uid";
+pub const RECREATED: &str = "recreated-uid";
+const CONFLICT: &str = r#"{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Conflict","code":409,"message":"Precondition failed: UID mismatch"}"#;
+const UID_POINTERS: [&str; 3] = ["/preconditions/uid", "/metadata/uid", "/0/value"];
+
+fn object(kind: &str, uid: &str) -> String {
+    serde_json::json!({
+        "apiVersion": crate::actions::mutate::api_version(kind),
+        "kind": kind,
+        "metadata": { "name": "podinfo", "namespace": "apps", "uid": uid }
+    })
+    .to_string()
+}
+
+pub fn sent_uid(body: &Value, pointer: &str) -> Option<String> {
+    body.pointer(pointer)
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
+pub fn recreated(
+    kind: &'static str,
+) -> (
+    ClusterManager,
+    ClusterHandle,
+    Arc<Traffic>,
+    Arc<Mutex<bool>>,
+) {
+    let changed = Arc::new(Mutex::new(false));
+    let state = changed.clone();
+    let (client, traffic) = client_reading_bodies(Duration::ZERO, move |method, _, body| {
+        let current = object(kind, RECREATED);
+        if method == Method::GET {
+            return Some((StatusCode::OK, current));
+        }
+        let wanted = UID_POINTERS
+            .iter()
+            .find_map(|pointer| sent_uid(body, pointer));
+        if wanted.as_deref() != Some(RECREATED) {
+            return Some((StatusCode::CONFLICT, CONFLICT.to_owned()));
+        }
+        *lock(&state) = true;
+        Some((StatusCode::OK, current))
+    });
+    let (manager, handle) = handle(&client);
+    let mut resources = lock(&handle.shared.resources);
+    for (api_version, name, resource) in [
+        ("v1", "ConfigMap", ApiResource::erase::<ConfigMap>(&())),
+        (
+            "apps/v1",
+            "Deployment",
+            ApiResource::erase::<Deployment>(&()),
+        ),
+        ("batch/v1", "Job", ApiResource::erase::<Job>(&())),
+    ] {
+        resources.insert((api_version.to_owned(), name.to_owned()), resource);
+    }
+    drop(resources);
+    (manager, handle, traffic, changed)
 }

@@ -71,6 +71,7 @@ fn note(loco: &mut LocoCluster, resource: &ResourceRef, tone: LogTone, text: Str
 mod tests {
     use std::time::Duration;
 
+    use fleet_core::Uid;
     use fleet_core::loco::{
         Application, Applications, Build, BuildPhase, Builds, ControllerObject, Placement,
         Workspace, WorkspaceApps,
@@ -110,6 +111,7 @@ mod tests {
             rollout: None,
             resources: None,
             health_check: None,
+            workload_uid: Uid::default(),
             objects: vec![ControllerObject {
                 status: deployment,
                 kind: "Deployment".into(),
@@ -129,6 +131,7 @@ mod tests {
             took: None,
             image_digest: None,
             cache_hit_percent: None,
+            job_uid: Uid::default(),
             job: None,
             node: None,
             fetch: Status::Ok,

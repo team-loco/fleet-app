@@ -108,10 +108,11 @@ impl CompareScreen {
     }
 
     fn apply(&self, spec: &SpecDiff, comparison: &Comparison, cx: &mut Context<Self>) -> Button {
-        let target = comparison.on(&spec.base);
+        let seen = comparison.seen_on(&spec.base);
+        let target = seen.target.clone();
         let command = Command::CopySpec {
             from: spec.other.clone(),
-            to: target.clone(),
+            to: seen,
             path: spec.path.clone(),
         };
         let this = cx.entity().downgrade();
@@ -426,6 +427,7 @@ fn diff_line(line: &fleet_core::changes::PatchLine) -> DiffLine {
 
 #[cfg(test)]
 mod tests {
+    use fleet_core::Uid;
     use fleet_core::changes::PatchLine;
     use fleet_core::compare::ComparedCluster;
 
@@ -454,6 +456,7 @@ mod tests {
         };
         let head = |name: &str| ComparedCluster {
             cluster: ClusterId::new(name),
+            uid: Uid::default(),
             status: Status::Ok,
             health: "Healthy".into(),
         };

@@ -155,8 +155,8 @@ impl BuildsScreen {
 
     fn summary(build: &Build, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let cancel = build.phase.is_active().then(|| {
-            let target = build.resource.clone();
-            let detail = format!("{} · {}", target.cluster, build.job_label());
+            let target = build.seen();
+            let detail = format!("{} · {}", target.target.cluster, build.job_label());
             let title = format!("{} · {}", build.service, build.id);
             let this = cx.entity().downgrade();
             Button::new("loco-build-cancel", CANCEL)

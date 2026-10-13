@@ -19,6 +19,7 @@ pub enum Mutation {
     Flux(FluxKey, Uid, FluxAction),
     CopySpec {
         target: ResourceRef,
+        uid: Uid,
         from: ClusterId,
         path: String,
         template: Value,
@@ -304,6 +305,7 @@ mod tests {
             name: "checkout-api".into(),
             clusters: vec![ComparedCluster {
                 cluster: ClusterId::new("a"),
+                uid: Uid::new("u1"),
                 status: Status::Err,
                 health: "Degraded".into(),
             }],
@@ -312,6 +314,7 @@ mod tests {
         });
         let mutation = Mutation::CopySpec {
             target: target.clone(),
+            uid: Uid::new("u1"),
             from: ClusterId::new("b"),
             path: "spec.template".into(),
             template: Value::Null,
@@ -319,7 +322,7 @@ mod tests {
         assert_eq!(
             Mutation::from_command(&Command::CopySpec {
                 from: ClusterId::new("b"),
-                to: target,
+                to: seen(target),
                 path: "spec.template".into(),
             }),
             None

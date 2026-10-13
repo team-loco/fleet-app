@@ -66,7 +66,7 @@ pub enum Command {
     Loco(crate::loco::LocoCommand),
     CopySpec {
         from: ClusterId,
-        to: ResourceRef,
+        to: Seen,
         path: String,
     },
     ShowClusterSettings(ClusterId),

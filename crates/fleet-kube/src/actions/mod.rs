@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use fleet_core::action::Notice;
 use fleet_core::{
-    ClusterId, Command, ExecRequest, Forward, LogRequest, Receiver, ResourceRef, Sender, Snapshot,
-    Status, Update,
+    ClusterId, Command, ExecRequest, Forward, LogRequest, Receiver, ResourceRef, Seen, Sender,
+    Snapshot, Status, Update,
 };
 use pending::Mutation;
 
@@ -293,8 +293,14 @@ async fn perform(handle: &ClusterHandle, mutation: &Mutation) -> Result<Vec<drai
         }
         Mutation::Flux(key, uid, action) => mutate::flux(handle, key, uid, *action).await?,
         Mutation::CopySpec {
-            target, template, ..
-        } => mutate::replace_template(handle, target, template).await?,
+            target,
+            uid,
+            template,
+            ..
+        } => {
+            let seen = Seen::new(target.clone(), uid.clone());
+            mutate::replace_template(handle, &seen, template).await?;
+        }
     }
     Ok(Vec::new())
 }

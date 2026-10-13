@@ -1,3 +1,4 @@
+use std::panic::AssertUnwindSafe;
 use std::time::{Duration, Instant};
 
 use fleet_core::compare::{Field, SpecDiff};
@@ -10,6 +11,7 @@ use fleet_kube::LiveBackend;
 use fleet_kube::discovery::{DiscoverySources, KubeContext, discover};
 use fleet_kube::settings::KubeSettings;
 use fleet_kube::store::ClusterStore;
+use futures::FutureExt;
 use k8s_openapi::api::apps::v1::{ControllerRevision, Deployment, StatefulSet};
 use k8s_openapi::api::core::v1::{ConfigMap, Node, Pod, PodTemplateSpec};
 use kube::api::{ApiResource, DynamicObject, GroupVersionKind};
@@ -56,11 +58,23 @@ fn kind_context(name: &str) -> Option<KubeContext> {
 }
 
 fn kind_only_home(contexts: &[KubeContext]) -> tempfile::TempDir {
-    let Some(first) = contexts.first() else {
+    let mut files: Vec<&std::path::Path> = contexts.iter().map(|c| c.id.file.as_path()).collect();
+    files.dedup();
+    let mut merged: Option<Kubeconfig> = None;
+    for file in files {
+        let Ok(config) = Kubeconfig::read_from(file) else {
+            panic!("kubeconfig readable");
+        };
+        merged = match merged {
+            Some(previous) => match previous.merge(config) {
+                Ok(both) => Some(both),
+                Err(error) => panic!("kubeconfigs merge: {error}"),
+            },
+            None => Some(config),
+        };
+    }
+    let Some(mut config) = merged else {
         panic!("at least one kind context");
-    };
-    let Ok(mut config) = Kubeconfig::read_from(&first.id.file) else {
-        panic!("kubeconfig readable");
     };
     let wanted = |name: &str| contexts.iter().any(|c| c.id.context == name);
     let clusters = |name: &str| contexts.iter().any(|c| c.cluster == name);
@@ -849,16 +863,9 @@ async fn recreate_scratch(deployments: &Api<Deployment>, image: &str) {
     assert!(created.is_ok(), "{created:?}");
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn compare_diffs_two_clusters_and_applies_the_other_template() {
-    let Some(harness) = Harness::start_with(&[CONTEXT, OTHER_CONTEXT]).await else {
-        return;
-    };
-    let ours: Api<Deployment> = Api::namespaced(harness.client.clone(), DEBUG_NAMESPACE);
-    let other_client = client_for(OTHER_CONTEXT).await;
-    let theirs: Api<Deployment> = Api::namespaced(other_client, DEBUG_NAMESPACE);
-    recreate_scratch(&ours, DEBUG_IMAGE).await;
-    recreate_scratch(&theirs, NEWER_IMAGE).await;
+async fn compare_and_apply(harness: &Harness, ours: &Api<Deployment>, theirs: &Api<Deployment>) {
+    recreate_scratch(ours, DEBUG_IMAGE).await;
+    recreate_scratch(theirs, NEWER_IMAGE).await;
     let target = resource("Deployment", Some(DEBUG_NAMESPACE), SCRATCH_DEPLOYMENT);
     harness.send(Command::Compare(target.clone()));
     let snapshot = harness
@@ -882,12 +889,12 @@ async fn compare_diffs_two_clusters_and_applies_the_other_template() {
     assert!(image.is_some_and(Field::differs), "{comparison:#?}");
     harness.send(Command::CopySpec {
         from: ClusterId::new(OTHER_CONTEXT),
-        to: target.clone(),
+        to: comparison.seen_on(&cluster()),
         path: "spec.template".into(),
     });
     eventually(
         "template applied",
-        || deployment_image(&ours),
+        || deployment_image(ours),
         |image| image.as_deref() == Some(NEWER_IMAGE),
     )
     .await;
@@ -899,11 +906,27 @@ async fn compare_diffs_two_clusters_and_applies_the_other_template() {
                 .is_some_and(|spec| !spec.has_changes())
         })
         .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn compare_diffs_two_clusters_and_applies_the_other_template() {
+    let Some(harness) = Harness::start_with(&[CONTEXT, OTHER_CONTEXT]).await else {
+        return;
+    };
+    let ours: Api<Deployment> = Api::namespaced(harness.client.clone(), DEBUG_NAMESPACE);
+    let other_client = client_for(OTHER_CONTEXT).await;
+    let theirs: Api<Deployment> = Api::namespaced(other_client, DEBUG_NAMESPACE);
+    let outcome = AssertUnwindSafe(compare_and_apply(&harness, &ours, &theirs))
+        .catch_unwind()
+        .await;
     for deployments in [&ours, &theirs] {
         let deleted = deployments
             .delete(SCRATCH_DEPLOYMENT, &DeleteParams::default())
             .await;
-        assert!(deleted.is_ok(), "{deleted:?}");
+        assert!(deleted.is_ok() || outcome.is_err(), "{deleted:?}");
+    }
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
     }
 }
 

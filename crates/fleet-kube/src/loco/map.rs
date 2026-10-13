@@ -6,7 +6,7 @@ use fleet_core::loco::{
     BuildPhase, Builds, Component, ControllerObject, Degraded, HealthCheck, Listener, LocoCluster,
     Placement, Platform, Resources, Rollout, Route, Routes, Workspace, WorkspaceApps, short_digest,
 };
-use fleet_core::{ClusterId, Counts, Page, ResourceRef, Status};
+use fleet_core::{ClusterId, Counts, Page, ResourceRef, Status, Uid};
 use fleet_loco::applications::{
     ApplicationModel, ObjectRelationship, RelatedObject, application_model, related_object,
 };
@@ -198,6 +198,10 @@ fn reference(cluster: &ClusterId, kind: &str, namespace: &str, name: &str) -> Re
     }
 }
 
+fn uid_of(metadata: &ObjectMeta) -> Uid {
+    Uid::new(metadata.uid.clone().unwrap_or_default())
+}
+
 fn annotation<'a>(metadata: &'a ObjectMeta, key: &str) -> Option<&'a str> {
     metadata.annotations.as_ref()?.get(key).map(String::as_str)
 }
@@ -295,6 +299,15 @@ fn application(
         fail_threshold: check.fail_threshold,
     });
     let (objects, route) = controller_objects(inputs, resource, model, routes, listeners);
+    let workload_uid = inputs
+        .deployments
+        .iter()
+        .find(|deployment| {
+            deployment.metadata.namespace.as_deref() == Some(model.workspace_namespace.as_str())
+                && deployment.metadata.name.as_deref() == Some(model.workload_name.as_str())
+        })
+        .map(|deployment| uid_of(&deployment.metadata))
+        .unwrap_or_default();
     Application {
         resource: reference(
             &inputs.cluster,
@@ -302,6 +315,7 @@ fn application(
             &model.application.namespace,
             &model.application.name,
         ),
+        workload_uid,
         name: model.application.name.clone(),
         environment: model.environment.clone().unwrap_or_default(),
         region: resource.spec.region.clone(),
@@ -621,7 +635,7 @@ fn builds(inputs: &Inputs, now: Timestamp, zone: &TimeZone) -> Builds {
     let builds = ordered
         .into_iter()
         .filter_map(|build| match build_model(build, &jobs, &pods, chrono_now) {
-            Ok(model) => Some(build_row(inputs, build, &model, &pods, zone)),
+            Ok(model) => Some(build_row(inputs, build, &model, &jobs, &pods, zone)),
             Err(error) => {
                 tracing::debug!(%error, "skipping an unreadable Build");
                 None
@@ -645,9 +659,18 @@ fn build_row(
     inputs: &Inputs,
     build: &LocoBuild,
     model: &BuildModel,
+    jobs: &[Job],
     pods: &[Pod],
     zone: &TimeZone,
 ) -> Build {
+    let job_uid = jobs
+        .iter()
+        .find(|job| {
+            job.metadata.namespace == Some(model.build.namespace.clone())
+                && job.metadata.name.as_deref() == Some(model.build.name.as_str())
+        })
+        .map(|job| uid_of(&job.metadata))
+        .unwrap_or_default();
     let phase = build_phase(&model.phase);
     let pod = model.pods.last().and_then(|reference| {
         pods.iter()
@@ -672,6 +695,7 @@ fn build_row(
             &model.build.namespace,
             &model.build.name,
         ),
+        job_uid,
         id: build.spec.build_id.clone(),
         service: format!("{}{}", fleet_loco::RESOURCE_PREFIX, model.resource_id),
         workspace: Workspace {

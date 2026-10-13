@@ -3,7 +3,7 @@ use std::time::Duration;
 use super::Workspace;
 use crate::filter::TextFilter;
 use crate::time::age;
-use crate::{ClusterId, ResourceRef, Status};
+use crate::{ClusterId, ResourceRef, Seen, Status, Uid};
 
 const MISSING: &str = "—";
 const SEPARATOR: &str = " · ";
@@ -213,6 +213,7 @@ impl AppRoute {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Application {
     pub resource: ResourceRef,
+    pub workload_uid: Uid,
     pub name: String,
     pub environment: String,
     pub region: Option<String>,
@@ -231,6 +232,10 @@ pub struct Application {
 }
 
 impl Application {
+    pub fn seen(&self) -> Seen {
+        Seen::new(self.resource.clone(), self.workload_uid.clone())
+    }
+
     pub fn replicas(&self) -> String {
         match (self.ready_replicas, self.desired_replicas) {
             (Some(ready), Some(desired)) => format!("{ready}/{desired}"),
@@ -383,6 +388,7 @@ pub(crate) mod tests {
             rollout: None,
             resources: None,
             health_check: None,
+            workload_uid: Uid::default(),
             objects: Vec::new(),
             route: None,
         }

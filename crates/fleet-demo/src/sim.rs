@@ -60,7 +60,7 @@ fn set_cluster(
 
 #[cfg(test)]
 mod tests {
-    use fleet_core::{Page, Preferences};
+    use fleet_core::{Page, Preferences, Seen, Uid};
 
     use super::*;
     use crate::simulate::{self, Settle};
@@ -133,7 +133,7 @@ mod tests {
         };
         let command = Command::CopySpec {
             from: cluster("prod-eu-west"),
-            to: target.clone(),
+            to: Seen::new(target.clone(), Uid::default()),
             path: "spec.template".into(),
         };
         let pending = simulate::apply(&mut state, &command);
