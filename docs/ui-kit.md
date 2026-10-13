@@ -65,15 +65,12 @@ PageHeader::new("checkout-api")
     .meta(div().flex().gap(SPACE_4).child("payments ·").child(Link::new("ks", "apps-payments")))
 ```
 
-`Lede` is the one-sentence summary at the top of a list page that the shell titles itself
-(Nodes, Namespaces, Events, resource lists, Cluster overview): the sentence in `fg2`, an optional
-mono meta line, and optional controls on the right. Build the sentence in `fleet-core` so demo and
-live read the same words.
+`MetaLine` is a mono, muted line of facts under a list page's header (Cluster overview: distro,
+version, region, metrics source; Nodes: the instance mix). List pages have no summary sentence
+(decision 22); the first row under the header is the `FilterBar`.
 
 ```rust
-Lede::new(fleet_core::nodes::sentence(&nodes))
-    .meta("14 nodes · 13 ready · 1 cordoned")
-    .end(filter_controls)
+MetaLine::new("14 nodes · 13 ready · 1 cordoned · m6i.xlarge ×12")
 ```
 
 ## Buttons and controls

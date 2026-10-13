@@ -75,3 +75,4 @@ Spec column points at `design/`.
 | CXC | Overview resource visuals and navigation; full nav selection (#125, #126, #122) | claude | overview-visuals | done |
 | CXB | Repair terminal TTY, rendering and explicit shell lifecycle; remove previous container logs (#128, #129) | claude | terminal-fix | done |
 | TBL2b | one namespace memory per cluster and list in cluster preferences; pods and resource lists scoped again after #146 (#117) | claude | tables-namespace-unify | done |
+| TBL3 | actions on table rows (hover ⋯, right-click), inspectors keep the primary action; no summary sentence on list pages (#119, #120) | claude | tables-row-actions-2 | done |

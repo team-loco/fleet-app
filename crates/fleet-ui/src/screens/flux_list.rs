@@ -1,12 +1,12 @@
 use fleet_core::filter::StatusFilter;
-use fleet_core::{ClusterId, Command, Counts, FluxObject, Page};
+use fleet_core::{ClusterId, Command, Counts, FluxAction, FluxObject, Page};
 use gpui::{
-    AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels, Render, Styled,
-    Window, div, px,
+    App, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels, Render,
+    Styled, WeakEntity, Window, div, px,
 };
 
 use super::ScreenEvent;
-use crate::kit::{Column, FilterBar, FilterEvent, Lede, Table, TableEvent, chip_label};
+use crate::kit::{Column, FilterBar, FilterEvent, MenuItem, Table, TableEvent, chip_label};
 
 const NAME_WEIGHT: f32 = 1.;
 const NAME_MIN: Pixels = px(220.);
@@ -25,8 +25,10 @@ impl EventEmitter<ScreenEvent> for FluxListScreen {}
 
 impl FluxListScreen {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let screen = cx.weak_entity();
         let table = cx.new(|cx| {
             Table::new("flux-list", columns(), cx)
+                .row_actions(move |object: &FluxObject| row_items(object, &screen))
                 .row_key(|o: &FluxObject| format!("{}/{}", o.key.namespace, o.key.name).into())
                 .type_ahead(|o: &FluxObject| o.key.name.clone().into())
                 .empty("No Flux objects match the filter.")
@@ -52,7 +54,7 @@ impl FluxListScreen {
         }
     }
 
-    pub fn list_focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
+    pub fn list_focus(&self, cx: &App) -> gpui::FocusHandle {
         gpui::Focusable::focus_handle(&self.table, cx)
     }
 
@@ -127,22 +129,56 @@ impl FluxListScreen {
 
 impl Render for FluxListScreen {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let counts = Counts::of(self.objects.iter().map(FluxObject::status));
-        let sentence = match counts.flagged() {
-            0 => format!("All {} objects are healthy.", self.objects.len()),
-            flagged => format!(
-                "{flagged} of {} objects need attention.",
-                self.objects.len()
-            ),
-        };
         div()
             .size_full()
             .flex()
             .flex_col()
-            .child(Lede::new(sentence))
             .child(self.filter.clone())
             .child(div().flex_1().min_h_0().child(self.table.clone()))
     }
+}
+
+fn row_items(object: &FluxObject, screen: &WeakEntity<FluxListScreen>) -> Vec<MenuItem> {
+    let emit = |command: Command| {
+        let screen = screen.clone();
+        move |_: &mut Window, cx: &mut App| {
+            let command = command.clone();
+            let _ = screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+        }
+    };
+    let key = object.key.clone();
+    let uid = object.uid.clone();
+    let reconcile = Command::Flux(key.clone(), uid.clone(), FluxAction::Reconcile);
+    let suspend = if object.phase.is_suspended() {
+        MenuItem::new(
+            "Resume",
+            emit(Command::Flux(key.clone(), uid, FluxAction::Resume)),
+        )
+        .description("Let Flux apply changes here again, starting with a reconcile now.")
+    } else {
+        MenuItem::new(
+            "Suspend",
+            emit(Command::Flux(key.clone(), uid, FluxAction::Suspend)),
+        )
+        .description("Stop Flux applying changes here until resumed.")
+    };
+    let mut items = vec![
+        MenuItem::new("Reconcile", emit(reconcile))
+            .description("Ask Flux to apply the current revision now."),
+        suspend,
+    ];
+    if let Some(source) = object.source.clone() {
+        let description = format!(
+            "{} {}: URL, ref and last fetch.",
+            source.kind.label(),
+            source.name
+        );
+        items.push(
+            MenuItem::new("Open source", emit(Command::OpenFluxObject(source)))
+                .description(description),
+        );
+    }
+    items
 }
 
 fn columns() -> Vec<Column<FluxObject>> {

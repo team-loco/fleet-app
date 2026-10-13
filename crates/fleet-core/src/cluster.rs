@@ -4,15 +4,13 @@ use std::time::Duration;
 use crate::events::{self, Event, recent_warnings};
 use crate::filter::TextFilter;
 use crate::nodes::{Node, NodeSummary};
-use crate::overview::{Capacity, Overview, WorkloadHealth, join_clauses, named, plural, verb};
+use crate::overview::{Capacity, Overview, WorkloadHealth};
 use crate::resources::{Resource, ResourceKind};
 use crate::{Counts, Page, Status};
 
 pub const CPU_UNIT: &str = "cores";
 pub const MEMORY_UNIT: &str = "GiB";
 pub const ACTIVE_PHASE: &str = "Active";
-const GROUP_SEPARATOR: &str = "; ";
-const NO_NAMESPACE_PROBLEMS: &str = "No namespace has problems.";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Namespace {
@@ -34,37 +32,6 @@ impl Namespace {
     pub fn phase_note(&self) -> Option<&str> {
         (!self.phase.is_empty() && self.phase != ACTIVE_PHASE).then_some(self.phase.as_str())
     }
-}
-
-pub fn namespace_sentence(namespaces: &[Namespace]) -> String {
-    let with = |pick: fn(&Counts) -> bool| -> Vec<&str> {
-        namespaces
-            .iter()
-            .filter(|n| pick(&n.problems))
-            .map(|n| n.name.as_str())
-            .collect()
-    };
-    let errors = with(|c| c.err > 0);
-    let warnings = with(|c| c.err == 0 && c.warn > 0);
-    let suspended = with(|c| c.err == 0 && c.warn == 0 && c.sus > 0);
-    let mut clauses = Vec::new();
-    for (names, what) in [
-        (&errors, "errors"),
-        (&warnings, "warnings"),
-        (&suspended, "suspended objects"),
-    ] {
-        if !names.is_empty() {
-            clauses.push(format!(
-                "{} {} {what}",
-                named(names),
-                verb(names.len(), "has", "have")
-            ));
-        }
-    }
-    if clauses.is_empty() {
-        return NO_NAMESPACE_PROBLEMS.into();
-    }
-    format!("{}.", clauses.join(GROUP_SEPARATOR))
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -130,43 +97,6 @@ impl ClusterDetail {
     pub fn recent_warnings(&self, limit: usize) -> Vec<Event> {
         recent_warnings(&self.events, limit)
     }
-
-    pub fn sentence(&self) -> String {
-        let pods = self.overview.pods;
-        let nodes = self.node_summary();
-        let mut clauses = Vec::new();
-        if pods.failing > 0 {
-            clauses.push(format!(
-                "{} failing",
-                plural(pods.failing as usize, "pod is", "pods are")
-            ));
-        }
-        if pods.pending > 0 {
-            clauses.push(format!(
-                "{} pending",
-                plural(pods.pending as usize, "is", "are")
-            ));
-        }
-        if nodes.not_ready > 0 {
-            clauses.push(format!(
-                "{} not ready",
-                plural(nodes.not_ready, "node is", "nodes are")
-            ));
-        }
-        if nodes.cordoned > 0 {
-            clauses.push(format!(
-                "{} cordoned",
-                plural(nodes.cordoned, "node is", "nodes are")
-            ));
-        }
-        if clauses.is_empty() {
-            return format!(
-                "All {} are ready and every pod is running.",
-                plural(nodes.total, "node", "nodes")
-            );
-        }
-        format!("{}.", join_clauses(&clauses))
-    }
 }
 
 #[cfg(test)]
@@ -188,48 +118,6 @@ mod tests {
     }
 
     #[test]
-    fn sentence_lists_what_is_wrong_first() {
-        let pods = PodPhases {
-            running: 398,
-            pending: 9,
-            failing: 5,
-        };
-        let nodes = vec![node("a", "m6i", true, true), node("b", "m6i", false, true)];
-        assert_eq!(
-            detail(pods, nodes).sentence(),
-            "5 pods are failing, 9 are pending and 1 node is cordoned."
-        );
-    }
-
-    #[test]
-    fn sentence_for_a_healthy_cluster() {
-        let pods = PodPhases {
-            running: 3,
-            pending: 0,
-            failing: 0,
-        };
-        let nodes = vec![node("a", "m6i", true, true), node("b", "m6i", true, true)];
-        assert_eq!(
-            detail(pods, nodes).sentence(),
-            "All 2 nodes are ready and every pod is running."
-        );
-    }
-
-    #[test]
-    fn sentence_with_one_failing_pod_and_unready_node() {
-        let pods = PodPhases {
-            running: 3,
-            pending: 0,
-            failing: 1,
-        };
-        let nodes = vec![node("a", "m6i", true, false)];
-        assert_eq!(
-            detail(pods, nodes).sentence(),
-            "1 pod is failing and 1 node is not ready."
-        );
-    }
-
-    #[test]
     fn namespace_filter_matches_its_name() {
         let ns = namespace("payments", Counts::default());
         assert!(ns.matches(&TextFilter::parse("pay")));
@@ -248,25 +136,6 @@ mod tests {
             memory: 0.,
             age: Duration::ZERO,
         }
-    }
-
-    #[test]
-    fn namespace_sentence_groups_by_worst_problem() {
-        let namespaces = [
-            namespace("payments", Counts::default().with_err(2).with_warn(1)),
-            namespace("ml", Counts::default().with_warn(1)),
-            namespace("search", Counts::default().with_warn(1)),
-            namespace("web", Counts::default()),
-            namespace("batch", Counts::default().with_sus(1)),
-        ];
-        assert_eq!(
-            namespace_sentence(&namespaces),
-            "payments has errors; ml and search have warnings; batch has suspended objects."
-        );
-        assert_eq!(
-            namespace_sentence(&namespaces[3..4]),
-            "No namespace has problems."
-        );
     }
 
     #[test]

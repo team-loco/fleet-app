@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use fleet_core::filter::StatusFilter;
 use fleet_core::resources::{
-    Resource, filter_counts, filter_resources, namespace_choices, namespaces_of, sentence,
+    Resource, filter_counts, filter_resources, namespace_choices, namespaces_of,
 };
 use fleet_core::settings::NamespaceSelection;
 use fleet_core::time::age;
@@ -17,9 +17,8 @@ use gpui::{
 
 use super::ScreenEvent;
 use crate::kit::{
-    ActionMenu, CodeView, Column, ConfirmDialog, FilterBar, FilterEvent, IconButton, Inspector,
-    Lede, MenuItem, Presence, Select, SelectEvent, Table, TableEvent, chip_label, confirm,
-    slide_in, slide_out,
+    CodeView, Column, ConfirmDialog, FilterBar, FilterEvent, IconButton, Inspector, MenuItem,
+    Presence, Select, SelectEvent, Table, TableEvent, chip_label, confirm, slide_in, slide_out,
 };
 use crate::theme::SPACE_3;
 
@@ -103,7 +102,6 @@ pub struct ResourcesScreen {
     cluster: Option<ClusterId>,
     kind: ResourceKind,
     rows: Vec<Resource>,
-    sentence: String,
     confirm_destructive: bool,
     namespace: Option<String>,
     preferences: Preferences,
@@ -112,7 +110,6 @@ pub struct ResourcesScreen {
     tables: HashMap<ResourceKind, Entity<Table<Resource>>>,
     namespaces: Entity<Select>,
     filter: Entity<FilterBar>,
-    menu: Entity<ActionMenu>,
     subscriptions: Vec<Subscription>,
     presence: Presence<Resource>,
 }
@@ -156,12 +153,10 @@ impl ResourcesScreen {
                 this.refresh(cx);
             }),
         ];
-        let menu = cx.new(|cx| ActionMenu::new("resource-actions", cx));
         Self {
             cluster: None,
             kind: ResourceKind::Deployment,
             rows: Vec::new(),
-            sentence: String::new(),
             confirm_destructive: true,
             namespace: None,
             preferences: Preferences::default(),
@@ -170,7 +165,6 @@ impl ResourcesScreen {
             tables: HashMap::new(),
             namespaces,
             filter,
-            menu,
             subscriptions,
             presence: Presence::default(),
         }
@@ -195,7 +189,7 @@ impl ResourcesScreen {
         self.namespace = namespace;
         if self.confirm_destructive != confirm_destructive {
             self.confirm_destructive = confirm_destructive;
-            self.refresh_menu(cx);
+            self.refresh(cx);
         }
         let switched = self.kind != kind || self.cluster.as_ref() != Some(&cluster.id);
         if !switched && !rescoped && self.rows == rows {
@@ -211,7 +205,6 @@ impl ResourcesScreen {
             self.selected = Some((namespace, name));
         }
         self.rows = rows.to_vec();
-        self.sentence = sentence(kind, &self.rows);
         let known = detail
             .namespaces
             .iter()
@@ -358,14 +351,12 @@ impl ResourcesScreen {
                 table.select(position, cx);
             }
         });
-        self.refresh_menu(cx);
         cx.notify();
     }
 
     fn select(&mut self, key: Option<(String, String)>, cx: &mut Context<Self>) {
         self.selected = key;
         let target = self.selected_row().and_then(|row| self.target(row));
-        self.refresh_menu(cx);
         if let Some(target) = target {
             cx.emit(ScreenEvent::Command(Command::InspectResource(target)));
         }
@@ -421,24 +412,10 @@ impl ResourcesScreen {
         }
     }
 
-    fn refresh_menu(&mut self, cx: &mut Context<Self>) {
-        let seen = self
-            .selected_row()
-            .and_then(|r| Some(Seen::new(self.target(r)?, r.uid.clone())));
-        let items = seen
-            .map(|seen| delete_items(self.kind, seen, self.confirm_destructive, cx.weak_entity()))
-            .unwrap_or_default();
-        self.menu.update(cx, |menu, cx| menu.set_items(items, cx));
-    }
-
     fn inspector(&self, row: &Resource, cx: &mut Context<Self>) -> AnyElement {
         let close = IconButton::glyph("close-resource", "×", "Close")
             .on_click(cx.listener(|this, _, _, cx| this.close(cx)));
-        let actions = div()
-            .flex()
-            .gap(SPACE_3)
-            .child(self.menu.clone())
-            .child(close);
+        let actions = div().flex().gap(SPACE_3).child(close);
         let subtitle = format!("{} · {}", self.kind.name(), row.namespace);
         Inspector::new(INSPECTOR_ID, row.name.clone())
             .mono()
@@ -478,7 +455,6 @@ impl Render for ResourcesScreen {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .child(Lede::new(self.sentence.clone()))
                     .child(self.filter.clone())
                     .child(div().flex_1().min_h_0().child(table)),
             )

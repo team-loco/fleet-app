@@ -1,4 +1,4 @@
-use fleet_core::cluster::{CPU_UNIT, MEMORY_UNIT, Namespace, namespace_sentence};
+use fleet_core::cluster::{CPU_UNIT, MEMORY_UNIT, Namespace};
 use fleet_core::filter::StatusFilter;
 use fleet_core::overview::fixed;
 use fleet_core::time::age;
@@ -10,7 +10,7 @@ use gpui::{
 
 use super::ScreenEvent;
 use crate::kit::status_symbols;
-use crate::kit::{Column, FilterBar, FilterEvent, Lede, StatusGlyph, Table, chip_label};
+use crate::kit::{Column, FilterBar, FilterEvent, StatusGlyph, Table, chip_label};
 use crate::theme::{ActiveTheme, FONT_MONO, GLYPH_SLOT, Palette, SPACE_4};
 
 const NAME_WEIGHT: f32 = 1.4;
@@ -24,7 +24,6 @@ const AGE_WIDTH: Pixels = px(44.);
 
 pub struct NamespacesScreen {
     namespaces: Vec<Namespace>,
-    sentence: String,
     table: Entity<Table<Namespace>>,
     filter: Entity<FilterBar>,
 }
@@ -49,7 +48,6 @@ impl NamespacesScreen {
         .detach();
         Self {
             namespaces: Vec::new(),
-            sentence: String::new(),
             table,
             filter,
         }
@@ -101,7 +99,6 @@ impl NamespacesScreen {
             return;
         }
         self.namespaces.clone_from(&detail.namespaces);
-        self.sentence = namespace_sentence(&self.namespaces);
         self.refresh(cx);
     }
 
@@ -114,13 +111,10 @@ impl NamespacesScreen {
 
 impl Render for NamespacesScreen {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let pods: u32 = self.namespaces.iter().map(|n| n.pods).sum();
-        let meta = format!("{} namespaces · {pods} pods", self.namespaces.len());
         div()
             .size_full()
             .flex()
             .flex_col()
-            .child(Lede::new(self.sentence.clone()).meta(meta))
             .child(self.filter.clone())
             .child(div().flex_1().min_h_0().child(self.table.clone()))
     }

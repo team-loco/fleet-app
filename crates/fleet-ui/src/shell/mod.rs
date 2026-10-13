@@ -3,7 +3,7 @@ mod load;
 mod page;
 mod sidebar;
 mod status_bar;
-mod switcher;
+pub(crate) mod switcher;
 
 use fleet_core::palette::{COMPARE_KEY, LOGS_KEY, OWNER_KEY, resource_commands};
 use fleet_core::resource::short_kind;

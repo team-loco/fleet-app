@@ -11,12 +11,11 @@ use crate::kit::{Skeleton, status_symbols};
 use crate::screens::add_cluster::empty_fleet;
 use crate::screens::workload::WorkloadScreen;
 use crate::theme::{
-    ActiveTheme, FONT_MONO, ICON_BUTTON, PAGE_HEADER, Palette, RADIUS, RULE, SPACE_2, SPACE_4,
-    SPACE_5, SPACE_7, SPACE_8, TEXT_LABEL, TEXT_SMALL, TEXT_TITLE,
+    ActiveTheme, FONT_MONO, PAGE_HEADER, Palette, RULE, SPACE_2, SPACE_4, SPACE_5, SPACE_7,
+    SPACE_8, TEXT_LABEL, TEXT_SMALL, TEXT_TITLE,
 };
 
 const LIVE: &str = "live";
-const MORE: &str = "⋯";
 const SEPARATOR: &str = "· ";
 
 impl Shell {
@@ -144,7 +143,6 @@ impl Shell {
                         .map(|(text, color)| div().text_color(color).child(status_symbols(text))),
                 )
         });
-        let more = self.selected_cluster().map(|_| more_button(palette));
         let controls = self
             .selected_cluster()
             .and_then(|_| self.pages.header_controls(self.state.page, cx));
@@ -167,7 +165,6 @@ impl Shell {
             .children(status)
             .child(div().flex_1())
             .children(controls)
-            .children(more)
     }
 
     fn content(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
@@ -232,20 +229,4 @@ fn note_parts(counts: &Counts, text: String, palette: &Palette) -> Vec<(String, 
     };
     parts.push((text, palette.mute));
     parts
-}
-
-fn more_button(palette: &Palette) -> impl IntoElement {
-    let hover = palette.hover;
-    div()
-        .id("page-actions")
-        .flex()
-        .items_center()
-        .justify_center()
-        .size(ICON_BUTTON)
-        .rounded(RADIUS)
-        .cursor_pointer()
-        .text_color(palette.fg2)
-        .hover(move |style| style.bg(hover))
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(MORE)
 }

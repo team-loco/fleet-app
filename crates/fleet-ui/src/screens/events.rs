@@ -10,7 +10,7 @@ use gpui::{
 
 use super::ScreenEvent;
 use crate::kit::{
-    Column, FilterBar, FilterEvent, IconButton, Inspector, KeyValue, Lede, Link, Presence, Select,
+    Column, FilterBar, FilterEvent, IconButton, Inspector, KeyValue, Link, Presence, Select,
     SelectEvent, StatusGlyph, StatusText, Table, TableEvent, chip_label, slide_in, slide_out,
 };
 use crate::theme::{
@@ -30,7 +30,6 @@ pub struct EventsScreen {
     selected: Option<String>,
     presence: Presence<Event>,
     events: Vec<Event>,
-    sentence: String,
     filter: Entity<FilterBar>,
     table: Entity<Table<Event>>,
 }
@@ -113,7 +112,6 @@ impl EventsScreen {
             selected: None,
             presence: Presence::default(),
             events: Vec::new(),
-            sentence: String::new(),
             filter,
             table,
         }
@@ -169,7 +167,6 @@ impl EventsScreen {
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let scope = self.preferences.namespace_selection(EVENT_LIST);
         let scoped = events::in_namespace(&self.events, scope.namespace());
-        self.sentence = events::sentence(&scoped);
         let (query, chip) = {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
@@ -307,7 +304,6 @@ impl Render for EventsScreen {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .child(Lede::new(self.sentence.clone()))
                     .child(self.filter.clone())
                     .child(div().flex_1().min_h_0().child(self.table.clone())),
             )
