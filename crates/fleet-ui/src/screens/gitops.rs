@@ -7,6 +7,7 @@ use gpui::{
     ParentElement, Pixels, Render, SharedString, Styled, Window, div, px,
 };
 
+use crate::kit::status_symbols;
 use crate::kit::{Column, Matrix, MatrixCell, SectionHeader, Segmented, Table};
 use crate::theme::{
     ActiveTheme, FONT_MONO, Palette, RULE, SPACE_2, SPACE_3, SPACE_6, SPACE_8, TEXT_BODY,
@@ -197,7 +198,7 @@ fn legend(palette: &Palette) -> impl IntoElement {
         div()
             .flex()
             .gap(SPACE_3)
-            .child(div().text_color(color).child(glyph))
+            .child(div().text_color(color).child(status_symbols(glyph)))
             .child(*label)
     });
     div()
@@ -260,7 +261,7 @@ fn cell_content(cell: &SyncCell, palette: &Palette) -> AnyElement {
             div()
                 .text_size(TEXT_GLYPH)
                 .text_color(glyph_color)
-                .child(glyph),
+                .child(status_symbols(glyph)),
         )
         .child(
             div()
@@ -361,7 +362,7 @@ fn controllers(install: &FluxInstall, palette: &Palette) -> AnyElement {
         div()
             .flex()
             .gap(SPACE_3)
-            .child(div().text_color(color).child(glyph))
+            .child(div().text_color(color).child(status_symbols(glyph)))
             .child(controller.name.clone())
     });
     div()

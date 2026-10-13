@@ -7,6 +7,7 @@ use gpui::{
     prelude::FluentBuilder, px, relative,
 };
 
+use crate::kit::status_symbols;
 use crate::kit::{
     Column, Link, SectionHeader, Segmented, StatusGlyph, StatusText, Table, TableEvent,
 };
@@ -297,7 +298,7 @@ fn badges(counts: &Counts, gap: Pixels, palette: &Palette) -> impl IntoElement {
     let items = counts.badges().into_iter().map(|(status, n)| {
         div()
             .text_color(palette.status(status))
-            .child(format!("{} {n}", status.glyph()))
+            .child(status_symbols(format!("{} {n}", status.glyph())))
     });
     div()
         .flex()
@@ -343,7 +344,7 @@ fn text(value: impl Into<SharedString>, color: Hsla) -> AnyElement {
     div()
         .truncate()
         .text_color(color)
-        .child(value.into())
+        .child(status_symbols(value))
         .into_any_element()
 }
 
@@ -449,7 +450,7 @@ fn pods_cell(cluster: &ClusterSummary, palette: &Palette) -> AnyElement {
             cell.child(
                 div()
                     .text_color(palette.status(status))
-                    .child(format!("{} {n}", status.glyph())),
+                    .child(status_symbols(format!("{} {n}", status.glyph()))),
             )
         })
         .into_any_element()
@@ -493,7 +494,7 @@ fn small(value: impl Into<SharedString>, color: Hsla) -> AnyElement {
         .truncate()
         .text_size(TEXT_SMALL)
         .text_color(color)
-        .child(value.into())
+        .child(status_symbols(value))
         .into_any_element()
 }
 

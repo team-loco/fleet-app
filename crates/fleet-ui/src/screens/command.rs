@@ -8,6 +8,7 @@ use gpui::{
 };
 
 use crate::actions::{CompareAcrossClusters, FollowLogs, ShowFluxOwner};
+use crate::kit::status_symbols;
 use crate::kit::{
     Highlighted, InputEvent, SectionLabel, Step, TextField, TextFieldDown, TextFieldEscape,
     TextFieldState, TextFieldUp, shadow, step,
@@ -321,7 +322,7 @@ fn entry_columns(
         fixed_cell(PALETTE_STATUS, status_color)
             .font_family(FONT_MONO)
             .text_size(TEXT_SMALL)
-            .child(status),
+            .child(status_symbols(status)),
     )
 }
 

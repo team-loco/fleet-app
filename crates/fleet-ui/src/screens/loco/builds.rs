@@ -5,6 +5,7 @@ use gpui::{
     ParentElement, Pixels, Render, SharedString, Styled, Subscription, Window, div, px,
 };
 
+use crate::kit::status_symbols;
 use crate::kit::{
     Button, Column, ConfirmDialog, Level, LogLine, LogView, PageTitle, StatusGlyph, Table,
     TableEvent, confirm,
@@ -216,7 +217,7 @@ fn log_line(line: &BuildLogLine) -> LogLine {
 fn glyph(status: Status, palette: &Palette) -> impl IntoElement {
     div()
         .text_color(palette.status(status))
-        .child(status.glyph())
+        .child(status_symbols(status.glyph()))
 }
 
 fn mono(value: impl Into<SharedString>, color: Hsla) -> AnyElement {

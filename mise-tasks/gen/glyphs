@@ -1,0 +1,137 @@
+#!/usr/bin/env -S uv run --with fonttools python
+#MISE description="Rebuild the Apache-2.0 Fleet Status fonts from geometric outlines"
+import math
+from pathlib import Path
+import tomllib
+
+from fontTools.fontBuilder import FontBuilder
+from fontTools.ttLib import TTFont
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+
+ADV = 600
+CX, CY = 300, 330
+R = 215
+SEGMENTS = 8
+TOP = 545
+BOTTOM = 125
+TRIANGLE_HALF_WIDTH = 245
+CROSS_HALF_SIZE = 190
+REGULAR_STROKE = 80
+MEDIUM_STROKE = 100
+FONT_EPOCH = 2082844800
+FAMILY = "Fleet Status"
+ROOT = Path(__file__).resolve().parents[2]
+FONTS = ROOT / "crates/fleet-ui/assets/fonts"
+COPYRIGHT = "Copyright 2026 Fleet contributors"
+LICENSE = "Licensed under the Apache License, Version 2.0"
+LICENSE_URL = "https://www.apache.org/licenses/LICENSE-2.0"
+
+def arc(pen, r, start, end, first_move=True):
+    n = max(1, round(abs(end - start) / (2 * math.pi) * SEGMENTS))
+    step = (end - start) / n
+    half = step / 2
+    ctrl_r = r / math.cos(half)
+    pt = lambda a, rad: (CX + rad * math.cos(a), CY + rad * math.sin(a))
+    if first_move:
+        pen.moveTo(pt(start, r))
+    for k in range(n):
+        a0 = start + k * step
+        pen.qCurveTo(pt(a0 + half, ctrl_r), pt(a0 + step, r))
+
+def disc(pen, r, clockwise=True):
+    if clockwise:
+        arc(pen, r, math.pi / 2, math.pi / 2 - 2 * math.pi)
+    else:
+        arc(pen, r, math.pi / 2, math.pi / 2 + 2 * math.pi)
+    pen.closePath()
+
+def poly(pen, pts):
+    pen.moveTo(pts[0])
+    for p in pts[1:]:
+        pen.lineTo(p)
+    pen.closePath()
+
+def build(stroke):
+    h = stroke / 2
+    glyphs = {}
+
+    def make(fn):
+        pen = TTGlyphPen(None)
+        fn(pen)
+        return pen.glyph()
+
+    glyphs[ord("●")] = make(lambda p: disc(p, R))
+    def ring(p):
+        disc(p, R)
+        disc(p, R - stroke, clockwise=False)
+    glyphs[ord("○")] = make(ring)
+    def half(p):
+        ring(p)
+        ri = R - stroke
+        arc(p, ri, -math.pi / 2, -3 * math.pi / 2)
+        p.closePath()
+    glyphs[ord("◐")] = make(half)
+    glyphs[ord("▲")] = make(lambda p: poly(p, [(CX, TOP), (CX + TRIANGLE_HALF_WIDTH, BOTTOM), (CX - TRIANGLE_HALF_WIDTH, BOTTOM)]))
+    e = CROSS_HALF_SIZE
+    k = h / math.sqrt(2)
+    def cross(p):
+        a, b = (CX - e, CY + e), (CX + e, CY - e)
+        poly(p, [(a[0] + k, a[1] + k), (b[0] + k, b[1] + k), (b[0] - k, b[1] - k), (a[0] - k, a[1] - k)])
+        a, b = (CX - e, CY - e), (CX + e, CY + e)
+        poly(p, [(a[0] - k, a[1] + k), (b[0] - k, b[1] + k), (b[0] + k, b[1] - k), (a[0] + k, a[1] - k)])
+    glyphs[ord("✕")] = make(cross)
+    gap = stroke
+    def bars(p):
+        for x0 in (CX - gap / 2 - stroke, CX + gap / 2):
+            poly(p, [(x0, BOTTOM), (x0, TOP), (x0 + stroke, TOP), (x0 + stroke, BOTTOM)])
+    glyphs[ord("‖")] = make(bars)
+    return glyphs
+
+def generate(weight, stroke, version):
+    reference = TTFont(FONTS / f"IBMPlexMono-{weight}.ttf")
+    glyphs = build(stroke)
+    names = {cp: f"uni{cp:04X}" for cp in glyphs}
+    order = [".notdef", *names.values()]
+    outlines = {names[cp]: glyph for cp, glyph in glyphs.items()}
+    outlines[".notdef"] = TTGlyphPen(None).glyph()
+    metrics = {name: (ADV, 0) for name in order}
+    font = FontBuilder(reference["head"].unitsPerEm, isTTF=True)
+    font.setupGlyphOrder(order)
+    font.setupCharacterMap(names)
+    font.setupGlyf(outlines)
+    font.setupHorizontalMetrics(metrics)
+    horizontal = reference["hhea"]
+    font.setupHorizontalHeader(ascent=horizontal.ascent, descent=horizontal.descent,
+                               lineGap=horizontal.lineGap)
+    font.setupNameTable({
+        "familyName": FAMILY,
+        "styleName": weight,
+        "typographicFamily": FAMILY,
+        "typographicSubfamily": weight,
+        "uniqueFontIdentifier": f"FleetStatus-{weight}-{version}",
+        "fullName": f"{FAMILY} {weight}",
+        "psName": f"FleetStatus-{weight}",
+        "version": f"Version {version}",
+        "copyright": COPYRIGHT,
+        "licenseDescription": LICENSE,
+        "licenseInfoURL": LICENSE_URL,
+    })
+    os2 = reference["OS/2"]
+    font.setupOS2(version=os2.version, sTypoAscender=os2.sTypoAscender, sTypoDescender=os2.sTypoDescender,
+                  sTypoLineGap=os2.sTypoLineGap, usWinAscent=os2.usWinAscent,
+                  usWinDescent=os2.usWinDescent, sxHeight=os2.sxHeight,
+                  sCapHeight=os2.sCapHeight, usWeightClass=os2.usWeightClass,
+                  fsSelection=os2.fsSelection)
+    font.setupPost(isFixedPitch=True)
+    font.setupMaxp()
+    font.font["head"].created = FONT_EPOCH
+    font.font["head"].modified = FONT_EPOCH
+    font.font.recalcTimestamp = False
+    filename = "FleetStatus.ttf" if weight == "Regular" else "FleetStatus-Medium.ttf"
+    font.save(FONTS / filename)
+
+
+with (ROOT / "Cargo.toml").open("rb") as manifest:
+    version = tomllib.load(manifest)["workspace"]["package"]["version"]
+generate("Regular", REGULAR_STROKE, version)
+generate("Medium", MEDIUM_STROKE, version)

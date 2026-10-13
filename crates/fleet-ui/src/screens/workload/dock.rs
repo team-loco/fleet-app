@@ -11,6 +11,7 @@ use gpui::{
 };
 
 use super::{WorkloadScreen, logs_tab_label};
+use crate::kit::status_symbols;
 use crate::kit::{
     Button, Dock, DockState, DockTab, InputEvent, Level, LogLine, LogView, Terminal, TerminalEvent,
     TextField, TextFieldState,
@@ -375,7 +376,7 @@ fn event_row(event: &Event, palette: &Palette) -> AnyElement {
                 .flex_none()
                 .text_size(TEXT_GLYPH)
                 .text_color(palette.status(event.status))
-                .child(event.status.glyph()),
+                .child(status_symbols(event.status.glyph())),
         )
         .child(
             div()

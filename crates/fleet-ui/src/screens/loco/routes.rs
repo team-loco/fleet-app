@@ -7,6 +7,7 @@ use gpui::{
 };
 
 use super::LocoEvent;
+use crate::kit::status_symbols;
 use crate::kit::{Column, PageTitle, SectionHeader, Segmented, StatusGlyph, Table, TableEvent};
 use crate::theme::{
     ActiveTheme, FONT_MONO, Palette, ROW_TABLE, RULE, SPACE_2, SPACE_8, TEXT_SMALL,
@@ -110,11 +111,13 @@ impl RoutesScreen {
             .text_color(palette.mute)
             .child(self.routes.total.to_string())
             .children((problems > 0).then(|| {
-                div().flex().child(" · ").child(
-                    div()
-                        .text_color(palette.warn)
-                        .child(format!("{} {problems}", Status::Warn.glyph())),
-                )
+                div()
+                    .flex()
+                    .child(" · ")
+                    .child(div().text_color(palette.warn).child(status_symbols(format!(
+                        "{} {problems}",
+                        Status::Warn.glyph()
+                    ))))
             }));
         SectionHeader::new("HTTPRoutes")
             .annotation(count)

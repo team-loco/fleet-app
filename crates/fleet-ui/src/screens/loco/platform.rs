@@ -10,6 +10,7 @@ use gpui::{
 };
 
 use super::LocoEvent;
+use crate::kit::status_symbols;
 use crate::kit::{
     Column, KeyValue, Level, Link, LogLine, LogView, PageTitle, SectionHeader, StatusGlyph, Table,
     TableEvent,
@@ -282,7 +283,7 @@ fn glyph_line(status: Status, text: impl Into<SharedString>, palette: &Palette) 
         .child(
             div()
                 .text_color(palette.status(status))
-                .child(status.glyph()),
+                .child(status_symbols(status.glyph())),
         )
         .child(text.into())
         .into_any_element()
@@ -292,7 +293,7 @@ fn placement_counts(summary: &PlacementSummary, palette: &Palette) -> impl IntoE
     let badges = summary.badges.iter().map(|(status, n)| {
         div()
             .text_color(palette.status(*status))
-            .child(format!("{} {n}", status.glyph()))
+            .child(status_symbols(format!("{} {n}", status.glyph())))
     });
     let prefix = format!(
         "{} · {} at desired revision",

@@ -32,10 +32,15 @@ const ICONS: &[(&str, &[u8])] = &[
 pub(crate) const PLEX_SANS_SEMIBOLD: &[u8] =
     include_bytes!("../assets/fonts/IBMPlexSans-SemiBold.ttf");
 
+const FLEET_STATUS: &[u8] = include_bytes!("../assets/fonts/FleetStatus.ttf");
+const FLEET_STATUS_MEDIUM: &[u8] = include_bytes!("../assets/fonts/FleetStatus-Medium.ttf");
+
 const FONTS: &[&[u8]] = &[
     include_bytes!("../assets/fonts/IBMPlexSans-Regular.ttf"),
     include_bytes!("../assets/fonts/IBMPlexSans-Medium.ttf"),
     PLEX_SANS_SEMIBOLD,
+    FLEET_STATUS,
+    FLEET_STATUS_MEDIUM,
     include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf"),
     include_bytes!("../assets/fonts/IBMPlexMono-Medium.ttf"),
 ];
@@ -73,6 +78,50 @@ pub fn register_fonts(cx: &App) -> Result<(), AssetError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::kit::STATUSES;
+
+    #[test]
+    fn fleet_status_contains_only_six_monospaced_status_symbols()
+    -> Result<(), ttf_parser::FaceParsingError> {
+        let plex =
+            ttf_parser::Face::parse(include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf"), 0)?;
+        let reference = plex
+            .glyph_index('M')
+            .and_then(|glyph| plex.glyph_hor_advance(glyph));
+        for bytes in [FLEET_STATUS, FLEET_STATUS_MEDIUM] {
+            let face = ttf_parser::Face::parse(bytes, 0)?;
+            assert_eq!(face.units_per_em(), plex.units_per_em());
+            assert_eq!(face.ascender(), plex.ascender());
+            assert_eq!(face.descender(), plex.descender());
+            assert_eq!(face.x_height(), plex.x_height());
+            assert_eq!(face.capital_height(), plex.capital_height());
+            let family = face.names().into_iter().filter_map(|name| {
+                (name.name_id == ttf_parser::name_id::FAMILY)
+                    .then(|| name.to_string())
+                    .flatten()
+            });
+            assert!(
+                family
+                    .into_iter()
+                    .any(|name| name == crate::theme::FONT_STATUS)
+            );
+            assert_eq!(usize::from(face.number_of_glyphs()), STATUSES.len() + 1);
+            for status in STATUSES {
+                for character in status.glyph().chars() {
+                    let glyph = face.glyph_index(character);
+                    assert!(glyph.is_some(), "missing {character}");
+                    let advance = glyph.and_then(|glyph| face.glyph_hor_advance(glyph));
+                    assert_eq!(advance, reference);
+                    let bounds = glyph.and_then(|glyph| face.glyph_bounding_box(glyph));
+                    assert!(bounds.is_some_and(|bounds| bounds.y_min > 0
+                        && bounds.y_max < face.capital_height().unwrap_or_default()));
+                }
+            }
+            assert!(face.glyph_index('M').is_none());
+        }
+        Ok(())
+    }
 
     #[test]
     fn serves_bundled_icons_only() {

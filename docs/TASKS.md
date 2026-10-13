@@ -46,3 +46,9 @@ Spec column points at `design/`.
 | I3 | e2e run against kind scenarios | claude | i3-e2e-suite | done |
 | I4 | Fleet.app bundle, icon (squircle 22%), version stamping | claude | i4-app-bundle | done |
 | I5 | animation polish + parity pass, dark and light, every screen | | | todo |
+
+## Font repair
+
+| id | unit | owner | branch | status |
+|---|---|---|---|---|
+| GLYPH | restore upstream Plex and ship Fleet Status glyph font (#95) | Codex | status-glyph-font | done |
