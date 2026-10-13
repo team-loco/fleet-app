@@ -203,8 +203,6 @@ pub fn summarize(id: ClusterId, name: String, handle: &ClusterHandle) -> Cluster
         problems,
         nav,
         metrics: None,
-        #[cfg(feature = "loco")]
-        loco_agent_synced: None,
     }
 }
 

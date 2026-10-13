@@ -19,8 +19,6 @@ mod workload;
 use std::collections::BTreeMap;
 use std::sync::mpsc;
 use std::thread;
-#[cfg(feature = "loco")]
-use std::time::Duration;
 
 use fleet_core::{
     Backend, ClusterId, ClusterSummary, Command, Counts, Page, Receiver, Sender, Snapshot, Status,
@@ -29,9 +27,6 @@ use fleet_core::{
 
 const PROD_US_EAST: &str = "prod-us-east";
 pub use workload::sample_target as sample_workload;
-
-#[cfg(feature = "loco")]
-const AGENT_SYNCED_SECS: u64 = 4;
 
 pub struct DemoBackend;
 
@@ -243,8 +238,6 @@ fn cluster(seed: ClusterSeed) -> ClusterSummary {
         problems: seed.problems,
         nav,
         metrics: home::metrics(seed.name),
-        #[cfg(feature = "loco")]
-        loco_agent_synced: None,
     }
 }
 
@@ -286,10 +279,6 @@ fn prod_us_east() -> ClusterSummary {
         (Page::Secrets, Counts::total(71)),
         (Page::Pvcs, Counts::total(19)),
     ]);
-    #[cfg(feature = "loco")]
-    {
-        summary.loco_agent_synced = Some(Duration::from_secs(AGENT_SYNCED_SECS));
-    }
     summary
 }
 

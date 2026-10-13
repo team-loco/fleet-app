@@ -1,8 +1,10 @@
 mod applications;
 mod builds;
+mod platform;
+mod routes;
 
 use fleet_core::loco::LocoCluster;
-use fleet_core::{AppState, Command, Page};
+use fleet_core::{AppState, Command, Page, ResourceRef};
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, IntoElement, ParentElement, Render,
     Styled, Subscription, Window, div,
@@ -10,13 +12,24 @@ use gpui::{
 
 use self::applications::ApplicationsScreen;
 use self::builds::BuildsScreen;
+use self::platform::PlatformScreen;
+use self::routes::RoutesScreen;
 use crate::kit::PageTitle;
 use crate::theme::{ActiveTheme, SPACE_7, SPACE_8};
 
 const NOT_INSTALLED: &str = "Loco is not installed on this cluster.";
 
 pub fn owns(page: Page) -> bool {
-    matches!(page, Page::LocoApplications | Page::LocoBuilds)
+    matches!(
+        page,
+        Page::LocoPlatform | Page::LocoApplications | Page::LocoBuilds | Page::LocoRoutes
+    )
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LocoEvent {
+    Command(Command),
+    ShowApplication(ResourceRef),
 }
 
 pub struct LocoScreens {
@@ -24,7 +37,9 @@ pub struct LocoScreens {
     loco: Option<LocoCluster>,
     applications: Entity<ApplicationsScreen>,
     builds: Entity<BuildsScreen>,
-    _subscriptions: [Subscription; 2],
+    platform: Entity<PlatformScreen>,
+    routes: Entity<RoutesScreen>,
+    _subscriptions: [Subscription; 4],
 }
 
 impl EventEmitter<Command> for LocoScreens {}
@@ -33,6 +48,8 @@ impl LocoScreens {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let applications = cx.new(|cx| ApplicationsScreen::new(window, cx));
         let builds = cx.new(BuildsScreen::new);
+        let platform = cx.new(PlatformScreen::new);
+        let routes = cx.new(RoutesScreen::new);
         let subscriptions = [
             cx.subscribe(&applications, |_, _, command: &Command, cx| {
                 cx.emit(command.clone());
@@ -40,13 +57,33 @@ impl LocoScreens {
             cx.subscribe(&builds, |_, _, command: &Command, cx| {
                 cx.emit(command.clone());
             }),
+            cx.subscribe(&platform, |this, _, event: &LocoEvent, cx| {
+                this.handle(event, cx);
+            }),
+            cx.subscribe(&routes, |this, _, event: &LocoEvent, cx| {
+                this.handle(event, cx);
+            }),
         ];
         Self {
             page: Page::LocoApplications,
             loco: None,
             applications,
             builds,
+            platform,
+            routes,
             _subscriptions: subscriptions,
+        }
+    }
+
+    fn handle(&mut self, event: &LocoEvent, cx: &mut Context<Self>) {
+        match event {
+            LocoEvent::Command(command) => cx.emit(command.clone()),
+            LocoEvent::ShowApplication(app) => {
+                let app = app.clone();
+                self.applications
+                    .update(cx, |screen, cx| screen.select(Some(app), cx));
+                cx.emit(Command::SelectPage(Page::LocoApplications));
+            }
         }
     }
 
@@ -61,10 +98,16 @@ impl LocoScreens {
             if let Some(loco) = &self.loco {
                 let applications = loco.applications.clone();
                 let builds = loco.builds.clone();
+                let routes = loco.routes.clone();
+                let whole = loco.clone();
                 self.applications
                     .update(cx, |screen, cx| screen.set_applications(applications, cx));
                 self.builds
                     .update(cx, |screen, cx| screen.set_builds(builds, cx));
+                self.routes
+                    .update(cx, |screen, cx| screen.set_routes(routes, cx));
+                self.platform
+                    .update(cx, |screen, cx| screen.set_loco(whole, cx));
             }
         }
         cx.notify();
@@ -93,6 +136,8 @@ impl Render for LocoScreens {
         let content = match (self.loco.is_some(), self.page) {
             (false, _) => self.not_installed(cx),
             (true, Page::LocoBuilds) => self.builds.clone().into_any_element(),
+            (true, Page::LocoPlatform) => self.platform.clone().into_any_element(),
+            (true, Page::LocoRoutes) => self.routes.clone().into_any_element(),
             (true, _) => self.applications.clone().into_any_element(),
         };
         div()

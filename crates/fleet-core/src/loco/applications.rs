@@ -38,10 +38,17 @@ impl AppPhase {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlacementIssue {
+    pub status: Status,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Placement {
     pub desired: Option<i64>,
     pub applied: Option<i64>,
+    pub issue: Option<PlacementIssue>,
 }
 
 impl Placement {
@@ -354,6 +361,7 @@ pub(crate) mod tests {
         Placement {
             desired: Some(desired),
             applied: Some(applied),
+            issue: None,
         }
     }
 
@@ -366,6 +374,7 @@ pub(crate) mod tests {
         let pending = Placement {
             desired: Some(3),
             applied: None,
+            issue: None,
         };
         assert_eq!(pending.short(), "— → r3");
         assert!(pending.out_of_sync());

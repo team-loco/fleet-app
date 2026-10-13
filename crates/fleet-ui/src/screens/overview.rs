@@ -591,8 +591,6 @@ mod tests {
             problems: fleet_core::Counts::default(),
             nav: BTreeMap::new(),
             metrics: None,
-            #[cfg(feature = "loco")]
-            loco_agent_synced: None,
         }
     }
 

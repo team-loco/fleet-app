@@ -77,9 +77,13 @@ enum Screen {
     Helmrelease,
     Source,
     #[cfg(feature = "loco")]
+    LocoPlatform,
+    #[cfg(feature = "loco")]
     LocoApps,
     #[cfg(feature = "loco")]
     LocoBuilds,
+    #[cfg(feature = "loco")]
+    LocoRoutes,
 }
 
 impl Screen {
@@ -137,9 +141,13 @@ impl Screen {
                 "fleet-infra",
             )),
             #[cfg(feature = "loco")]
+            Self::LocoPlatform => vec![sample, Command::SelectPage(Page::LocoPlatform)],
+            #[cfg(feature = "loco")]
             Self::LocoApps => vec![sample, Command::SelectPage(Page::LocoApplications)],
             #[cfg(feature = "loco")]
             Self::LocoBuilds => vec![sample, Command::SelectPage(Page::LocoBuilds)],
+            #[cfg(feature = "loco")]
+            Self::LocoRoutes => vec![sample, Command::SelectPage(Page::LocoRoutes)],
         }
     }
 }
@@ -276,11 +284,15 @@ fn launch(
             Screen::Helmrelease => shell_view(updates, commands, screen, window, cx),
             Screen::Source => shell_view(updates, commands, screen, window, cx),
             #[cfg(feature = "loco")]
+            Screen::LocoPlatform => shell_view(updates, commands, screen, window, cx),
+            #[cfg(feature = "loco")]
             Screen::LocoApps => shell_view(updates, commands, screen, window, cx),
             #[cfg(feature = "loco")]
             Screen::LocoBuilds => shell_view(updates, commands, screen, window, cx),
             Screen::Compare => shell_view(updates, commands, screen, window, cx),
             Screen::ClusterSettings => shell_view(updates, commands, screen, window, cx),
+            #[cfg(feature = "loco")]
+            Screen::LocoRoutes => shell_view(updates, commands, screen, window, cx),
         };
         cx.new(|cx| Root::new(view, window, cx))
     })
