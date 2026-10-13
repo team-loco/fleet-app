@@ -79,6 +79,10 @@ fn failed_detail(target: &ResourceRef, error: &Error) -> String {
     format!("{} · {}", target.cluster, action_failure(error).line())
 }
 
+pub(crate) fn failed_notice(verb: &str, target: &ResourceRef, error: &Error) -> Notice {
+    Notice::failed(failed_title(verb, target), failed_detail(target, error))
+}
+
 impl Actions {
     pub fn new(updates: Sender<Update>) -> (Self, Receiver<()>) {
         let (changed, signals) = async_channel::unbounded();
@@ -157,8 +161,7 @@ impl Actions {
                     )),
                 }),
                 Err(error) => {
-                    let title = failed_title(mutation.verb(), &target);
-                    this.notify(Notice::failed(title, failed_detail(&target, &error)));
+                    this.notify(failed_notice(mutation.verb(), &target, &error));
                 }
             }
         });

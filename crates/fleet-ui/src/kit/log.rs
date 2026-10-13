@@ -256,6 +256,7 @@ pub struct LogView {
     buffer: LogBuffer,
     follow: bool,
     timestamps: bool,
+    timestamp_width: Pixels,
     levels: Levels,
     inset: Pixels,
     query: SharedString,
@@ -271,6 +272,7 @@ impl LogView {
             buffer: LogBuffer::default(),
             follow: true,
             timestamps: true,
+            timestamp_width: LOG_TIMESTAMP,
             levels: Levels::Column,
             inset: SPACE_6,
             query: SharedString::default(),
@@ -303,6 +305,11 @@ impl LogView {
     pub fn plain(mut self) -> Self {
         self.levels = Levels::Tint;
         self.timestamps = false;
+        self
+    }
+
+    pub fn timestamp_width(mut self, width: Pixels) -> Self {
+        self.timestamp_width = width;
         self
     }
 
@@ -414,7 +421,7 @@ impl LogView {
                 row.child(
                     div()
                         .flex_none()
-                        .min_w(LOG_TIMESTAMP)
+                        .min_w(self.timestamp_width)
                         .text_color(palette.mute)
                         .children(line.timestamp.clone()),
                 )

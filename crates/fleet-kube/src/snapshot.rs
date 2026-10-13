@@ -184,6 +184,8 @@ fn kind_total(handle: &ClusterHandle, kind: &WatchKind) -> Option<u32> {
         WatchKind::Ingresses => handle.objects::<Ingress>().len(),
         WatchKind::ConfigMaps => handle.objects::<PartialObjectMeta<ConfigMap>>().len(),
         WatchKind::Secrets => handle.objects::<PartialObjectMeta<Secret>>().len(),
+        WatchKind::ServiceAccounts => return None,
+        WatchKind::NetworkPolicies => return None,
         WatchKind::PersistentVolumeClaims => handle.objects::<PersistentVolumeClaim>().len(),
         WatchKind::Nodes => return None,
         WatchKind::Pods => return None,

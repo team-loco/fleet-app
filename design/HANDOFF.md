@@ -32,7 +32,7 @@ Each screen is in `screens/`: the markup holds the layout and inline styles, and
 
 - Font: IBM Plex Sans for UI at 13px, IBM Plex Mono for data at 12px. Uppercase 11px section labels.
 - Corners: 3px radius maximum, 4px for menus and dialogs. No pills, no cards. Sections are separated by 1px rules.
-- Status uses both shape and colour: ● ok, ▲ warning, ✕ error, ◐ in progress, ‖ suspended, ○ offline.
+- Status uses both shape and colour: ● ok, ▲ warning, ✕ error, ◐ in progress, ‖ suspended, ○ offline. ○ in mute also marks a Loco build that ended without finishing (canceled or superseded); it is neither an error nor a success.
 - Pages read like documents. Put one plain sentence about what's wrong first, then data. Diffs are always shown in full.
 - Light and dark follow the OS. Every colour is a token; the values are below.
 

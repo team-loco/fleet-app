@@ -81,6 +81,7 @@ impl ApplicationsScreen {
                 .row_height(ROW_TABLE_MIN)
                 .column_gap(SPACE_5)
                 .click_opens()
+                .unruled()
                 .fit_content()
         });
         let menu = cx.new(|cx| ActionMenu::new("loco-app-actions", cx));
@@ -358,7 +359,7 @@ impl ApplicationsScreen {
             .child(
                 div()
                     .flex()
-                    .items_end()
+                    .items_baseline()
                     .gap(SPACE_3)
                     .px(SPACE_8)
                     .pb(SPACE_8)
@@ -366,7 +367,7 @@ impl ApplicationsScreen {
                     .text_size(TEXT_MONO)
                     .line_height(relative(ROUTE_LINE))
                     .text_color(palette.fg2)
-                    .child(div().flex_1().min_w_0().child(summary))
+                    .child(div().min_w_0().child(summary))
                     .child(
                         div()
                             .flex_none()
@@ -471,7 +472,7 @@ fn group_row(row: &AppRow, palette: &Palette) -> Option<AnyElement> {
     };
     let element = div()
         .flex()
-        .items_baseline()
+        .items_center()
         .gap(SPACE_5)
         .size_full()
         .px(SPACE_8)

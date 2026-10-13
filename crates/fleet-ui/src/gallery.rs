@@ -31,7 +31,7 @@ const MEM_WIDTH: Pixels = px(60.);
 const AGE_WIDTH: Pixels = px(34.);
 
 const METER_WIDTH: Pixels = px(240.);
-const SPLIT_HEIGHT: Pixels = px(300.);
+const SPLIT_HEIGHT: Pixels = px(420.);
 const EVENT_AGE_WIDTH: Pixels = px(48.);
 const EVENT_REASON_WIDTH: Pixels = px(170.);
 const EVENT_COUNT_WIDTH: Pixels = px(34.);
@@ -511,12 +511,11 @@ impl Gallery {
     }
 
     fn panes(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut removed = DiffLine::new(
+        let removed = DiffLine::new(
             LineKind::Removed,
-            Some(23),
+            Some(42),
             "        image: ghcr.io/acme/checkout-api:2.13.4",
         );
-        removed.old = Some(23);
         let rendered = DiffFile::new(
             "Deployment/payments/checkout-api · rendered for prod-us-east",
             vec![
@@ -670,7 +669,9 @@ fn more_items() -> Vec<MenuItem> {
             .description("Stop reconciling until resumed. Drift stays in place."),
         MenuItem::new("Reconcile with source", |_, _| {})
             .description("Fetch fleet-infra first, then apply."),
-        MenuItem::new("View YAML", |_, _| {}).shortcut("⌘Y"),
+        MenuItem::new("View YAML", |_, _| {})
+            .shortcut("⌘Y")
+            .description("Read the live manifest without editing it."),
         MenuItem::new("Delete…", |window, cx| {
             confirm(delete_dialog(), window, cx);
         })
