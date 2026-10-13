@@ -1,7 +1,7 @@
 use fleet_core::pods::{
     Container, Pod, PodFilter, PodQuery, filter_counts, namespaces, nav_counts,
 };
-use fleet_core::{ClusterId, Command, ResourceRef, Snapshot, Status};
+use fleet_core::{ClusterId, Command, Counts, ResourceRef, Snapshot, Status};
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, InteractiveElement,
     IntoElement, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled,
@@ -179,13 +179,13 @@ impl PodsScreen {
         self.refresh(cx);
     }
 
-    pub fn header_note(&self) -> (Status, String) {
+    pub fn header_note(&self) -> (Counts, String) {
         let total = self
             .cluster
             .as_ref()
             .and_then(|cluster| nav_counts(&self.pods, cluster).total)
             .unwrap_or_default();
-        (Status::Ok, total.to_string())
+        (Counts::default(), total.to_string())
     }
 
     fn cluster_pods(&self) -> Vec<&Pod> {

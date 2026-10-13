@@ -1,16 +1,16 @@
-use fleet_core::nodes::{Node, NodeSummary, Usage};
+use fleet_core::nodes::{Node, NodeSummary, Usage, sentence};
 use fleet_core::overview::{number, percent};
 use fleet_core::time::age;
-use fleet_core::{ClusterDetail, ClusterId, ClusterSummary, Command, ResourceRef, Status};
+use fleet_core::{ClusterDetail, ClusterId, ClusterSummary, Command, Counts, ResourceRef, Status};
 use gpui::{
-    AnyElement, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
-    Render, SharedString, Styled, WeakEntity, Window, div, px,
+    AnyElement, AppContext, Context, Entity, EventEmitter, Hsla, IntoElement, ParentElement,
+    Pixels, Render, SharedString, Styled, WeakEntity, Window, div, px,
 };
 
 use super::{NODE_KIND, ScreenEvent};
 use crate::kit::{
-    ActionMenu, Button, Column, ConfirmDialog, IconButton, Inspector, KeyValue, MenuItem, Meter,
-    MiniMeter, SectionHeader, SectionLabel, StatusGlyph, StatusText, Table, TableEvent, confirm,
+    ActionMenu, Button, Column, ConfirmDialog, IconButton, Inspector, KeyValue, Lede, MenuItem,
+    Meter, MiniMeter, SectionLabel, StatusGlyph, StatusText, Table, TableEvent, confirm,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, Palette, SPACE_2, SPACE_3, SPACE_4, SPACE_5, TEXT_MONO, TEXT_SMALL,
@@ -20,7 +20,9 @@ const NONE: &str = "none";
 const VERSION_SEPARATOR: char = '-';
 const NAME_WEIGHT: f32 = 1.4;
 const NAME_MIN: Pixels = px(150.);
-const STATUS_WIDTH: Pixels = px(150.);
+const STATUS_WEIGHT: f32 = 0.8;
+const STATUS_MIN: Pixels = px(150.);
+const INSTANCE_WEIGHT: f32 = 0.5;
 const INSTANCE_WIDTH: Pixels = px(96.);
 const ZONE_WIDTH: Pixels = px(80.);
 const USAGE_WIDTH: Pixels = px(84.);
@@ -34,6 +36,8 @@ pub struct NodesScreen {
     cluster: Option<ClusterId>,
     summary: NodeSummary,
     nodes: Vec<Node>,
+    sentence: String,
+    confirm_destructive: bool,
     selected: Option<String>,
     table: Entity<Table<Node>>,
     menu: Entity<ActionMenu>,
@@ -62,6 +66,8 @@ impl NodesScreen {
             cluster: None,
             summary: NodeSummary::default(),
             nodes: Vec::new(),
+            sentence: String::new(),
+            confirm_destructive: true,
             selected: None,
             table,
             menu,
@@ -72,17 +78,23 @@ impl NodesScreen {
         &mut self,
         cluster: &ClusterSummary,
         detail: &ClusterDetail,
+        confirm_destructive: bool,
         cx: &mut Context<Self>,
     ) {
         if self.cluster.as_ref() != Some(&cluster.id) {
             self.selected = None;
         }
         self.cluster = Some(cluster.id.clone());
+        if self.confirm_destructive != confirm_destructive {
+            self.confirm_destructive = confirm_destructive;
+            self.refresh_menu(cx);
+        }
         if self.nodes == detail.nodes {
             return;
         }
         self.nodes.clone_from(&detail.nodes);
         self.summary = detail.node_summary();
+        self.sentence = sentence(&self.nodes);
         if self
             .selected
             .as_ref()
@@ -115,17 +127,10 @@ impl NodesScreen {
         }
     }
 
-    pub fn header_note(&self) -> (Status, String) {
-        let summary = &self.summary;
-        let status = if summary.cordoned + summary.not_ready > 0 {
-            Status::Warn
-        } else {
-            Status::Ok
-        };
-        (
-            status,
-            format!("{} / {} ready", summary.ready, summary.total),
-        )
+    pub fn header_note(&self) -> (Counts, String) {
+        let counts = Counts::of(self.nodes.iter().map(|n| n.status));
+        let ready = format!("{} / {} ready", self.summary.ready, self.summary.total);
+        (counts, ready)
     }
 
     fn select(&mut self, name: Option<String>, cx: &mut Context<Self>) {
@@ -157,7 +162,7 @@ impl NodesScreen {
     fn refresh_menu(&mut self, cx: &mut Context<Self>) {
         let target = self.selected_node().and_then(|n| self.target(n));
         let items = target
-            .map(|target| drain_items(target, cx.weak_entity()))
+            .map(|target| drain_items(target, self.confirm_destructive, cx.weak_entity()))
             .unwrap_or_default();
         self.menu.update(cx, |menu, cx| menu.set_items(items, cx));
     }
@@ -264,8 +269,8 @@ impl Render for NodesScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
         let summary = &self.summary;
-        let count = format!(
-            "{} · {} ready · {} cordoned · {}",
+        let meta = format!(
+            "{} nodes · {} ready · {} cordoned · {}",
             summary.total,
             summary.ready,
             summary.cordoned,
@@ -284,19 +289,28 @@ impl Render for NodesScreen {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .child(SectionHeader::new("Nodes").count(count))
+                    .child(Lede::new(self.sentence.clone()).meta(meta))
                     .child(div().flex_1().min_h_0().child(self.table.clone())),
             )
             .children(inspector)
     }
 }
 
-fn drain_items(target: ResourceRef, screen: WeakEntity<NodesScreen>) -> Vec<MenuItem> {
+fn drain_items(
+    target: ResourceRef,
+    confirm_destructive: bool,
+    screen: WeakEntity<NodesScreen>,
+) -> Vec<MenuItem> {
     let detail = format!("{} · {}", target.cluster, target.name);
     vec![
         MenuItem::new("Drain…", move |window, cx| {
             let screen = screen.clone();
             let target = target.clone();
+            if !confirm_destructive {
+                let command = Command::Drain(target);
+                let _ = screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+                return;
+            }
             let dialog = ConfirmDialog::new(
                 "Drain node",
                 "The node is cordoned and every pod except DaemonSet pods is evicted. Pods without a controller are not recreated.",
@@ -374,12 +388,12 @@ fn usage_row(label: &'static str, usage: Usage, unit: &str, palette: &Palette) -
         .child(Meter::new(usage.fraction()))
 }
 
-fn usage_cell(usage: Usage) -> AnyElement {
+fn usage_cell(usage: Usage, color: Hsla) -> AnyElement {
     div()
         .flex()
         .items_center()
         .gap(SPACE_4)
-        .child(MiniMeter::new(usage.fraction()))
+        .child(MiniMeter::new(usage.fraction()).color(color))
         .child(percent(usage.fraction()))
         .into_any_element()
 }
@@ -402,7 +416,7 @@ fn columns() -> Vec<Column<Node>> {
         Column::new("Status", |n: &Node, _| {
             StatusText::new(n.status, n.state.clone()).into_any_element()
         })
-        .fixed(STATUS_WIDTH)
+        .flex(STATUS_WEIGHT, STATUS_MIN)
         .sort_by_key(|n: &Node| std::cmp::Reverse(n.status)),
         Column::colored_text(
             "Instance",
@@ -410,17 +424,17 @@ fn columns() -> Vec<Column<Node>> {
             |_, p| p.fg2,
         )
         .mono()
-        .fixed(INSTANCE_WIDTH)
+        .flex(INSTANCE_WEIGHT, INSTANCE_WIDTH)
         .sort_by_key(|n: &Node| n.instance_type.clone()),
         Column::colored_text("Zone", |n: &Node| n.zone.clone().into(), |_, p| p.fg2)
             .mono()
             .fixed(ZONE_WIDTH)
             .sort_by_key(|n: &Node| n.zone.clone()),
-        Column::new("CPU", |n: &Node, _| usage_cell(n.cpu))
+        Column::new("CPU", |n: &Node, p| usage_cell(n.cpu, p.acc))
             .mono()
             .fixed(USAGE_WIDTH)
             .sortable(|a: &Node, b: &Node| a.cpu.fraction().total_cmp(&b.cpu.fraction())),
-        Column::new("Memory", |n: &Node, _| usage_cell(n.memory))
+        Column::new("Memory", |n: &Node, p| usage_cell(n.memory, p.ai))
             .mono()
             .fixed(USAGE_WIDTH)
             .sortable(|a: &Node, b: &Node| a.memory.fraction().total_cmp(&b.memory.fraction())),

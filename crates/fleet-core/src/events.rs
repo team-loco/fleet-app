@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-use crate::Status;
+use crate::overview::{join_clauses, plural};
+use crate::time::age;
+use crate::{Counts, Status};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
@@ -76,6 +78,46 @@ pub fn recent_warnings(events: &[Event], limit: usize) -> Vec<Event> {
     warnings
 }
 
+pub fn counts(events: &[Event]) -> Counts {
+    let flagged = Counts::of(events.iter().map(|e| e.status));
+    Counts {
+        total: None,
+        ..flagged
+    }
+}
+
+pub fn sentence(events: &[Event]) -> String {
+    let counts = counts(events);
+    let newest = events
+        .iter()
+        .filter(|e| e.is_warning())
+        .min_by_key(|e| (e.age, std::cmp::Reverse(e.status)));
+    let Some(newest) = newest else {
+        return if events.is_empty() {
+            "No events have been recorded recently.".into()
+        } else {
+            format!(
+                "No warnings; all {} are Normal.",
+                plural(events.len(), "event", "events")
+            )
+        };
+    };
+    let mut tally = Vec::new();
+    if counts.err > 0 {
+        tally.push(plural(counts.err as usize, "error", "errors"));
+    }
+    if counts.warn > 0 {
+        tally.push(plural(counts.warn as usize, "warning", "warnings"));
+    }
+    format!(
+        "{}; the newest is {} on {}, {} ago.",
+        join_clauses(&tally),
+        newest.reason,
+        newest.object,
+        age(newest.age)
+    )
+}
+
 pub fn filter_events(events: &[Event], filter: EventFilter, query: &str) -> Vec<Event> {
     let kept: Vec<Event> = events
         .iter()
@@ -130,6 +172,45 @@ mod tests {
             event(Status::Warn, "Mid", 6),
         ];
         assert_eq!(reasons(&recent_warnings(&events, 2)), ["New", "Mid"]);
+    }
+
+    #[test]
+    fn counts_split_errors_from_warnings() {
+        let events = [
+            event(Status::Ok, "Scheduled", 1),
+            event(Status::Err, "BackOff", 2),
+            event(Status::Warn, "FailedMount", 6),
+            event(Status::Warn, "Unhealthy", 11),
+        ];
+        assert_eq!(counts(&events), Counts::default().with_err(1).with_warn(2));
+    }
+
+    #[test]
+    fn sentence_counts_then_names_the_newest_warning() {
+        let events = [
+            event(Status::Ok, "Scheduled", 1),
+            event(Status::Warn, "FailedMount", 6),
+            event(Status::Err, "BackOff", 2),
+            event(Status::Warn, "Unhealthy", 11),
+        ];
+        assert_eq!(
+            sentence(&events),
+            "1 error and 2 warnings; the newest is BackOff on pod/backoff, 2m ago."
+        );
+        assert_eq!(
+            sentence(&events[1..2]),
+            "1 warning; the newest is FailedMount on pod/failedmount, 6m ago."
+        );
+    }
+
+    #[test]
+    fn sentence_without_warnings() {
+        let events = [
+            event(Status::Ok, "Scheduled", 1),
+            event(Status::Ok, "Pulled", 1),
+        ];
+        assert_eq!(sentence(&events), "No warnings; all 2 events are Normal.");
+        assert_eq!(sentence(&[]), "No events have been recorded recently.");
     }
 
     #[test]

@@ -1,6 +1,11 @@
 use std::time::Duration;
 
+use crate::overview::{named, plural, verb};
 use crate::{Page, Status};
+
+const READY_COLUMN: &str = "Ready";
+const STATUS_COLUMN: &str = "Status";
+const RATIO: char = '/';
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ResourceKind {
@@ -79,6 +84,20 @@ impl ResourceKind {
         }
     }
 
+    pub fn status_cell(self, row: &Resource) -> Option<String> {
+        let columns = self.columns();
+        let ready = columns.iter().position(|c| *c == READY_COLUMN);
+        let ready = ready
+            .and_then(|ix| row.cells.get(ix))
+            .filter(|cell| cell.contains(RATIO))
+            .map(|cell| format!("{cell} ready"));
+        let status = || {
+            let ix = columns.iter().position(|c| *c == STATUS_COLUMN)?;
+            row.cells.get(ix).filter(|cell| !cell.is_empty()).cloned()
+        };
+        ready.or_else(status)
+    }
+
     pub const fn is_workload(self) -> bool {
         matches!(
             self,
@@ -113,6 +132,34 @@ pub fn filter_resources(rows: &[Resource], namespace: Option<&str>, query: &str)
         .filter(|row| row.matches(namespace, query))
         .cloned()
         .collect()
+}
+
+pub fn sentence(kind: ResourceKind, rows: &[Resource]) -> String {
+    let label = kind.page().label();
+    if rows.is_empty() {
+        return format!("There are no {label} in this cluster.");
+    }
+    let mut flagged: Vec<&Resource> = rows.iter().filter(|r| r.status != Status::Ok).collect();
+    if flagged.is_empty() {
+        return format!(
+            "Nothing needs attention across {}.",
+            plural(rows.len(), kind.name(), label)
+        );
+    }
+    flagged.sort_by_key(|r| std::cmp::Reverse(r.status));
+    let described: Vec<String> = flagged
+        .iter()
+        .map(|row| match kind.status_cell(row) {
+            Some(cell) => format!("{} ({cell})", row.name),
+            None => row.name.clone(),
+        })
+        .collect();
+    let described: Vec<&str> = described.iter().map(String::as_str).collect();
+    format!(
+        "{} {} attention.",
+        named(&described),
+        verb(flagged.len(), "needs", "need")
+    )
 }
 
 pub fn namespaces_of(rows: &[Resource]) -> Vec<String> {
@@ -169,6 +216,59 @@ pub(crate) mod tests {
         assert_eq!(
             names(filter_resources(&rows, Some("web"), "checkout")),
             [""; 0]
+        );
+    }
+
+    fn with_cells(mut row: Resource, cells: &[&str]) -> Resource {
+        row.cells = cells.iter().map(|c| (*c).to_owned()).collect();
+        row
+    }
+
+    #[test]
+    fn sentence_names_flagged_rows_worst_first_with_their_state() {
+        let rows = vec![
+            with_cells(
+                resource("monitoring", "grafana", Status::Warn),
+                &["0/1", "1", "0", "grafana"],
+            ),
+            with_cells(
+                resource("payments", "checkout-api", Status::Err),
+                &["2/3", "3", "2", "checkout"],
+            ),
+            resource("web", "web-frontend", Status::Ok),
+        ];
+        assert_eq!(
+            sentence(ResourceKind::Deployment, &rows),
+            "checkout-api (2/3 ready) and grafana (0/1 ready) need attention."
+        );
+    }
+
+    #[test]
+    fn sentence_uses_the_status_column_and_caps_names() {
+        let rows: Vec<Resource> = ["a", "b", "c", "d"]
+            .into_iter()
+            .map(|name| with_cells(resource("ml", name, Status::Err), &["0/1", "4m", "Failed"]))
+            .collect();
+        assert_eq!(
+            sentence(ResourceKind::Job, &rows),
+            "a (Failed), b (Failed), c (Failed) and 1 more need attention."
+        );
+        assert_eq!(
+            sentence(ResourceKind::Job, &rows[..1]),
+            "a (Failed) needs attention."
+        );
+    }
+
+    #[test]
+    fn sentence_when_nothing_is_wrong() {
+        let rows = vec![resource("web", "a", Status::Ok)];
+        assert_eq!(
+            sentence(ResourceKind::ConfigMap, &rows),
+            "Nothing needs attention across 1 ConfigMap."
+        );
+        assert_eq!(
+            sentence(ResourceKind::PersistentVolumeClaim, &[]),
+            "There are no PVCs in this cluster."
         );
     }
 

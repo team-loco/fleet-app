@@ -7,7 +7,7 @@ use k8s_openapi::api::core::v1::{Event, Namespace, Node, Pod};
 
 use crate::detail::{self, PodIndex, capacity};
 use crate::flux::{self, FluxObject, custom_kind, flux_object};
-use crate::lists::{nav_counts, watched_lists};
+use crate::lists::watched_lists;
 use crate::manager::{ClusterHandle, ConnectionStatus};
 use crate::metrics::{NodeUsage, PodUsage};
 use crate::probe::PrometheusTarget;
@@ -133,13 +133,7 @@ pub fn cluster(
     }
     let detail = selection.map(|selection| {
         let detail = cluster_detail(handle, extras, &pods, &nodes, selection, now);
-        for (kind, rows) in &detail.resources {
-            summary.nav.insert(kind.page(), nav_counts(rows));
-        }
-        let warnings = u32::try_from(detail.warnings()).unwrap_or(u32::MAX);
-        summary
-            .nav
-            .insert(Page::Events, Counts::default().with_warn(warnings));
+        summary.nav.extend(detail.nav());
         detail
     });
     Built {

@@ -1,14 +1,17 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use crate::events::{Event, recent_warnings};
+use crate::events::{self, Event, recent_warnings};
 use crate::nodes::{Node, NodeSummary};
-use crate::overview::{Capacity, Overview, WorkloadHealth, join_clauses, plural};
+use crate::overview::{Capacity, Overview, WorkloadHealth, join_clauses, named, plural, verb};
 use crate::resources::{Resource, ResourceKind};
-use crate::{Counts, Status};
+use crate::{Counts, Page, Status};
 
 pub const CPU_UNIT: &str = "cores";
 pub const MEMORY_UNIT: &str = "GiB";
+pub const ACTIVE_PHASE: &str = "Active";
+const GROUP_SEPARATOR: &str = "; ";
+const NO_NAMESPACE_PROBLEMS: &str = "No namespace has problems.";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Namespace {
@@ -20,6 +23,43 @@ pub struct Namespace {
     pub cpu: f32,
     pub memory: f32,
     pub age: Duration,
+}
+
+impl Namespace {
+    pub fn phase_note(&self) -> Option<&str> {
+        (!self.phase.is_empty() && self.phase != ACTIVE_PHASE).then_some(self.phase.as_str())
+    }
+}
+
+pub fn namespace_sentence(namespaces: &[Namespace]) -> String {
+    let with = |pick: fn(&Counts) -> bool| -> Vec<&str> {
+        namespaces
+            .iter()
+            .filter(|n| pick(&n.problems))
+            .map(|n| n.name.as_str())
+            .collect()
+    };
+    let errors = with(|c| c.err > 0);
+    let warnings = with(|c| c.err == 0 && c.warn > 0);
+    let suspended = with(|c| c.err == 0 && c.warn == 0 && c.sus > 0);
+    let mut clauses = Vec::new();
+    for (names, what) in [
+        (&errors, "errors"),
+        (&warnings, "warnings"),
+        (&suspended, "suspended objects"),
+    ] {
+        if !names.is_empty() {
+            clauses.push(format!(
+                "{} {} {what}",
+                named(names),
+                verb(names.len(), "has", "have")
+            ));
+        }
+    }
+    if clauses.is_empty() {
+        return NO_NAMESPACE_PROBLEMS.into();
+    }
+    format!("{}.", clauses.join(GROUP_SEPARATOR))
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -65,6 +105,16 @@ impl ClusterDetail {
             .into_iter()
             .filter(|kind| kind.is_workload())
             .map(|kind| WorkloadHealth::of(kind, self.resources(kind)))
+            .collect()
+    }
+
+    pub fn nav(&self) -> Vec<(Page, Counts)> {
+        let resources = self
+            .resources
+            .iter()
+            .map(|(kind, rows)| (kind.page(), Counts::of(rows.iter().map(|r| r.status))));
+        std::iter::once((Page::Events, events::counts(&self.events)))
+            .chain(resources)
             .collect()
     }
 
@@ -171,6 +221,67 @@ mod tests {
         assert_eq!(
             detail(pods, nodes).sentence(),
             "1 pod is failing and 1 node is not ready."
+        );
+    }
+
+    fn namespace(name: &str, problems: Counts) -> Namespace {
+        Namespace {
+            name: name.into(),
+            status: problems.status(),
+            phase: ACTIVE_PHASE.into(),
+            pods: 0,
+            problems,
+            cpu: 0.,
+            memory: 0.,
+            age: Duration::ZERO,
+        }
+    }
+
+    #[test]
+    fn namespace_sentence_groups_by_worst_problem() {
+        let namespaces = [
+            namespace("payments", Counts::default().with_err(2).with_warn(1)),
+            namespace("ml", Counts::default().with_warn(1)),
+            namespace("search", Counts::default().with_warn(1)),
+            namespace("web", Counts::default()),
+            namespace("batch", Counts::default().with_sus(1)),
+        ];
+        assert_eq!(
+            namespace_sentence(&namespaces),
+            "payments has errors; ml and search have warnings; batch has suspended objects."
+        );
+        assert_eq!(
+            namespace_sentence(&namespaces[3..4]),
+            "No namespace has problems."
+        );
+    }
+
+    #[test]
+    fn phase_note_hides_active() {
+        let mut ns = namespace("old", Counts::default());
+        assert_eq!(ns.phase_note(), None);
+        ns.phase = "Terminating".into();
+        assert_eq!(ns.phase_note(), Some("Terminating"));
+    }
+
+    #[test]
+    fn nav_counts_events_and_every_resource_kind() {
+        let mut detail = ClusterDetail::default();
+        detail.resources.insert(
+            ResourceKind::Deployment,
+            vec![
+                resource("a", "x", Status::Err),
+                resource("a", "y", Status::Warn),
+                resource("a", "z", Status::Ok),
+            ],
+        );
+        let nav = detail.nav();
+        assert_eq!(
+            nav,
+            [
+                (Page::Events, Counts::default()),
+                (Page::Deployments, Counts::total(3).with_err(1).with_warn(1)),
+            ]
         );
     }
 

@@ -66,6 +66,17 @@ PageHeader::new("checkout-api")
     .meta(div().flex().gap(SPACE_4).child("payments ·").child(Link::new("ks", "apps-payments")))
 ```
 
+`Lede` is the one-sentence summary at the top of a list page that the shell titles itself
+(Nodes, Namespaces, Events, resource lists, Cluster overview): the sentence in `fg2`, an optional
+mono meta line, and optional controls on the right. Build the sentence in `fleet-core` so demo and
+live read the same words.
+
+```rust
+Lede::new(fleet_core::nodes::sentence(&nodes))
+    .meta("14 nodes · 13 ready · 1 cordoned")
+    .end(filter_controls)
+```
+
 ## Buttons and controls
 
 ```rust
@@ -338,7 +349,7 @@ additions, old side for removals) and a `+` / `−` sign in `addfg` / `delfg` ov
 
 ```rust
 Meter::new(0.61).request(0.74).limit(1.0)           // 6px bar, request marker fg2, limit marker warn; .color(c)
-MiniMeter::new(0.42)                                // 36×4 inline bar for table cells
+MiniMeter::new(0.42).color(palette.acc)             // 36×4 inline bar for table cells; fg2 by default
 StackedBar::new(vec![(Status::Ok, 398.), (Status::Warn, 9.), (Status::Err, 5.)])   // .thin() for 4px
 LineChart::new(100.)                                 // y max
     .series(Series::new("CPU", palette.acc, cpu).area(palette.accbg))
@@ -347,6 +358,7 @@ LineChart::new(100.)                                 // y max
     .y_labels(labels_top_to_bottom)                  // also sets the number of gridlines
     .x_labels(labels_left_to_right)
     .height(px)                                      // default CHART_HEIGHT 170
+    .title(SectionLabel::new("Utilization"))         // left of the legend, same row
 ```
 
 Values outside 0..=1 (or 0..=max) are clamped; NaN reads as 0.

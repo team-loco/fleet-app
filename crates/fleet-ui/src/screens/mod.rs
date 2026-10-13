@@ -14,7 +14,7 @@ mod resources;
 pub mod settings;
 pub mod workload;
 
-use fleet_core::{ClusterDetail, ClusterSummary, Command, Page, ResourceKind, ResourceRef, Status};
+use fleet_core::{ClusterDetail, ClusterSummary, Command, Counts, Page, ResourceKind, ResourceRef};
 use gpui::{AnyElement, App, AppContext, Context, Entity, IntoElement, Subscription, Window};
 
 pub use events::EventsScreen;
@@ -73,6 +73,7 @@ impl ClusterPages {
         page: Page,
         cluster: Option<&ClusterSummary>,
         detail: Option<&ClusterDetail>,
+        confirm_destructive: bool,
         cx: &mut App,
     ) {
         let (Some(cluster), Some(detail)) = (cluster, detail) else {
@@ -82,17 +83,18 @@ impl ClusterPages {
             Page::ClusterOverview => self
                 .overview
                 .update(cx, |screen, cx| screen.set(cluster, detail, cx)),
-            Page::Nodes => self
-                .nodes
-                .update(cx, |screen, cx| screen.set(cluster, detail, cx)),
+            Page::Nodes => self.nodes.update(cx, |screen, cx| {
+                screen.set(cluster, detail, confirm_destructive, cx);
+            }),
             Page::Namespaces => self
                 .namespaces
                 .update(cx, |screen, cx| screen.set(detail, cx)),
             Page::Events => self.events.update(cx, |screen, cx| screen.set(detail, cx)),
             other => {
                 if let Some(kind) = ResourceKind::for_page(other) {
-                    self.resources
-                        .update(cx, |screen, cx| screen.set(cluster, kind, detail, cx));
+                    self.resources.update(cx, |screen, cx| {
+                        screen.set(cluster, kind, detail, confirm_destructive, cx);
+                    });
                 }
             }
         }
@@ -131,7 +133,12 @@ impl ClusterPages {
         Some(element)
     }
 
-    pub fn header_note(&self, page: Page, has_detail: bool, cx: &App) -> Option<(Status, String)> {
+    pub fn header_controls(&self, page: Page, cx: &App) -> Option<AnyElement> {
+        (page == Page::ClusterOverview)
+            .then(|| OverviewScreen::header_controls(&self.overview, cx).into_any_element())
+    }
+
+    pub fn header_note(&self, page: Page, has_detail: bool, cx: &App) -> Option<(Counts, String)> {
         if !has_detail {
             return None;
         }

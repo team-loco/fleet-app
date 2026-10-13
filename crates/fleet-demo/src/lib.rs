@@ -284,7 +284,6 @@ fn prod_us_east() -> ClusterSummary {
     summary.nav = BTreeMap::from([
         (Page::Nodes, Counts::total(14).with_warn(1)),
         (Page::Namespaces, Counts::total(23)),
-        (Page::Events, Counts::default().with_warn(7)),
         #[cfg(feature = "loco")]
         (Page::LocoPlatform, Counts::default().with_warn(1)),
         #[cfg(feature = "loco")]
@@ -293,20 +292,11 @@ fn prod_us_east() -> ClusterSummary {
         (Page::LocoBuilds, Counts::default().with_err(1)),
         #[cfg(feature = "loco")]
         (Page::LocoRoutes, Counts::total(44).with_warn(2)),
-        (Page::Deployments, Counts::total(48).with_err(1)),
-        (Page::StatefulSets, Counts::total(12)),
-        (Page::DaemonSets, Counts::total(9)),
-        (Page::Jobs, Counts::total(31)),
-        (Page::CronJobs, Counts::total(14)),
         (Page::Kustomizations, Counts::total(12).with_err(1)),
         (Page::HelmReleases, Counts::total(9)),
         (Page::Sources, Counts::total(4)),
-        (Page::Services, Counts::total(64)),
-        (Page::Ingresses, Counts::total(11)),
-        (Page::ConfigMaps, Counts::total(88)),
-        (Page::Secrets, Counts::total(71)),
-        (Page::Pvcs, Counts::total(19)),
     ]);
+    summary.nav.extend(detail::prod_us_east().nav());
     summary
 }
 
@@ -340,6 +330,20 @@ mod tests {
         ];
         assert_eq!(counts[1..], expected);
         assert_eq!(phases, Some((398, 9, 5)));
+    }
+
+    #[test]
+    fn prod_us_east_nav_counts_come_from_its_detail() {
+        let summary = prod_us_east();
+        assert_eq!(
+            summary.nav.get(&Page::Deployments),
+            Some(&Counts::total(48).with_err(1).with_warn(1))
+        );
+        assert_eq!(
+            summary.nav.get(&Page::Events),
+            Some(&Counts::default().with_err(2).with_warn(5))
+        );
+        assert_eq!(summary.nav.get(&Page::ConfigMaps), Some(&Counts::total(88)));
     }
 
     #[test]
