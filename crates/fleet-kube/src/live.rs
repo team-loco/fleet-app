@@ -8,10 +8,11 @@ use fleet_core::add_cluster::home_relative;
 use fleet_core::home::problem_counts;
 use fleet_core::resource::page_for_kind;
 use fleet_core::settings::{Auth, ClusterSettings, Connection};
+use fleet_core::stream::Sink;
 use fleet_core::{
     Backend, ChangesLog, CheckLine, ClusterCatalog, ClusterId, ClusterSummary, Command,
     ContextChoice, Counts, FleetHome, GitOps, KubeconfigFile, NewCluster, Page, Preferences,
-    Receiver, ResourceRef, Sender, Snapshot, Status, Update, Verdict,
+    Receiver, ResourceRef, Sender, Snapshot, Status, Update, Verdict, Workload,
 };
 use fleet_flux::ObjectKind;
 use jiff::Timestamp;
@@ -130,6 +131,7 @@ struct Live {
     yaml: Option<(ResourceRef, String)>,
     inspecting: Option<ResourceRef>,
     yaml_task: Option<TaskGuard>,
+    workload_task: Option<TaskGuard>,
     #[cfg(feature = "loco")]
     loco: crate::loco::LocoBackend,
 }
@@ -376,6 +378,16 @@ impl Live {
         }
     }
 
+    fn watch_workload(&mut self, target: &ResourceRef, sink: &Sink<Workload>) {
+        self.workload_task = None;
+        let Some(handle) = self.handle(&target.cluster).cloned() else {
+            return;
+        };
+        let refresh = self.settings.workload_refresh;
+        let watch = crate::workload::watch(handle, target.clone(), sink.clone(), refresh);
+        self.workload_task = Some(TaskGuard::spawn(watch));
+    }
+
     fn inspect(&mut self, target: &ResourceRef) {
         self.yaml = None;
         self.yaml_task = None;
@@ -449,7 +461,7 @@ impl Live {
                 self.remove(id);
                 return true;
             }
-            Command::WatchWorkload { .. } => {}
+            Command::WatchWorkload { target, sink } => self.watch_workload(target, sink),
             Command::StreamLogs(_) => self.act(command),
             Command::Exec(_) => self.act(command),
             Command::RestartRollout(_) => self.act(command),
@@ -706,6 +718,13 @@ fn watch_kubeconfigs(
     }
 }
 
+async fn scan(sources: &DiscoverySources) -> Discovery {
+    let sources = sources.clone();
+    tokio::task::spawn_blocking(move || discover(&sources))
+        .await
+        .unwrap_or_default()
+}
+
 fn ticker(period: Duration) -> tokio::time::Interval {
     let mut interval = tokio::time::interval(period);
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -719,15 +738,12 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
         store,
     } = backend;
     let env = Arc::new(capture(&user_shell(), settings.shell_env_timeout).await);
-    let scan_sources = sources.clone();
-    let discovery = tokio::task::spawn_blocking(move || discover(&scan_sources))
-        .await
-        .unwrap_or_default();
+    let discovery = scan(&sources).await;
     let (_watcher, discovery_events) = watch_kubeconfigs(&sources, &discovery, &settings);
     let runtime = tokio::runtime::Handle::current();
     let (fetched, fetched_events) = async_channel::unbounded();
-    let mut usage_tick = ticker(settings.metrics_interval);
-    let mut prometheus_tick = ticker(settings.prometheus_interval);
+    let [mut usage_tick, mut prometheus_tick] =
+        [settings.metrics_interval, settings.prometheus_interval].map(ticker);
     let (manager, cluster_events) = ClusterManager::new(runtime, settings.clone(), env.clone());
     let (actions, action_changes) = Actions::new(updates.clone());
     let mut live = Live {
@@ -748,6 +764,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
         yaml: None,
         inspecting: None,
         yaml_task: None,
+        workload_task: None,
         #[cfg(feature = "loco")]
         loco: crate::loco::LocoBackend::new(crate::loco::LocoSettings::default()),
     };

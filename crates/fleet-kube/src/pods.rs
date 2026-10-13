@@ -45,7 +45,7 @@ fn qos(text: Option<&str>) -> Qos {
     }
 }
 
-fn health_status(health: PodHealth) -> Status {
+pub(crate) fn health_status(health: PodHealth) -> Status {
     match health {
         PodHealth::Healthy => Status::Ok,
         PodHealth::Warning => Status::Warn,
@@ -53,7 +53,7 @@ fn health_status(health: PodHealth) -> Status {
     }
 }
 
-fn unschedulable(pod: &core::Pod) -> Option<String> {
+pub(crate) fn unschedulable(pod: &core::Pod) -> Option<String> {
     pod.status
         .as_ref()?
         .conditions
@@ -63,7 +63,7 @@ fn unschedulable(pod: &core::Pod) -> Option<String> {
         .map(|c| c.message.clone().unwrap_or_default())
 }
 
-fn container(
+pub(crate) fn container(
     spec: &core::Container,
     status: Option<&ContainerStatus>,
     waiting_note: Option<&str>,
@@ -163,7 +163,7 @@ fn volume(volume: &core::Volume) -> Volume {
     }
 }
 
-fn reason(pod: &core::Pod, containers: &[Container], health: PodHealth) -> String {
+pub(crate) fn reason(pod: &core::Pod, containers: &[Container], health: PodHealth) -> String {
     let status = pod.status.as_ref();
     if let Some(reason) = status.and_then(|s| s.reason.clone()) {
         return reason;

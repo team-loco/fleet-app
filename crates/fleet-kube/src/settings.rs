@@ -13,6 +13,7 @@ pub struct KubeSettings {
     pub prometheus_interval: Duration,
     pub usage_history: Duration,
     pub event_limit: usize,
+    pub workload_refresh: Duration,
 }
 
 impl KubeSettings {
@@ -37,6 +38,7 @@ impl Default for KubeSettings {
             prometheus_interval: Duration::from_secs(60),
             usage_history: Duration::from_secs(3600),
             event_limit: 1000,
+            workload_refresh: Duration::from_secs(2),
         }
     }
 }
