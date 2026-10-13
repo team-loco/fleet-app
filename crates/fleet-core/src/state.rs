@@ -74,6 +74,7 @@ pub enum Command {
     SetRefresh(Refresh),
     Connect(ClusterId),
     Reauthenticate(ClusterId),
+    ConfirmContext(ClusterId),
     Disconnect(ClusterId),
 }
 
@@ -187,6 +188,7 @@ impl AppState {
             Command::SetRefresh(_) => {}
             Command::Connect(_) => {}
             Command::Reauthenticate(_) => {}
+            Command::ConfirmContext(_) => {}
             Command::Disconnect(_) => {}
         }
     }

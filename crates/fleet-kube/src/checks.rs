@@ -752,6 +752,8 @@ mod tests {
         };
         drop(listener);
         let context = KubeContext {
+            trust: crate::discovery::Fingerprint::default(),
+            credentials: crate::discovery::Fingerprint::default(),
             id: ContextRef {
                 file: "/k".into(),
                 context: "gone".to_owned(),
@@ -801,6 +803,8 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn independent_checks_overlap_and_report_in_order() {
         let context = KubeContext {
+            trust: crate::discovery::Fingerprint::default(),
+            credentials: crate::discovery::Fingerprint::default(),
             id: ContextRef {
                 file: "/k".into(),
                 context: "fake".to_owned(),
@@ -845,6 +849,8 @@ mod tests {
         };
         drop(listener);
         let context = KubeContext {
+            trust: crate::discovery::Fingerprint::default(),
+            credentials: crate::discovery::Fingerprint::default(),
             id: ContextRef {
                 file: "/k".into(),
                 context: "gone".to_owned(),

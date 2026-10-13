@@ -1,10 +1,13 @@
 use std::collections::BTreeSet;
 use std::ffi::OsString;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 pub use fleet_core::ContextRef;
-use kube::config::Kubeconfig;
+use kube::config::{AuthInfo, Cluster, Kubeconfig};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::error::kubeconfig_reason;
 use crate::provider::{AuthKind, Provider, detect_auth, detect_provider};
@@ -26,6 +29,59 @@ pub struct KubeContext {
     pub provider: Provider,
     pub auth: AuthKind,
     pub is_current: bool,
+    pub trust: Fingerprint,
+    pub credentials: Fingerprint,
+}
+
+impl KubeContext {
+    pub fn same_target(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.cluster == other.cluster
+            && self.user == other.user
+            && self.server == other.server
+            && self.trust == other.trust
+            && self.credentials == other.credentials
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Fingerprint(String);
+
+impl Fingerprint {
+    pub fn of(parts: &[&[u8]]) -> Self {
+        let mut hasher = Sha256::new();
+        for part in parts {
+            let length = u64::try_from(part.len()).unwrap_or(u64::MAX);
+            hasher.update(length.to_be_bytes());
+            hasher.update(part);
+        }
+        let digest = hasher.finalize();
+        let hex = digest.iter().fold(String::new(), |mut hex, byte| {
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        });
+        Self(hex)
+    }
+}
+
+fn file_bytes(path: Option<&str>) -> Vec<u8> {
+    path.and_then(|path| fs::read(path).ok())
+        .unwrap_or_default()
+}
+
+fn trust_of(cluster: Option<&Cluster>) -> Fingerprint {
+    let declared = serde_json::to_vec(&cluster).unwrap_or_default();
+    let authority = file_bytes(cluster.and_then(|c| c.certificate_authority.as_deref()));
+    Fingerprint::of(&[&declared, &authority])
+}
+
+fn credentials_of(auth: Option<&AuthInfo>) -> Fingerprint {
+    let declared = serde_json::to_vec(&auth).unwrap_or_default();
+    let token = file_bytes(auth.and_then(|a| a.token_file.as_deref()));
+    let certificate = file_bytes(auth.and_then(|a| a.client_certificate.as_deref()));
+    let key = file_bytes(auth.and_then(|a| a.client_key.as_deref()));
+    Fingerprint::of(&[&declared, &token, &certificate, &key])
 }
 
 #[derive(Debug, Clone, Default)]
@@ -191,6 +247,8 @@ pub fn contexts_of(file: &Path, config: &Kubeconfig) -> Vec<KubeContext> {
                     .and_then(|named| named.auth_info.as_ref())
             });
             let server = cluster.and_then(|cluster| cluster.server.clone());
+            let trust = trust_of(cluster);
+            let credentials = credentials_of(auth_info);
             let auth = detect_auth(auth_info);
             let provider = detect_provider(&named.name, server.as_deref(), &auth);
             Some(KubeContext {
@@ -205,6 +263,8 @@ pub fn contexts_of(file: &Path, config: &Kubeconfig) -> Vec<KubeContext> {
                 provider,
                 auth,
                 is_current: config.current_context.as_deref() == Some(named.name.as_str()),
+                trust,
+                credentials,
             })
         })
         .collect()
@@ -407,6 +467,50 @@ users:
 
         assert_eq!(names(&discovery), vec!["dup", "dup"]);
         assert_eq!(discovery.files.len(), 2);
+    }
+
+    #[test]
+    fn rotated_credentials_and_trust_are_changes_without_exposing_them() {
+        let Ok(home) = tempfile::tempdir() else {
+            panic!("tempdir");
+        };
+        let config = home.path().join(".kube").join("config");
+        let original = kubeconfig("lab", "https://127.0.0.1:1");
+        write(&config, &original);
+        let src = sources(home.path(), None);
+        let before = discover(&src);
+
+        write(
+            &config,
+            &original.replace("token: abc", "token: restricted"),
+        );
+        let rotated = discover(&src);
+        let events = diff(&before, &rotated);
+        let changed: Vec<&str> = events
+            .iter()
+            .filter_map(|event| match event {
+                DiscoveryEvent::Changed(context) => Some(context.id.context.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(changed, ["lab"]);
+        let debug = format!("{rotated:?}");
+        assert!(!debug.contains("restricted"), "{debug}");
+
+        let with_ca = original.replace(
+            "    server: https://127.0.0.1:1\n",
+            "    server: https://127.0.0.1:1\n    certificate-authority-data: Zmlyc3Q=\n",
+        );
+        write(&config, &with_ca);
+        let first = discover(&src);
+        write(&config, &with_ca.replace("Zmlyc3Q=", "c2Vjb25k"));
+        let second = discover(&src);
+        assert_eq!(diff(&first, &second).len(), 1);
+        let trust = |discovery: &Discovery| discovery.contexts.first().map(|c| c.trust.clone());
+        assert_ne!(trust(&first), trust(&second));
+        let credentials =
+            |discovery: &Discovery| discovery.contexts.first().map(|c| c.credentials.clone());
+        assert_eq!(credentials(&first), credentials(&second));
     }
 
     #[test]

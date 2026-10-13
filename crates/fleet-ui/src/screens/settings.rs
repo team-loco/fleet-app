@@ -286,7 +286,11 @@ impl SettingsScreen {
     fn inspector(&self, palette: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
         let summary = self.summary()?.clone();
         let settings = self.settings()?.clone();
-        let action = ClusterAction::for_cluster(summary.status, settings.auth_expired);
+        let action = ClusterAction::for_cluster(
+            summary.status,
+            settings.auth_expired,
+            settings.context_change.is_some(),
+        );
         let id = summary.id.clone();
         let cta = Button::new("cluster-cta", action.label())
             .primary()
@@ -326,7 +330,10 @@ impl SettingsScreen {
                     .child(cta)
                     .child(self.menu.clone()),
             );
-        let auth = settings.auth_sentence().map(|sentence| {
+        let sentence = settings
+            .context_sentence()
+            .or_else(|| settings.auth_sentence());
+        let auth = sentence.map(|sentence| {
             div()
                 .px(SPACE_8)
                 .py(SPACE_5)
@@ -484,6 +491,7 @@ fn action_command(action: ClusterAction, cluster: &ClusterId) -> Command {
         ClusterAction::Open => Command::SelectCluster(Some(cluster.clone())),
         ClusterAction::Reauthenticate => Command::Reauthenticate(cluster.clone()),
         ClusterAction::Connect => Command::Connect(cluster.clone()),
+        ClusterAction::ConfirmContext => Command::ConfirmContext(cluster.clone()),
     }
 }
 

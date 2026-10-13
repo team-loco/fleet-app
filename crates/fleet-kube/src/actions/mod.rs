@@ -145,7 +145,10 @@ impl Actions {
         let this = self.clone();
         tokio::spawn(async move {
             let outcome = match handle {
-                Some(handle) => perform(&handle, &mutation).await,
+                Some(handle) => {
+                    let performed = handle.until_closed(perform(&handle, &mutation)).await;
+                    performed.unwrap_or(Err(Error::NotConnected))
+                }
                 None => Err(Error::NotConnected),
             };
             lock(&this.registry)
@@ -240,8 +243,7 @@ impl Actions {
     pub fn overlay(&self, snapshot: &mut Snapshot) {
         let mut registry = lock(&self.registry);
         registry.forwards.retain(|active| {
-            let connected = snapshot.cluster(&active.forward.target.cluster).is_some();
-            let keep = connected && active.alive();
+            let keep = !active.handle.is_closed() && active.alive();
             if !keep {
                 active.stop();
             }
@@ -295,4 +297,63 @@ async fn perform(handle: &ClusterHandle, mutation: &Mutation) -> Result<Vec<drai
         } => mutate::replace_template(handle, target, template).await?,
     }
     Ok(Vec::new())
+}
+
+#[cfg(test)]
+mod tests {
+    use fleet_core::ClusterSummary;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn a_disconnected_cluster_keeps_no_forward_even_while_its_row_is_listed() {
+        let (client, _) = crate::fake::client(std::time::Duration::ZERO, |_, _| None);
+        let (manager, handle) = crate::fake::handle(&client);
+        let Ok(info) = handle.port_forward("apps", "web-1", 80, 0).await else {
+            panic!("forward starts");
+        };
+        let (updates, _) = async_channel::unbounded();
+        let (actions, _) = Actions::new(updates);
+        let cluster = ClusterId::new("prod");
+        let target = ResourceRef {
+            cluster: cluster.clone(),
+            kind: "Service".into(),
+            namespace: Some("apps".into()),
+            name: "web".into(),
+        };
+        let forward = Forward {
+            target,
+            local: info.local_addr.port(),
+            remote: 80,
+        };
+        lock(&actions.registry).forwards.push(Active {
+            forward,
+            handle: handle.clone(),
+            id: info.id,
+        });
+        let mut snapshot = Snapshot {
+            clusters: vec![ClusterSummary {
+                id: cluster,
+                name: "prod".into(),
+                status: Status::Offline,
+                state: "Disconnected".into(),
+                distro: String::new(),
+                region: String::new(),
+                version: None,
+                nodes: None,
+                problems: fleet_core::Counts::default(),
+                nav: std::collections::BTreeMap::new(),
+                metrics: None,
+            }],
+            ..Snapshot::default()
+        };
+        actions.overlay(&mut snapshot);
+        assert_eq!(snapshot.forwards.len(), 1);
+
+        manager.disconnect(handle.id());
+        actions.overlay(&mut snapshot);
+
+        assert_eq!(snapshot.forwards, Vec::new());
+        assert!(lock(&actions.registry).forwards.is_empty());
+    }
 }

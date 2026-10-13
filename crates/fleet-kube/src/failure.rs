@@ -9,6 +9,7 @@ use crate::discovery::KubeContext;
 use crate::error::Error;
 use crate::provider::{AuthKind, Provider};
 
+const CONTEXT_CHANGED: &str = "The kubeconfig changed since Fleet read it; Fleet reads it again.";
 const HTTP_UNAUTHORIZED: u16 = 401;
 const HTTP_FORBIDDEN: u16 = 403;
 const HTTP_NOT_FOUND: u16 = 404;
@@ -279,6 +280,14 @@ pub fn classify(err: &Error, context: &KubeContext) -> Failure {
             message,
         };
     }
+    if let Error::ContextChanged(_) = err {
+        return Failure {
+            kind: FailureKind::Config,
+            detail: CONTEXT_CHANGED.to_owned(),
+            remedy: None,
+            message,
+        };
+    }
     if let Error::Kubeconfig { .. } = err {
         return Failure {
             kind: FailureKind::Config,
@@ -335,6 +344,8 @@ mod tests {
 
     fn context(provider: Provider, command: &str, args: &[&str]) -> KubeContext {
         KubeContext {
+            trust: crate::discovery::Fingerprint::default(),
+            credentials: crate::discovery::Fingerprint::default(),
             id: ContextRef {
                 file: PathBuf::from("/k/config"),
                 context: "sandbox".to_owned(),
@@ -363,6 +374,15 @@ mod tests {
             },
         };
         Error::Kube(kube::Error::Auth(auth))
+    }
+
+    #[test]
+    fn a_changed_context_is_a_config_failure_not_an_auth_one() {
+        let ctx = context(Provider::Generic, "kubectl", &[]);
+        let failure = classify(&Error::ContextChanged("lab".into()), &ctx);
+        assert_eq!(failure.kind, FailureKind::Config);
+        assert_eq!(failure.detail, CONTEXT_CHANGED);
+        assert!(!failure.kind.is_auth());
     }
 
     #[test]

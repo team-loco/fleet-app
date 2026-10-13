@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use kube::config::{AuthInfo, ExecInteractiveMode, KubeConfigOptions, Kubeconfig};
 
-use crate::discovery::KubeContext;
+use crate::discovery::{KubeContext, contexts_of};
 use crate::error::{Error, Result, kubeconfig_reason};
 use crate::shell_env::ShellEnv;
 
@@ -45,6 +45,12 @@ pub async fn load_config(context: &KubeContext, env: &ShellEnv) -> Result<kube::
         path: file.clone(),
         reason: kubeconfig_reason(&source),
     })?;
+    let current = contexts_of(&file, &kubeconfig)
+        .into_iter()
+        .find(|found| found.id == context.id);
+    if !current.is_some_and(|current| current.same_target(context)) {
+        return Err(Error::ContextChanged(context.id.context.clone()));
+    }
     let options = KubeConfigOptions {
         context: Some(context.id.context.clone()),
         cluster: None,
@@ -131,5 +137,49 @@ mod tests {
                 .iter()
                 .any(|entry| entry.get("name").map(String::as_str) == Some("PATH"))
         );
+    }
+
+    fn env() -> ShellEnv {
+        ShellEnv::from_vars(
+            BTreeMap::new(),
+            EnvOrigin::Fallback {
+                reason: String::new(),
+            },
+            None,
+        )
+    }
+
+    #[tokio::test]
+    async fn a_context_retargeted_after_discovery_is_not_connected() {
+        let Ok(home) = tempfile::tempdir() else {
+            panic!("tempdir");
+        };
+        let file = home.path().join("config");
+        let original = crate::discovery::tests::kubeconfig("lab", "https://127.0.0.1:1");
+        assert!(std::fs::write(&file, &original).is_ok());
+        let Ok(parsed) = Kubeconfig::read_from(&file) else {
+            panic!("kubeconfig");
+        };
+        let Some(discovered) = contexts_of(&file, &parsed).into_iter().next() else {
+            panic!("context");
+        };
+        let loaded = load_config(&discovered, &env()).await;
+        let Ok(config) = loaded else {
+            panic!("unchanged context loads");
+        };
+        assert_eq!(config.cluster_url.port_u16(), Some(1));
+
+        let retargeted = original.replace("127.0.0.1:1", "127.0.0.1:2");
+        assert!(std::fs::write(&file, retargeted).is_ok());
+        let loaded = load_config(&discovered, &env()).await;
+        assert!(
+            matches!(loaded, Err(Error::ContextChanged(ref name)) if name == "lab"),
+            "{loaded:?}"
+        );
+
+        let rotated = original.replace("token: abc", "token: other");
+        assert!(std::fs::write(&file, rotated).is_ok());
+        let loaded = load_config(&discovered, &env()).await;
+        assert!(matches!(loaded, Err(Error::ContextChanged(_))));
     }
 }

@@ -18,8 +18,15 @@ pub struct ClusterSettings {
     pub cluster: ClusterId,
     pub connection: Connection,
     pub auth_expired: bool,
+    pub context_change: Option<ContextChange>,
     pub prometheus: Option<String>,
     pub preferences: Preferences,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextChange {
+    pub pinned: String,
+    pub current: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,6 +66,7 @@ pub enum ClusterAction {
     Open,
     Reauthenticate,
     Connect,
+    ConfirmContext,
 }
 
 impl Default for Preferences {
@@ -147,8 +155,10 @@ impl MetricsSource {
 }
 
 impl ClusterAction {
-    pub fn for_cluster(status: Status, auth_expired: bool) -> Self {
-        if auth_expired {
+    pub fn for_cluster(status: Status, auth_expired: bool, context_changed: bool) -> Self {
+        if context_changed {
+            Self::ConfirmContext
+        } else if auth_expired {
             Self::Reauthenticate
         } else if status == Status::Offline {
             Self::Connect
@@ -162,11 +172,25 @@ impl ClusterAction {
             Self::Open => "Open cluster",
             Self::Reauthenticate => "Re-authenticate",
             Self::Connect => "Connect",
+            Self::ConfirmContext => "Trust new server",
         }
     }
 }
 
 impl ClusterSettings {
+    pub fn context_sentence(&self) -> Option<String> {
+        let change = self.context_change.as_ref()?;
+        let sentence = if change.pinned == change.current {
+            "This context's certificate authority changed. Fleet stopped using it until you trust the new one.".to_owned()
+        } else {
+            format!(
+                "This context now points at {} instead of {}. Fleet stopped using it until you trust the new server.",
+                change.current, change.pinned
+            )
+        };
+        Some(sentence)
+    }
+
     pub fn auth_sentence(&self) -> Option<String> {
         if !self.auth_expired {
             return None;
@@ -239,6 +263,7 @@ mod tests {
                 kubeconfig: "~/.kube/config".into(),
             },
             auth_expired,
+            context_change: None,
             prometheus: None,
             preferences: Preferences::default(),
         }
@@ -293,16 +318,45 @@ mod tests {
     #[test]
     fn primary_action_depends_on_connection() {
         assert_eq!(
-            ClusterAction::for_cluster(Status::Err, true),
+            ClusterAction::for_cluster(Status::Err, true, false),
             ClusterAction::Reauthenticate
         );
         assert_eq!(
-            ClusterAction::for_cluster(Status::Offline, false),
+            ClusterAction::for_cluster(Status::Offline, false, false),
             ClusterAction::Connect
         );
         assert_eq!(
-            ClusterAction::for_cluster(Status::Warn, false),
+            ClusterAction::for_cluster(Status::Warn, false, false),
             ClusterAction::Open
+        );
+        assert_eq!(
+            ClusterAction::for_cluster(Status::Offline, true, true),
+            ClusterAction::ConfirmContext
+        );
+    }
+
+    #[test]
+    fn a_changed_context_says_what_moved() {
+        let mut changed = settings(Auth::Other("token".into()), false);
+        assert_eq!(changed.context_sentence(), None);
+        changed.context_change = Some(ContextChange {
+            pinned: "https://a:6443".into(),
+            current: "https://b:6443".into(),
+        });
+        assert_eq!(
+            changed.context_sentence().as_deref(),
+            Some(
+                "This context now points at https://b:6443 instead of https://a:6443. Fleet stopped using it until you trust the new server."
+            )
+        );
+        changed.context_change = Some(ContextChange {
+            pinned: "https://a:6443".into(),
+            current: "https://a:6443".into(),
+        });
+        assert!(
+            changed
+                .context_sentence()
+                .is_some_and(|sentence| sentence.contains("certificate authority"))
         );
     }
 

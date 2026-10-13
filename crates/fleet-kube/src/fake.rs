@@ -124,6 +124,8 @@ pub fn handle(client: &Client) -> (ClusterManager, ClusterHandle) {
     let env = Arc::new(ShellEnv::from_process(String::new()));
     let (manager, _) = ClusterManager::new(tokio::runtime::Handle::current(), settings, env);
     let context = KubeContext {
+        trust: crate::discovery::Fingerprint::default(),
+        credentials: crate::discovery::Fingerprint::default(),
         id: ContextRef {
             file: MISSING_KUBECONFIG.into(),
             context: NAMESPACE.to_owned(),

@@ -8,7 +8,7 @@ use fleet_core::add_cluster::home_relative;
 use fleet_core::app_settings::DEFAULT_SNAPSHOTS;
 use fleet_core::home::problems_badge;
 use fleet_core::resource::page_for_kind;
-use fleet_core::settings::{Auth, ClusterSettings, Connection};
+use fleet_core::settings::{Auth, ClusterSettings, Connection, ContextChange};
 use fleet_core::stream::Sink;
 use fleet_core::{
     Backend, ChangesLog, CheckLine, ClusterCatalog, ClusterId, ClusterSummary, Command, Comparison,
@@ -39,7 +39,7 @@ use crate::resources::WatchKind;
 use crate::settings::KubeSettings;
 use crate::shell_env::{ShellEnv, capture, user_shell};
 use crate::snapshot::page_kinds;
-use crate::store::{ClusterStore, SavedCluster, SavedPreferences};
+use crate::store::{ClusterStore, Pin, SavedCluster, SavedPreferences};
 use crate::task::TaskGuard;
 use crate::throttle::Throttle;
 use crate::usage::prometheus_utilization;
@@ -51,6 +51,7 @@ const EXTENSION_POLL_INTERVAL: Duration = SNAPSHOT_INTERVAL;
 const BASELINE_KINDS: [WatchKind; 2] = [WatchKind::Nodes, WatchKind::Pods];
 const DEFAULT_WINDOW: u64 = 0;
 const MISSING_STATE: &str = "Not in kubeconfig";
+const CHANGED_STATE: &str = "Context changed";
 const DISCONNECTED_STATE: &str = "Disconnected";
 const SET_ASIDE_TITLE: &str = "Saved clusters could not be read";
 const MISSING_CONTEXT: &str = "This context is no longer in its kubeconfig file.";
@@ -209,7 +210,41 @@ impl Live {
         self.reconcile();
     }
 
+    fn pin_new(&mut self) {
+        let unpinned: Vec<(ClusterId, Pin)> = self
+            .store
+            .clusters()
+            .iter()
+            .filter(|saved| saved.pin.is_none())
+            .filter_map(|saved| {
+                let context = self.discovery.get(&saved.context_ref())?;
+                Some((saved.id(), Pin::of(context)))
+            })
+            .collect();
+        for (id, pin) in unpinned {
+            self.save_pin(&id, pin);
+        }
+    }
+
+    fn save_pin(&mut self, id: &ClusterId, pin: Pin) {
+        if let Err(error) = self.store.pin(id, pin) {
+            tracing::error!(%error, path = %self.store.path().display(), "saving the cluster's server failed");
+        }
+    }
+
+    fn confirm_context(&mut self, id: &ClusterId) {
+        let context = self
+            .store
+            .get(id)
+            .and_then(|saved| self.discovery.get(&saved.context_ref()));
+        if let Some(pin) = context.map(Pin::of) {
+            self.save_pin(id, pin);
+        }
+        self.reconcile();
+    }
+
     fn reconcile(&mut self) {
+        self.pin_new();
         let ids = wanted(&self.store, &self.discovery, &self.disconnected);
         let wanted: BTreeSet<&ContextRef> = ids.keys().collect();
         let gone: Vec<ContextRef> = self
@@ -551,8 +586,10 @@ impl Live {
             return;
         };
         let refresh = self.settings.workload_refresh;
-        let watch = crate::workload::watch(handle, target.clone(), sink.clone(), refresh);
-        self.navigation.workload_task = Some(TaskGuard::spawn(watch));
+        let watch = crate::workload::watch(handle.clone(), target.clone(), sink.clone(), refresh);
+        self.navigation.workload_task = Some(TaskGuard::spawn(async move {
+            handle.until_closed(watch).await;
+        }));
     }
 
     fn inspect(&mut self, target: &ResourceRef) {
@@ -726,6 +763,10 @@ impl Live {
             Command::Disconnect(id) => {
                 self.disconnected.insert(id.clone());
                 self.reconcile();
+            }
+            Command::ConfirmContext(id) => {
+                self.confirm_context(id);
+                return true;
             }
         }
         false
@@ -914,6 +955,17 @@ impl Live {
         Some(selecting.any(|navigation| navigation.page == Page::Pods))
     }
 
+    fn away(&self, saved: &SavedCluster) -> &'static str {
+        if self.disconnected.contains(&saved.id()) {
+            return DISCONNECTED_STATE;
+        }
+        match self.discovery.get(&saved.context_ref()) {
+            Some(context) if !pinned(saved, context) => CHANGED_STATE,
+            Some(_) => MISSING_STATE,
+            None => MISSING_STATE,
+        }
+    }
+
     fn snapshot(&self) -> Snapshot {
         let now = Timestamp::now();
         let mut connected = Vec::new();
@@ -957,7 +1009,7 @@ impl Live {
             .clusters()
             .iter()
             .filter(|saved| !self.clusters.contains_key(&saved.context_ref()))
-            .map(|saved| offline_summary(saved, self.disconnected.contains(&saved.id())));
+            .map(|saved| offline_summary(saved, self.away(saved)));
         let mut clusters: Vec<_> = connected.into_iter().chain(missing).collect();
         clusters.sort_by(|a, b| a.name.cmp(&b.name));
         #[cfg(feature = "loco")]
@@ -978,15 +1030,13 @@ impl Live {
             .store
             .clusters()
             .iter()
-            .filter(|saved| self.disconnected.contains(&saved.id()))
+            .filter(|saved| !self.clusters.contains_key(&saved.context_ref()))
             .filter_map(|saved| {
                 let context = self.discovery.get(&saved.context_ref())?;
-                Some(cluster_settings(
-                    saved.id(),
-                    context,
-                    false,
-                    Some(&saved.preferences),
-                ))
+                let mut settings =
+                    cluster_settings(saved.id(), context, false, Some(&saved.preferences));
+                settings.context_change = context_change(saved, context);
+                Some(settings)
             });
         let mut settings: Vec<ClusterSettings> =
             connected_settings.chain(disconnected_settings).collect();
@@ -1032,6 +1082,7 @@ pub fn cluster_settings(
         preferences.default_namespace.clone_from(&context.namespace);
     }
     ClusterSettings {
+        context_change: None,
         cluster,
         connection: Connection {
             context: context.id.context.clone(),
@@ -1211,6 +1262,21 @@ fn leaves_compare(command: &Command) -> bool {
     )
 }
 
+fn pinned(saved: &SavedCluster, context: &KubeContext) -> bool {
+    saved.pin.as_ref() == Some(&Pin::of(context))
+}
+
+fn context_change(saved: &SavedCluster, context: &KubeContext) -> Option<ContextChange> {
+    if pinned(saved, context) {
+        return None;
+    }
+    let pinned = saved.pin.as_ref().and_then(|pin| pin.server.clone());
+    Some(ContextChange {
+        pinned: pinned.unwrap_or_default(),
+        current: context.server.clone().unwrap_or_default(),
+    })
+}
+
 fn wanted(
     store: &ClusterStore,
     discovery: &Discovery,
@@ -1220,7 +1286,11 @@ fn wanted(
         .clusters()
         .iter()
         .filter(|saved| !disconnected.contains(&saved.id()))
-        .filter(|saved| discovery.get(&saved.context_ref()).is_some())
+        .filter(|saved| {
+            discovery
+                .get(&saved.context_ref())
+                .is_some_and(|context| pinned(saved, context))
+        })
         .map(|saved| (saved.context_ref(), saved.id()))
         .collect()
 }
@@ -1234,12 +1304,7 @@ fn set_aside_notice(store: &ClusterStore) -> Option<Notice> {
     })
 }
 
-fn offline_summary(saved: &SavedCluster, disconnected: bool) -> ClusterSummary {
-    let state = if disconnected {
-        DISCONNECTED_STATE
-    } else {
-        MISSING_STATE
-    };
+fn offline_summary(saved: &SavedCluster, state: &str) -> ClusterSummary {
     ClusterSummary {
         id: saved.id(),
         name: saved.name.clone(),
@@ -1343,6 +1408,8 @@ mod tests {
 
     fn context(file: &str, name: &str) -> KubeContext {
         KubeContext {
+            trust: crate::discovery::Fingerprint::default(),
+            credentials: crate::discovery::Fingerprint::default(),
             id: ContextRef {
                 file: PathBuf::from(file),
                 context: name.to_owned(),
@@ -1635,15 +1702,103 @@ mod tests {
     #[test]
     fn saved_clusters_without_a_context_show_offline() {
         let saved = SavedCluster {
+            pin: None,
             file: PathBuf::from("/gone"),
             context: "old".to_owned(),
             name: "old".to_owned(),
             preferences: SavedPreferences::default(),
         };
-        let summary = offline_summary(&saved, false);
+        let summary = offline_summary(&saved, MISSING_STATE);
         assert_eq!(summary.status, Status::Offline);
         assert_eq!(summary.state, MISSING_STATE);
-        assert_eq!(offline_summary(&saved, true).state, DISCONNECTED_STATE);
+    }
+
+    fn served(name: &str, server: &str) -> KubeContext {
+        KubeContext {
+            server: Some(server.to_owned()),
+            ..context("/h/.kube/config", name)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_retargeted_context_is_held_until_its_new_server_is_trusted() {
+        let Ok(dir) = tempfile::tempdir() else {
+            panic!("tempdir");
+        };
+        let mut live = test_live(dir.path());
+        let lab = ClusterId::new("lab");
+        live.discovery.contexts = vec![served("lab", "https://a:6443")];
+        live.add(&[NewCluster {
+            context: served("lab", "https://a:6443").id,
+            name: "lab".to_owned(),
+        }]);
+        let Some(first) = live.handle(&lab).cloned() else {
+            panic!("pinned on add and connected");
+        };
+
+        apply_discovery(
+            &mut live.discovery,
+            DiscoveryEvent::Changed(served("lab", "https://b:6443")),
+        );
+        live.reconcile();
+
+        assert!(live.handle(&lab).is_none());
+        assert!(first.is_closed());
+        let snapshot = live.snapshot();
+        let row = snapshot.cluster(&lab).map(|row| row.state.clone());
+        assert_eq!(row.as_deref(), Some(CHANGED_STATE));
+        let change = snapshot
+            .catalog
+            .get(&lab)
+            .and_then(|settings| settings.context_change.clone());
+        assert_eq!(
+            change,
+            Some(ContextChange {
+                pinned: "https://a:6443".into(),
+                current: "https://b:6443".into(),
+            })
+        );
+
+        assert!(live.apply(&Command::ConfirmContext(lab.clone())));
+        let server = live
+            .handle(&lab)
+            .and_then(|handle| handle.context().server.clone());
+        assert_eq!(server.as_deref(), Some("https://b:6443"));
+        let saved = live.store.get(&lab).and_then(|saved| saved.pin.clone());
+        assert_eq!(
+            saved.and_then(|pin| pin.server).as_deref(),
+            Some("https://b:6443")
+        );
+    }
+
+    #[tokio::test]
+    async fn rotated_credentials_reconnect_with_the_new_material() {
+        let Ok(dir) = tempfile::tempdir() else {
+            panic!("tempdir");
+        };
+        let mut live = test_live(dir.path());
+        let lab = ClusterId::new("lab");
+        live.discovery.contexts = vec![served("lab", "https://a:6443")];
+        live.add(&[NewCluster {
+            context: served("lab", "https://a:6443").id,
+            name: "lab".to_owned(),
+        }]);
+        let Some(first) = live.handle(&lab).cloned() else {
+            panic!("connected");
+        };
+        let rotated = KubeContext {
+            credentials: crate::discovery::Fingerprint::of(&[b"restricted"]),
+            ..served("lab", "https://a:6443")
+        };
+        apply_discovery(
+            &mut live.discovery,
+            DiscoveryEvent::Changed(rotated.clone()),
+        );
+        live.reconcile();
+
+        assert!(first.is_closed());
+        let current = live.handle(&lab).map(|handle| handle.context().clone());
+        assert_eq!(current, Some(rotated));
     }
 
     #[test]
@@ -1665,6 +1820,10 @@ mod tests {
             ],
             errors: Vec::new(),
         };
+        for context in &discovery.contexts {
+            let id = ClusterId::new(&context.id.context);
+            assert!(store.pin(&id, Pin::of(context)).is_ok());
+        }
         let names = |disconnected: &BTreeSet<ClusterId>| -> Vec<String> {
             wanted(&store, &discovery, disconnected)
                 .into_values()

@@ -10,6 +10,8 @@ pub enum Error {
     Http(#[from] http::Error),
     #[error("watching kubeconfig files: {0}")]
     Notify(#[from] notify::Error),
+    #[error("context {0} changed in its kubeconfig since Fleet read it")]
+    ContextChanged(String),
     #[error("cluster is not connected")]
     NotConnected,
     #[error("{api_version} {kind} is not served by this cluster")]
