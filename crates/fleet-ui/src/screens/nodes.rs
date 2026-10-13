@@ -1,6 +1,6 @@
 use fleet_core::filter::StatusFilter;
 use fleet_core::nodes::{Node, NodeSummary, Usage, sentence};
-use fleet_core::overview::{number, percent};
+use fleet_core::overview::{Capacity, Commitment, number, percent};
 use fleet_core::time::age;
 use fleet_core::{
     ClusterDetail, ClusterId, ClusterSummary, Command, Counts, ResourceRef, Seen, Status,
@@ -12,9 +12,9 @@ use gpui::{
 
 use super::{NODE_KIND, ScreenEvent};
 use crate::kit::{
-    ActionMenu, Button, Column, ConfirmDialog, FilterBar, FilterEvent, IconButton, Inspector,
-    KeyValue, Lede, MenuItem, Meter, MiniMeter, Presence, SectionLabel, StatusGlyph, StatusText,
-    Table, TableEvent, chip_label, confirm, slide_in, slide_out,
+    ActionMenu, Button, CapacityMeter, Column, ConfirmDialog, FilterBar, FilterEvent, IconButton,
+    Inspector, KeyValue, Lede, MenuItem, Meter, MiniMeter, Presence, SectionLabel, StatusGlyph,
+    StatusText, Table, TableEvent, chip_label, confirm, slide_in, slide_out,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, INSPECTOR, Palette, SPACE_2, SPACE_3, SPACE_4, SPACE_5, TEXT_MONO,
@@ -264,21 +264,7 @@ impl NodesScreen {
             .row("OS image", node.os_image.clone())
             .row("runtime", node.runtime.clone())
             .row("age", age(node.age));
-        let capacity = div()
-            .flex()
-            .flex_col()
-            .gap(SPACE_5)
-            .child(usage_row("CPU", node.cpu, "cores", palette))
-            .child(usage_row("Memory", node.memory, "GiB", palette))
-            .child(usage_row(
-                "Pods",
-                Usage {
-                    used: count(node.pods),
-                    allocatable: count(node.pod_capacity),
-                },
-                "",
-                palette,
-            ));
+        let capacity = node_capacity(node, palette);
         let conditions = node.conditions.iter().map(|c| {
             let status = if c.healthy { Status::Ok } else { Status::Err };
             div()
@@ -440,6 +426,59 @@ fn count(value: u32) -> f32 {
 fn short_version(version: &str) -> SharedString {
     let short = version.split(VERSION_SEPARATOR).next().unwrap_or(version);
     short.to_owned().into()
+}
+
+fn node_capacity(node: &Node, palette: &Palette) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap(SPACE_5)
+        .child(capacity_row(
+            "CPU",
+            node.cpu,
+            node.cpu_commitment,
+            "cores",
+            palette.acc,
+        ))
+        .child(capacity_row(
+            "Memory",
+            node.memory,
+            node.memory_commitment,
+            "GiB",
+            palette.ai,
+        ))
+        .child(usage_row(
+            "Pods",
+            Usage {
+                used: count(node.pods),
+                allocatable: count(node.pod_capacity),
+            },
+            "",
+            palette,
+        ))
+}
+
+fn capacity_row(
+    label: &'static str,
+    usage: Usage,
+    commitment: Commitment,
+    unit: &str,
+    color: Hsla,
+) -> impl IntoElement {
+    let capacity = Capacity {
+        used: usage.used,
+        total: usage.allocatable,
+        unit: unit.into(),
+        requests: commitment.requests,
+        limits: commitment.limits,
+    };
+    let id = format!("node-capacity-{label}");
+    div()
+        .flex()
+        .flex_col()
+        .gap(SPACE_4)
+        .child(SectionLabel::new(label))
+        .child(CapacityMeter::new(id, capacity, color))
 }
 
 fn usage_row(label: &'static str, usage: Usage, unit: &str, palette: &Palette) -> impl IntoElement {

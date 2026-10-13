@@ -213,6 +213,8 @@ mod tests {
         let mut snapshot = Snapshot::default();
         let detail = snapshot.details.entry(ClusterId::new("a")).or_default();
         detail.nodes.push(Node {
+            cpu_commitment: fleet_core::overview::Commitment::default(),
+            memory_commitment: fleet_core::overview::Commitment::default(),
             uid: Uid::default(),
             name: "n1".into(),
             status: Status::Ok,

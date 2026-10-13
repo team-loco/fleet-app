@@ -25,7 +25,7 @@ mod text;
 mod tooltip;
 
 pub use button::{Button, ButtonSize, ButtonVariant, Checkbox, IconButton, Segmented, Toggle};
-pub use chart::{LineChart, Meter, MiniMeter, Series, StackedBar};
+pub use chart::{CapacityMeter, LineChart, Meter, MiniMeter, Series, StackedBar};
 pub use code::CodeView;
 pub use diff::{DiffFile, DiffLine, DiffView, LineKind, parse_unified};
 pub use dock::{Dock, DockState, DockTab};

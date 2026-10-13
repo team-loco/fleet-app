@@ -166,7 +166,9 @@ fn section_rows(
                 .map(|c| badges(c, palette))
                 .unwrap_or_default();
             let key = ElementId::NamedInteger("page".into(), page as u64);
+            let selector = format!("nav-{}", page.label().to_lowercase());
             nav_row(key, ROW_NAV, selected, palette)
+                .debug_selector(move || selector.clone())
                 .when(!selected, |row| row.text_color(palette.fg2))
                 .border(RULE)
                 .border_color(if cursor == Some(page) {

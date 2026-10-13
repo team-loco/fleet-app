@@ -80,6 +80,7 @@ pub struct PodIndex {
     pub phases: PodPhases,
     namespaces: HashMap<String, NamespaceFacts>,
     per_node: HashMap<String, u32>,
+    node_resources: HashMap<String, (Totals, Totals)>,
     requests: Totals,
     limits: Totals,
 }
@@ -135,6 +136,11 @@ impl PodIndex {
                 }
             }
             let (requests, limits) = pod_resources(pod);
+            if let Some(name) = pod.spec.as_ref().and_then(|s| s.node_name.as_ref()) {
+                let totals = index.node_resources.entry(name.clone()).or_default();
+                totals.0.add(requests);
+                totals.1.add(limits);
+            }
             index.requests.add(requests);
             index.limits.add(limits);
             if let Some((issue, _)) = pod_issue(pod, now) {
@@ -146,23 +152,31 @@ impl PodIndex {
     }
 
     pub fn commitments(&self, capacity: Allocatable) -> (Commitment, Commitment) {
-        let share = |used: f64, total: f64| {
-            if total > 0. { narrow(used / total) } else { 0. }
-        };
-        let cpu = Commitment {
-            requests: share(self.requests.cpu, capacity.cpu_millicores),
-            limits: share(self.limits.cpu, capacity.cpu_millicores),
-        };
-        let memory = Commitment {
-            requests: share(self.requests.memory, capacity.memory_bytes),
-            limits: share(self.limits.memory, capacity.memory_bytes),
-        };
-        (cpu, memory)
+        commitments(self.requests, self.limits, capacity)
     }
 
     pub fn issue(&self, owner: &OwnerKey) -> Option<Status> {
         self.issues.get(owner).copied()
     }
+}
+
+fn commitments(
+    requests: Totals,
+    limits: Totals,
+    capacity: Allocatable,
+) -> (Commitment, Commitment) {
+    let share = |used: f64, total: f64| {
+        if total > 0. { narrow(used / total) } else { 0. }
+    };
+    let cpu = Commitment {
+        requests: share(requests.cpu, capacity.cpu_millicores),
+        limits: share(limits.cpu, capacity.cpu_millicores),
+    };
+    let memory = Commitment {
+        requests: share(requests.memory, capacity.memory_bytes),
+        limits: share(limits.memory, capacity.memory_bytes),
+    };
+    (cpu, memory)
 }
 
 pub fn capacity(nodes: &[Arc<Node>]) -> Allocatable {
@@ -267,6 +281,8 @@ pub fn node(node: &Node, pods: u32, usage: Option<&Usage>, now: Timestamp) -> no
             used: usage.map_or(0., |u| gib(u.memory_bytes)),
             allocatable: gib(capacity.memory_bytes),
         },
+        cpu_commitment: Commitment::default(),
+        memory_commitment: Commitment::default(),
         pods,
         pod_capacity: pod_capacity(node),
         age: age(&node.metadata, now),
@@ -292,7 +308,12 @@ pub fn nodes(
         .map(|n| {
             let name = n.metadata.name.as_deref().unwrap_or_default();
             let pods = index.per_node.get(name).copied().unwrap_or_default();
-            node(n, pods, used.get(name).copied(), now)
+            let mut row = node(n, pods, used.get(name).copied(), now);
+            let (requests, limits) = index.node_resources.get(name).copied().unwrap_or_default();
+            let (cpu, memory) = commitments(requests, limits, allocatable(n));
+            row.cpu_commitment = cpu;
+            row.memory_commitment = memory;
+            row
         })
         .collect();
     rows.sort_by(|a, b| a.name.cmp(&b.name));
@@ -476,6 +497,45 @@ mod tests {
                 ]
             }
         }))
+    }
+
+    #[test]
+    fn node_commitments_use_only_active_pods_assigned_to_that_node() {
+        let mut finished = (*pod_with_resources("done", "w1", "4", "8Gi")).clone();
+        finished.status = Some(core::PodStatus {
+            phase: Some("Succeeded".into()),
+            ..Default::default()
+        });
+        let pods = [
+            pod_with_resources("a", "w1", "500m", "1Gi"),
+            pod_with_resources("b", "w2", "1500m", "3Gi"),
+            Arc::new(finished),
+        ];
+        let index = PodIndex::build(&pods, now());
+        let workers = [worker("w1"), worker("w2"), worker("w3")];
+        let rows = nodes(&workers, &index, &[], now());
+        assert_eq!(
+            rows[0].cpu_commitment,
+            Commitment {
+                requests: 0.125,
+                limits: 0.5
+            }
+        );
+        assert_eq!(
+            rows[0].memory_commitment,
+            Commitment {
+                requests: 0.125,
+                limits: 0.125
+            }
+        );
+        assert_eq!(
+            rows[1].cpu_commitment,
+            Commitment {
+                requests: 0.375,
+                limits: 0.5
+            }
+        );
+        assert_eq!(rows[2].cpu_commitment, Commitment::default());
     }
 
     #[test]

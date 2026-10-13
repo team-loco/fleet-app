@@ -8,13 +8,13 @@ use fleet_core::{ClusterDetail, ClusterSummary, Page, Status};
 use gpui::{
     AnyElement, App, AppContext, Context, ElementId, Entity, EventEmitter, FontWeight, Hsla,
     InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, px,
+    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
 };
 
 use super::ScreenEvent;
 use crate::kit::{
-    Button, Column, Lede, LineChart, Link, Meter, SectionHeader, SectionLabel, Segmented, Series,
-    StackedBar, StatusText, Table, TableEvent, Tooltip,
+    Button, CapacityMeter, Column, Lede, LineChart, Link, SectionHeader, SectionLabel, Segmented,
+    Series, StackedBar, StatusText, Table, TableEvent, Tooltip,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, METER, Palette, RADIUS_SMALL, RULE, SPACE_1, SPACE_3, SPACE_4, SPACE_5,
@@ -190,34 +190,8 @@ impl OverviewScreen {
     }
 
     fn capacity(data: &OverviewData, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let cpu = capacity_cell(
-            "CPU",
-            &data.cpu,
-            palette.acc,
-            palette,
-            vec![
-                note("Requests", percent(data.cpu.requests), palette.fg),
-                note(
-                    "Limits",
-                    percent(data.cpu.limits),
-                    limit_color(data.cpu.limits, palette),
-                ),
-            ],
-        );
-        let memory = capacity_cell(
-            "Memory",
-            &data.memory,
-            palette.ai,
-            palette,
-            vec![
-                note("Requests", percent(data.memory.requests), palette.fg),
-                note(
-                    "Limits",
-                    percent(data.memory.limits),
-                    limit_color(data.memory.limits, palette),
-                ),
-            ],
-        );
+        let cpu = capacity_cell("CPU", &data.cpu, palette.acc, palette);
+        let memory = capacity_cell("Memory", &data.memory, palette.ai, palette);
         let pods = data.pods;
         let pod_bar = StackedBar::new(vec![
             (Status::Ok, count_weight(pods.running)),
@@ -247,6 +221,8 @@ impl OverviewScreen {
             ],
             palette,
         );
+        let pods_cell = Self::navigation("overview-pods", Page::Pods, pods_cell, palette, cx);
+        let nodes_cell = Self::navigation("overview-nodes", Page::Nodes, nodes_cell, palette, cx);
         let cells = [cpu, memory, pods_cell, nodes_cell];
         let last = cells.len() - 1;
         let row = cells.into_iter().enumerate().map(|(ix, cell)| {
@@ -262,6 +238,35 @@ impl OverviewScreen {
             .border_b(RULE)
             .border_color(palette.line)
             .children(row)
+            .into_any_element()
+    }
+
+    fn navigation(
+        id: impl Into<SharedString>,
+        page: Page,
+        content: AnyElement,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = id.into();
+        let hover = palette.hover;
+        let focus = palette.selline;
+        div()
+            .debug_selector(|| id.to_string())
+            .id(id)
+            .w_full()
+            .tab_index(0)
+            .cursor_pointer()
+            .hover(move |style| style.bg(hover))
+            .focus(move |style| style.bg(hover).border(RULE).border_color(focus))
+            .on_click(cx.listener(move |_, _, _, cx| cx.emit(ScreenEvent::Navigate(page))))
+            .on_key_down(cx.listener(move |_, event: &gpui::KeyDownEvent, _, cx| {
+                if event.keystroke.key == "enter" || event.keystroke.key == "space" {
+                    cx.emit(ScreenEvent::Navigate(page));
+                    cx.stop_propagation();
+                }
+            }))
+            .child(content)
             .into_any_element()
     }
 
@@ -323,17 +328,10 @@ impl OverviewScreen {
             .iter()
             .map(|w| {
                 let page = w.page;
-                let hover = palette.hover;
-                div()
-                    .id(ElementId::NamedInteger("workload".into(), page as u64))
+                let row = div()
                     .flex()
                     .flex_col()
                     .gap(SPACE_3)
-                    .cursor_pointer()
-                    .hover(move |style| style.bg(hover))
-                    .on_click(cx.listener(move |_, _, _, cx| {
-                        cx.emit(ScreenEvent::Navigate(page));
-                    }))
                     .child(
                         div()
                             .flex()
@@ -355,7 +353,9 @@ impl OverviewScreen {
                         ])
                         .thin(),
                     )
-                    .into_any_element()
+                    .into_any_element();
+                let id = format!("overview-{}", page.label().to_lowercase());
+                Self::navigation(id, page, row, palette, cx)
             })
             .collect();
         div()
@@ -404,6 +404,7 @@ impl Render for OverviewScreen {
         div()
             .flex()
             .flex_col()
+            .tab_group()
             .pb(SPACE_8)
             .child(Lede::new(data.sentence.clone()).meta(data.meta.clone()))
             .child(Self::capacity(&data, &palette, cx))
@@ -476,30 +477,12 @@ fn warnings_color(warnings: usize, palette: &Palette) -> Hsla {
     }
 }
 
-fn limit_color(limit: f32, palette: &Palette) -> Hsla {
-    if limit > 1. { palette.warn } else { palette.fg }
-}
-
 fn count_weight(count: u32) -> f32 {
     f32::from(u16::try_from(count).unwrap_or(u16::MAX))
 }
 
 fn count_weight_usize(count: usize) -> f32 {
     f32::from(u16::try_from(count).unwrap_or(u16::MAX))
-}
-
-fn note(label: &'static str, value: String, color: Hsla) -> AnyElement {
-    div()
-        .flex()
-        .gap(SPACE_3)
-        .child(label)
-        .child(
-            div()
-                .text_color(color)
-                .font_weight(FontWeight::MEDIUM)
-                .child(value),
-        )
-        .into_any_element()
 }
 
 fn counted(value: u32, label: &'static str, color: Hsla) -> AnyElement {
@@ -526,17 +509,15 @@ fn capacity_cell(
     capacity: &Capacity,
     color: Hsla,
     palette: &Palette,
-    notes: Vec<AnyElement>,
 ) -> AnyElement {
-    let meter = Meter::new(capacity.fraction())
-        .request(capacity.requests)
-        .color(color);
+    let id = format!("overview-capacity-{label}");
+    let meter = CapacityMeter::new(id, capacity.clone(), color);
     cell(
         label,
         capacity.amount(),
         percent(capacity.fraction()),
         meter.into_any_element(),
-        notes,
+        Vec::new(),
         palette,
     )
 }
@@ -576,14 +557,16 @@ fn cell(
                 .child(figure),
         )
         .child(bar)
-        .child(
-            div()
-                .flex()
-                .gap(SPACE_7)
-                .text_size(TEXT_CONTROL)
-                .text_color(palette.mute)
-                .children(notes),
-        )
+        .when(!notes.is_empty(), |cell| {
+            cell.child(
+                div()
+                    .flex()
+                    .gap(SPACE_7)
+                    .text_size(TEXT_CONTROL)
+                    .text_color(palette.mute)
+                    .children(notes),
+            )
+        })
         .into_any_element()
 }
 
@@ -618,12 +601,5 @@ mod tests {
             data.meta,
             "EKS · v1.31.2 · us-east-1 · 0 namespaces · metrics monitoring/prometheus-k8s"
         );
-    }
-
-    #[test]
-    fn limits_over_capacity_turn_warn() {
-        let palette = Palette::dark();
-        assert_eq!(limit_color(1.31, &palette), palette.warn);
-        assert_eq!(limit_color(0.92, &palette), palette.fg);
     }
 }

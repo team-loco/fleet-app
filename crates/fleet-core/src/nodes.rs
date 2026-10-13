@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::filter::TextFilter;
-use crate::overview::{join_clauses, named, plural, verb};
+use crate::overview::{Commitment, join_clauses, named, plural, verb};
 use crate::{Status, Uid};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -43,6 +43,8 @@ pub struct Node {
     pub runtime: String,
     pub cpu: Usage,
     pub memory: Usage,
+    pub cpu_commitment: Commitment,
+    pub memory_commitment: Commitment,
     pub pods: u32,
     pub pod_capacity: u32,
     pub age: Duration,
@@ -220,6 +222,8 @@ pub(crate) mod tests {
             runtime: String::new(),
             cpu: Usage::default(),
             memory: Usage::default(),
+            cpu_commitment: Commitment::default(),
+            memory_commitment: Commitment::default(),
             pods: 0,
             pod_capacity: 110,
             age: Duration::ZERO,
