@@ -1,7 +1,7 @@
 use crate::resource::page_for_kind;
 use crate::{
-    AddClusterStep, CheckLine, ClusterId, ContextRef, ExecRequest, KubeconfigFile, LogRequest,
-    NewCluster, Page, ResourceRef, Sink, Snapshot, Verdict, Workload,
+    AddClusterStep, CheckLine, ClusterId, ContextRef, ExecRequest, FluxAction, FluxKey, FluxKind,
+    KubeconfigFile, LogRequest, NewCluster, Page, ResourceRef, Sink, Snapshot, Verdict, Workload,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,6 +42,8 @@ pub enum Command {
         target: ResourceRef,
         revision: u64,
     },
+    OpenFluxObject(FluxKey),
+    Flux(FluxKey, FluxAction),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -60,6 +62,7 @@ pub struct AppState {
     pub resource: Option<ResourceRef>,
     pub clusters_open: bool,
     pub resources_open: bool,
+    pub flux_object: Option<FluxKey>,
 }
 
 impl Default for AppState {
@@ -71,6 +74,7 @@ impl Default for AppState {
             resource: None,
             clusters_open: true,
             resources_open: true,
+            flux_object: None,
         }
     }
 }
@@ -83,12 +87,14 @@ impl AppState {
                     self.cluster = Some(id.clone());
                     self.page = Page::ClusterOverview;
                     self.resource = None;
+                    self.flux_object = None;
                 }
             }
             Command::SelectCluster(None) => {
                 self.cluster = None;
                 self.page = Page::Overview;
                 self.resource = None;
+                self.flux_object = None;
             }
             Command::SelectPage(page) => self.select_page(*page),
             Command::OpenCommit(_) => self.select_page(Page::Changes),
@@ -112,6 +118,8 @@ impl AppState {
             Command::RestartRollout(_) => {}
             Command::Scale { .. } => {}
             Command::Rollback { .. } => {}
+            Command::OpenFluxObject(key) => self.open_flux_object(key),
+            Command::Flux(..) => {}
         }
     }
 
@@ -126,6 +134,13 @@ impl AppState {
                 if selection_gone {
                     self.apply(&Command::SelectCluster(None));
                 }
+                let object_gone = self
+                    .flux_object
+                    .as_ref()
+                    .is_some_and(|key| self.snapshot.flux_object(key).is_none());
+                if object_gone {
+                    self.flux_object = None;
+                }
             }
             Update::Contexts(_) => {}
             Update::Check(..) => {}
@@ -138,19 +153,43 @@ impl AppState {
             self.cluster = None;
             self.page = page;
             self.resource = None;
+            self.flux_object = None;
         } else if self.cluster.is_some() {
             self.page = page;
             self.resource = None;
+            self.flux_object = None;
         }
     }
 
     fn open_resource(&mut self, resource: &ResourceRef) {
+        let flux = FluxKind::from_label(&resource.kind).zip(resource.namespace.as_ref());
+        let key = flux.map(|(kind, namespace)| FluxKey {
+            cluster: resource.cluster.clone(),
+            kind,
+            namespace: namespace.clone(),
+            name: resource.name.clone(),
+        });
+        if let Some(key) = key.filter(|key| self.snapshot.flux_object(key).is_some()) {
+            self.open_flux_object(&key);
+            return;
+        }
         if self.snapshot.cluster(&resource.cluster).is_none() {
             return;
         }
         self.cluster = Some(resource.cluster.clone());
         self.page = page_for_kind(&resource.kind);
         self.resource = Some(resource.clone());
+        self.flux_object = None;
+    }
+
+    fn open_flux_object(&mut self, key: &FluxKey) {
+        if self.snapshot.flux_object(key).is_none() {
+            return;
+        }
+        self.cluster = Some(key.cluster.clone());
+        self.page = key.kind.page();
+        self.resource = None;
+        self.flux_object = Some(key.clone());
     }
 }
 
@@ -266,6 +305,64 @@ mod tests {
         state.apply(&Command::ToggleResourcesPanel);
         assert!(!state.clusters_open);
         assert!(state.resources_open);
+    }
+
+    fn with_flux() -> (AppState, FluxKey) {
+        let mut snapshot = sample();
+        let object = crate::flux::tests::object("b", crate::flux::Phase::Ready, "a41e07c");
+        let key = object.key.clone();
+        snapshot.flux = vec![object];
+        let mut state = AppState::default();
+        state.update(Update::Snapshot(Box::new(snapshot)));
+        (state, key)
+    }
+
+    #[test]
+    fn opening_a_flux_object_selects_its_cluster_and_nav_page() {
+        let (mut state, key) = with_flux();
+        state.apply(&Command::SelectCluster(Some(ClusterId::new("a"))));
+        state.apply(&Command::OpenFluxObject(key.clone()));
+        assert_eq!(state.cluster, Some(ClusterId::new("b")));
+        assert_eq!(state.page, Page::Kustomizations);
+        assert_eq!(state.flux_object, Some(key));
+        state.apply(&Command::SelectPage(Page::Kustomizations));
+        assert_eq!(state.flux_object, None);
+    }
+
+    #[test]
+    fn opening_a_flux_resource_shows_its_object_page() {
+        let (mut state, key) = with_flux();
+        let target = ResourceRef {
+            cluster: key.cluster.clone(),
+            kind: "Kustomization".into(),
+            namespace: Some(key.namespace.clone()),
+            name: key.name.clone(),
+        };
+        state.apply(&Command::OpenResource(target.clone()));
+        assert_eq!(state.flux_object, Some(key));
+        state.apply(&Command::OpenResource(ResourceRef {
+            kind: "Deployment".into(),
+            ..target
+        }));
+        assert_eq!(state.flux_object, None);
+        assert_eq!(state.page, Page::Deployments);
+    }
+
+    #[test]
+    fn opening_an_unknown_flux_object_is_ignored() {
+        let (mut state, key) = with_flux();
+        let before = state.clone();
+        state.apply(&Command::OpenFluxObject(key.on(&ClusterId::new("a"))));
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn flux_object_selection_clears_when_it_disappears() {
+        let (mut state, key) = with_flux();
+        state.apply(&Command::OpenFluxObject(key));
+        state.update(Update::Snapshot(Box::new(sample())));
+        assert_eq!(state.flux_object, None);
+        assert_eq!(state.page, Page::Kustomizations);
     }
 
     #[test]

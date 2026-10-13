@@ -172,6 +172,12 @@ impl Live {
                 self.page = Page::Changes;
                 self.resubscribe_page();
             }
+            Command::OpenFluxObject(key) => {
+                self.selected = Some(key.cluster.clone());
+                self.page = key.kind.page();
+                self.resubscribe_page();
+            }
+            Command::Flux(..) => {}
             Command::ToggleClustersPanel => {}
             Command::ToggleResourcesPanel => {}
             Command::OpenResource(resource) => self.open(resource),
@@ -216,6 +222,7 @@ impl Live {
             changes: ChangesLog::default(),
             details: BTreeMap::new(),
             gitops: GitOps::default(),
+            flux: Vec::new(),
         }
     }
 }

@@ -3,6 +3,7 @@ pub mod changes;
 pub mod command;
 mod events;
 pub mod fleet;
+pub(crate) mod flux_object;
 pub mod gitops;
 mod namespaces;
 mod nodes;
@@ -146,4 +147,8 @@ fn subscribe<V: 'static, S: gpui::EventEmitter<ScreenEvent>>(
     cx: &mut Context<V>,
 ) -> Subscription {
     cx.subscribe(screen, move |view, _, event, cx| on_event(view, event, cx))
+}
+
+pub(crate) fn init(cx: &mut App) {
+    flux_object::bind_keys(cx);
 }

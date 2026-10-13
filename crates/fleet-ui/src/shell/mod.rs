@@ -17,6 +17,7 @@ use crate::screens::add_cluster::{AddClusterDialog, AddClusterEvent};
 use crate::screens::changes::ChangesScreen;
 use crate::screens::command::{CommandPalette, PaletteEvent};
 use crate::screens::fleet::FleetScreen;
+use crate::screens::flux_object::FluxObjectPage;
 use crate::screens::gitops::GitOpsScreen;
 use crate::screens::workload::WorkloadScreen;
 use crate::screens::{ClusterPages, ScreenEvent};
@@ -37,12 +38,14 @@ pub struct Shell {
     add_cluster: Option<(Entity<AddClusterDialog>, Subscription)>,
     cluster_menus: BTreeMap<ClusterId, Entity<ActionMenu>>,
     workload: Option<(Entity<WorkloadScreen>, Subscription)>,
+    flux_object: Entity<FluxObjectPage>,
     _updates: Task<()>,
     _appearance: Subscription,
     _fleet_commands: Subscription,
     _palette_events: Subscription,
     gitops: Entity<GitOpsScreen>,
     _gitops_commands: Subscription,
+    _flux_object: Subscription,
 }
 
 impl Shell {
@@ -89,6 +92,10 @@ impl Shell {
             },
         );
         let pages = ClusterPages::new(window, cx, Self::screen_event);
+        let flux_object = cx.new(FluxObjectPage::new);
+        let flux_commands = cx.subscribe(&flux_object, |shell, _, command: &Command, cx| {
+            shell.dispatch(command.clone(), cx);
+        });
         Self {
             state: AppState::default(),
             commands,
@@ -104,12 +111,14 @@ impl Shell {
             add_cluster: None,
             cluster_menus: BTreeMap::new(),
             workload: None,
+            flux_object,
             _updates: listen,
             _appearance: appearance,
             _fleet_commands: fleet_commands,
             _palette_events: palette_events,
             gitops,
             _gitops_commands: gitops_commands,
+            _flux_object: flux_commands,
         }
     }
 
@@ -251,6 +260,8 @@ impl Shell {
             Command::RestartRollout(_) => {}
             Command::Scale { .. } => {}
             Command::Rollback { .. } => {}
+            Command::OpenFluxObject(_) => {}
+            Command::Flux(..) => {}
         }
         self.state.apply(&command);
         if let Command::OpenResource(target) = &command {
@@ -266,6 +277,10 @@ impl Shell {
         let page = self.state.page;
         self.fleet.update(cx, |fleet, cx| fleet.set_page(page, cx));
         self.sync_pages(cx);
+        let flux = self.state.flux_object.as_ref();
+        let object = flux.and_then(|key| self.state.snapshot.flux_page(key));
+        self.flux_object
+            .update(cx, |screen, cx| screen.set_page(object, cx));
     }
 
     fn strip(cx: &App) -> impl IntoElement {
