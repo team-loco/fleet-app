@@ -39,6 +39,10 @@ pub struct Shell {
     cluster_menus: BTreeMap<ClusterId, Entity<ActionMenu>>,
     workload: Option<(Entity<WorkloadScreen>, Subscription)>,
     flux_object: Entity<FluxObjectPage>,
+    #[cfg(feature = "loco")]
+    loco: Entity<crate::screens::loco::LocoScreens>,
+    #[cfg(feature = "loco")]
+    _loco_commands: Subscription,
     _updates: Task<()>,
     _appearance: Subscription,
     _fleet_commands: Subscription,
@@ -79,6 +83,12 @@ impl Shell {
         let gitops_commands = cx.subscribe(&gitops, |this, _, command: &Command, cx| {
             this.dispatch(command.clone(), cx);
         });
+        #[cfg(feature = "loco")]
+        let loco = cx.new(|cx| crate::screens::loco::LocoScreens::new(window, cx));
+        #[cfg(feature = "loco")]
+        let loco_commands = cx.subscribe(&loco, |this, _, command: &Command, cx| {
+            this.dispatch(command.clone(), cx);
+        });
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         theme::follow_window(window, cx);
@@ -112,6 +122,10 @@ impl Shell {
             cluster_menus: BTreeMap::new(),
             workload: None,
             flux_object,
+            #[cfg(feature = "loco")]
+            loco,
+            #[cfg(feature = "loco")]
+            _loco_commands: loco_commands,
             _updates: listen,
             _appearance: appearance,
             _fleet_commands: fleet_commands,
@@ -227,6 +241,8 @@ impl Shell {
             Command::OpenResource(_) => {}
             Command::FollowLogs(_) => {}
             Command::Compare(_) => {}
+            #[cfg(feature = "loco")]
+            Command::Loco(_) => {}
             Command::PortForward {
                 ref service,
                 local,
@@ -281,6 +297,9 @@ impl Shell {
         let object = flux.and_then(|key| self.state.snapshot.flux_page(key));
         self.flux_object
             .update(cx, |screen, cx| screen.set_page(object, cx));
+        #[cfg(feature = "loco")]
+        self.loco
+            .update(cx, |loco, cx| loco.set_context(&self.state, cx));
     }
 
     fn strip(cx: &App) -> impl IntoElement {

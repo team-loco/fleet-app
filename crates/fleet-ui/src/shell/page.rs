@@ -20,6 +20,10 @@ const MORE: &str = "⋯";
 
 impl Shell {
     pub(super) fn page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        #[cfg(feature = "loco")]
+        if crate::screens::loco::owns(self.state.page) {
+            return self.loco.clone().into_any_element();
+        }
         if let Some(screen) = self.workload_screen(window, cx) {
             return div()
                 .flex_1()

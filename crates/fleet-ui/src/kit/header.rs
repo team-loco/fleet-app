@@ -1,13 +1,13 @@
 use fleet_core::Status;
 use gpui::{
-    AnyElement, App, FontWeight, IntoElement, ParentElement, RenderOnce, SharedString, Styled,
-    Window, div, prelude::FluentBuilder, relative,
+    AnyElement, App, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    RenderOnce, SharedString, Styled, Window, div, prelude::FluentBuilder, relative,
 };
 
 use super::status::StatusText;
 use crate::theme::{
-    ActiveTheme, FONT_MONO, LINE_PROSE, RULE, SPACE_4, SPACE_5, SPACE_7, SPACE_8, TEXT_BODY,
-    TEXT_HEADING, TEXT_MONO, TEXT_UI,
+    ActiveTheme, FONT_MONO, LINE_PROSE, PAGE_HEADER, RULE, SPACE_4, SPACE_5, SPACE_7, SPACE_8,
+    TEXT_BODY, TEXT_HEADING, TEXT_MONO, TEXT_SMALL, TEXT_TITLE, TEXT_UI,
 };
 
 #[derive(IntoElement)]
@@ -112,5 +112,68 @@ impl RenderOnce for PageHeader {
                         .child(meta),
                 )
             })
+    }
+}
+
+#[derive(IntoElement)]
+pub struct PageTitle {
+    title: SharedString,
+    detail: Option<SharedString>,
+    end: Vec<AnyElement>,
+}
+
+impl PageTitle {
+    pub fn new(title: impl Into<SharedString>) -> Self {
+        Self {
+            title: title.into(),
+            detail: None,
+            end: Vec::new(),
+        }
+    }
+
+    pub fn detail(mut self, detail: impl Into<SharedString>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+
+    pub fn end(mut self, element: impl IntoElement) -> Self {
+        self.end.push(element.into_any_element());
+        self
+    }
+}
+
+impl RenderOnce for PageTitle {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let palette = cx.palette();
+        div()
+            .flex()
+            .items_center()
+            .flex_none()
+            .gap(SPACE_5)
+            .h(PAGE_HEADER)
+            .px(SPACE_8)
+            .border_b(RULE)
+            .border_color(palette.line)
+            .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(TEXT_TITLE)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(self.title),
+            )
+            .when_some(self.detail, |row, detail| {
+                row.child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .font_family(FONT_MONO)
+                        .text_size(TEXT_SMALL)
+                        .text_color(palette.mute)
+                        .child(detail),
+                )
+            })
+            .child(div().flex_1())
+            .children(self.end)
     }
 }

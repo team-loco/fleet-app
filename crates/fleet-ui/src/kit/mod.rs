@@ -26,7 +26,7 @@ pub use chart::{LineChart, Meter, MiniMeter, Series, StackedBar};
 pub use code::CodeView;
 pub use diff::{DiffFile, DiffLine, DiffView, LineKind, parse_unified};
 pub use dock::{Dock, DockState, DockTab};
-pub use header::PageHeader;
+pub use header::{PageHeader, PageTitle};
 pub use input::{
     InputEvent, TextField, TextFieldDown, TextFieldEscape, TextFieldState, TextFieldUp,
 };

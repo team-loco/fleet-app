@@ -2,9 +2,10 @@ use std::collections::VecDeque;
 use std::ops::Range;
 
 use gpui::{
-    AnyElement, Context, ElementId, HighlightStyle, InteractiveElement, IntoElement, ListAlignment,
-    ListState, ParentElement, Pixels, Render, ScrollStrategy, SharedString, Styled, StyledText,
-    UniformListScrollHandle, Window, div, list, prelude::FluentBuilder, px, uniform_list,
+    AnyElement, Context, ElementId, HighlightStyle, Hsla, InteractiveElement, IntoElement,
+    ListAlignment, ListState, ParentElement, Pixels, Render, ScrollStrategy, SharedString, Styled,
+    StyledText, UniformListScrollHandle, Window, div, list, prelude::FluentBuilder, px,
+    uniform_list,
 };
 
 use crate::theme::{
@@ -216,11 +217,47 @@ pub fn find_matches(text: &str, query: &str) -> Vec<Range<usize>> {
         .collect()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Levels {
+    Column,
+    Tint,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LineColors {
+    level: Hsla,
+    message: Hsla,
+    row: Option<Hsla>,
+}
+
+fn line_colors(level: Option<Level>, levels: Levels, palette: &Palette) -> LineColors {
+    let (level_color, row) = match level {
+        Some(Level::Error) => (palette.err, Some(palette.errbg)),
+        Some(Level::Fatal) => (palette.err, Some(palette.errbg)),
+        Some(Level::Warn) => (palette.warn, None),
+        Some(Level::Debug) => (palette.mute, None),
+        Some(Level::Info) => (palette.acc, None),
+        None => (palette.mute, None),
+    };
+    let message = match level {
+        Some(_) if levels == Levels::Tint => level_color,
+        Some(_) => palette.fg,
+        None => palette.fg,
+    };
+    LineColors {
+        level: level_color,
+        message,
+        row,
+    }
+}
+
 pub struct LogView {
     id: SharedString,
     buffer: LogBuffer,
     follow: bool,
     timestamps: bool,
+    levels: Levels,
+    inset: Pixels,
     query: SharedString,
     scroll: UniformListScrollHandle,
     wrap: bool,
@@ -234,6 +271,8 @@ impl LogView {
             buffer: LogBuffer::default(),
             follow: true,
             timestamps: true,
+            levels: Levels::Column,
+            inset: SPACE_6,
             query: SharedString::default(),
             scroll: UniformListScrollHandle::new(),
             wrap: false,
@@ -259,6 +298,17 @@ impl LogView {
         if self.follow {
             self.wrapped.scroll_to_end();
         }
+    }
+
+    pub fn plain(mut self) -> Self {
+        self.levels = Levels::Tint;
+        self.timestamps = false;
+        self
+    }
+
+    pub fn inset(mut self, inset: Pixels) -> Self {
+        self.inset = inset;
+        self
     }
 
     pub fn push(&mut self, line: LogLine, cx: &mut Context<Self>) {
@@ -342,14 +392,7 @@ impl LogView {
     }
 
     fn render_line(&self, line: &LogLine, palette: &Palette) -> AnyElement {
-        let (level_color, row_bg) = match line.level {
-            Some(Level::Error) => (palette.err, Some(palette.errbg)),
-            Some(Level::Fatal) => (palette.err, Some(palette.errbg)),
-            Some(Level::Warn) => (palette.warn, None),
-            Some(Level::Debug) => (palette.mute, None),
-            Some(Level::Info) => (palette.acc, None),
-            None => (palette.mute, None),
-        };
+        let colors = line_colors(line.level, self.levels, palette);
         let highlight = HighlightStyle {
             background_color: Some(palette.accbg),
             color: Some(palette.fg),
@@ -361,12 +404,12 @@ impl LogView {
         div()
             .flex()
             .gap(SPACE_6)
-            .px(SPACE_6)
+            .px(self.inset)
             .when(self.wrap, |row| row.min_h(LOG_LINE).line_height(LOG_LINE))
             .when(!self.wrap, |row| {
                 row.h(LOG_LINE).w_full().whitespace_nowrap()
             })
-            .when_some(row_bg, Styled::bg)
+            .when_some(colors.row, Styled::bg)
             .when(self.timestamps, |row| {
                 row.child(
                     div()
@@ -376,17 +419,19 @@ impl LogView {
                         .children(line.timestamp.clone()),
                 )
             })
-            .child(
-                div()
-                    .w(LOG_LEVEL)
-                    .flex_none()
-                    .text_color(level_color)
-                    .children(line.level.map(Level::label)),
-            )
+            .when(self.levels == Levels::Column, |row| {
+                row.child(
+                    div()
+                        .w(LOG_LEVEL)
+                        .flex_none()
+                        .text_color(colors.level)
+                        .children(line.level.map(Level::label)),
+                )
+            })
             .child(
                 div()
                     .when(self.wrap, |text| text.flex_1().min_w_0())
-                    .text_color(palette.fg)
+                    .text_color(colors.message)
                     .child(message),
             )
             .into_any_element()
@@ -502,6 +547,23 @@ mod tests {
         assert_eq!(bare.timestamp, None);
         assert_eq!(bare.level, None);
         assert_eq!(bare.message.as_ref(), "GET /healthz 200 0.3ms");
+    }
+
+    #[test]
+    fn plain_lines_take_the_level_colour() {
+        let palette = Palette::dark();
+        let leveled = line_colors(Some(Level::Error), Levels::Column, &palette);
+        assert_eq!(leveled.message, palette.fg);
+        assert_eq!(leveled.row, Some(palette.errbg));
+        let plain = line_colors(Some(Level::Error), Levels::Tint, &palette);
+        assert_eq!(plain.message, palette.err);
+        assert_eq!(plain.row, Some(palette.errbg));
+        let dim = line_colors(Some(Level::Debug), Levels::Tint, &palette);
+        assert_eq!(dim.message, palette.mute);
+        assert_eq!(
+            line_colors(None, Levels::Tint, &palette).message,
+            palette.fg
+        );
     }
 
     #[test]

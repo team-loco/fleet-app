@@ -68,6 +68,10 @@ enum Screen {
     Kustomization,
     Helmrelease,
     Source,
+    #[cfg(feature = "loco")]
+    LocoApps,
+    #[cfg(feature = "loco")]
+    LocoBuilds,
 }
 
 impl Screen {
@@ -113,6 +117,10 @@ impl Screen {
                 "flux-system",
                 "fleet-infra",
             )),
+            #[cfg(feature = "loco")]
+            Self::LocoApps => vec![sample, Command::SelectPage(Page::LocoApplications)],
+            #[cfg(feature = "loco")]
+            Self::LocoBuilds => vec![sample, Command::SelectPage(Page::LocoBuilds)],
         }
     }
 }
@@ -246,6 +254,10 @@ fn launch(
             Screen::Kustomization => shell_view(updates, commands, screen, window, cx),
             Screen::Helmrelease => shell_view(updates, commands, screen, window, cx),
             Screen::Source => shell_view(updates, commands, screen, window, cx),
+            #[cfg(feature = "loco")]
+            Screen::LocoApps => shell_view(updates, commands, screen, window, cx),
+            #[cfg(feature = "loco")]
+            Screen::LocoBuilds => shell_view(updates, commands, screen, window, cx),
         };
         cx.new(|cx| Root::new(view, window, cx))
     })

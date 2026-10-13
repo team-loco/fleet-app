@@ -8,6 +8,8 @@ pub mod fuzzy;
 pub mod gitops;
 pub mod home;
 pub mod id;
+#[cfg(feature = "loco")]
+pub mod loco;
 pub mod nav;
 pub mod nodes;
 pub mod overview;

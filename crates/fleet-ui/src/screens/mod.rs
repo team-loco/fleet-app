@@ -152,3 +152,5 @@ fn subscribe<V: 'static, S: gpui::EventEmitter<ScreenEvent>>(
 pub(crate) fn init(cx: &mut App) {
     flux_object::bind_keys(cx);
 }
+#[cfg(feature = "loco")]
+pub mod loco;
