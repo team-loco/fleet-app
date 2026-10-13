@@ -206,6 +206,8 @@ impl Live {
             Command::RestartRollout(_) => {}
             Command::Scale { .. } => {}
             Command::Rollback { .. } => {}
+            #[cfg(feature = "loco")]
+            Command::Loco(_) => {}
         }
         false
     }
@@ -303,6 +305,8 @@ impl Live {
             details: BTreeMap::new(),
             gitops: GitOps::default(),
             flux: Vec::new(),
+            #[cfg(feature = "loco")]
+            loco: BTreeMap::new(),
         }
     }
 }

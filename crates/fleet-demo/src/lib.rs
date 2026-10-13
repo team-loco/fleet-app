@@ -5,6 +5,8 @@ mod flux;
 mod gitops;
 mod home;
 mod lists;
+#[cfg(feature = "loco")]
+mod loco;
 mod resources;
 mod simulate;
 mod workload;
@@ -193,6 +195,8 @@ pub fn snapshot() -> Snapshot {
         details: BTreeMap::from([(ClusterId::new(PROD_US_EAST), detail::prod_us_east())]),
         gitops: gitops::gitops(),
         flux: flux::objects(),
+        #[cfg(feature = "loco")]
+        loco: loco::clusters(),
     }
 }
 

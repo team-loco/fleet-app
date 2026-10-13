@@ -41,6 +41,8 @@ pub struct Snapshot {
     pub details: BTreeMap<ClusterId, ClusterDetail>,
     pub gitops: GitOps,
     pub flux: Vec<FluxObject>,
+    #[cfg(feature = "loco")]
+    pub loco: BTreeMap<ClusterId, crate::loco::LocoCluster>,
 }
 
 impl Snapshot {
@@ -101,6 +103,8 @@ pub(crate) mod tests {
             details: BTreeMap::new(),
             gitops: GitOps::default(),
             flux: Vec::new(),
+            #[cfg(feature = "loco")]
+            loco: BTreeMap::new(),
         }
     }
 

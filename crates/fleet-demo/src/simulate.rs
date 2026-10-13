@@ -18,6 +18,8 @@ pub enum Settle {
     Uncordoned(ResourceRef),
     Drained(ResourceRef),
     Deleted(ResourceRef),
+    #[cfg(feature = "loco")]
+    Loco(crate::loco::Settle),
 }
 
 pub fn apply(snapshot: &mut Snapshot, command: &Command) -> Option<Settle> {
@@ -39,6 +41,8 @@ pub fn apply(snapshot: &mut Snapshot, command: &Command) -> Option<Settle> {
             resource.status = Status::Progress;
             Some(Settle::Deleted(target.clone()))
         }
+        #[cfg(feature = "loco")]
+        Command::Loco(command) => crate::loco::apply(snapshot, command).map(Settle::Loco),
         _ => None,
     }
 }
@@ -62,6 +66,8 @@ pub fn settle(snapshot: &mut Snapshot, settle: &Settle) {
             }
         }
         Settle::Deleted(target) => remove_resource(snapshot, target),
+        #[cfg(feature = "loco")]
+        Settle::Loco(pending) => crate::loco::settle(snapshot, pending),
     }
     if let Settle::Cordoned(target) | Settle::Uncordoned(target) | Settle::Drained(target) = settle
     {

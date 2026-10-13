@@ -44,6 +44,8 @@ pub enum Command {
     },
     OpenFluxObject(FluxKey),
     Flux(FluxKey, FluxAction),
+    #[cfg(feature = "loco")]
+    Loco(crate::loco::LocoCommand),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -120,6 +122,8 @@ impl AppState {
             Command::Rollback { .. } => {}
             Command::OpenFluxObject(key) => self.open_flux_object(key),
             Command::Flux(..) => {}
+            #[cfg(feature = "loco")]
+            Command::Loco(_) => {}
         }
     }
 
