@@ -1,15 +1,12 @@
 use clap::ValueEnum;
-use fleet_core::{
-    AddClusterStep, ClusterId, Command, FluxKey, FluxKind, Page, Receiver, ResourceRef, Sender,
-    Update,
-};
+use fleet_core::{AddClusterStep, ClusterId, Command, FluxKey, FluxKind, Page, ResourceRef};
 use fleet_ui::actions::{
-    CompareAcrossClusters, FollowLogs, ShowFluxOwner, ToggleClustersPanel, ToggleCommandPalette,
-    ToggleResourcesPanel,
+    CloseWindow, CompareAcrossClusters, FollowLogs, OpenSelectedNewWindow, ShowFluxOwner,
+    ToggleClustersPanel, ToggleCommandPalette, ToggleResourcesPanel,
 };
 use fleet_ui::theme::Appearance;
-use fleet_ui::{Gallery, GalleryPage, Shell};
-use gpui::{AnyView, App, AppContext as _, KeyBinding, Window};
+use fleet_ui::{Gallery, GalleryPage, Shell, Store};
+use gpui::{AnyView, App, AppContext as _, Entity, KeyBinding, Window};
 
 pub const WINDOW_WIDTH: f32 = 1440.;
 pub const WINDOW_HEIGHT: f32 = 900.;
@@ -20,7 +17,7 @@ const SAMPLE_NAMESPACE: &str = "payments";
 const SAMPLE_DEPLOYMENT: &str = "checkout-api";
 const DEPLOYMENT: &str = "Deployment";
 
-gpui::actions!(fleet, [Quit]);
+gpui::actions!(fleet, [Quit, NewWindow]);
 
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
@@ -31,6 +28,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-d", CompareAcrossClusters, None),
         KeyBinding::new("cmd-shift-g", ShowFluxOwner, None),
         KeyBinding::new("cmd-q", Quit, None),
+        KeyBinding::new("cmd-n", NewWindow, None),
+        KeyBinding::new("cmd-w", CloseWindow, None),
+        KeyBinding::new("alt-enter", OpenSelectedNewWindow, Some("CommandPalette")),
     ]);
     cx.bind_keys(fleet_ui::screens::workload::key_bindings());
 }
@@ -210,8 +210,7 @@ impl From<AppearanceArg> for Appearance {
 pub fn root_view(
     screen: Screen,
     preset: &Preset,
-    updates: Receiver<Update>,
-    commands: Sender<Command>,
+    store: Entity<Store>,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyView {
@@ -225,48 +224,47 @@ pub fn root_view(
         Screen::KitPanes => cx
             .new(|cx| Gallery::new(GalleryPage::Panes, window, cx))
             .into(),
-        Screen::Fleet => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::Cluster => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::Collapsed => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::Command => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::Changes => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::Overview => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::Nodes => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::Namespaces => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::Events => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::Resources => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::AddCluster => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::AddClusterCheck => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::Gitops => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::Workload => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::Pods => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::PodsShell => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::Kustomization => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::Helmrelease => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::Source => shell_view(updates, commands, screen, preset, window, cx),
+        Screen::Fleet => shell_view(store, screen, preset, window, cx),
+        Screen::Cluster => shell_view(store, screen, preset, window, cx),
+        Screen::Collapsed => shell_view(store, screen, preset, window, cx),
+        Screen::Command => shell_view(store, screen, preset, window, cx),
+        Screen::Changes => shell_view(store, screen, preset, window, cx),
+        Screen::Overview => shell_view(store, screen, preset, window, cx),
+        Screen::Nodes => shell_view(store, screen, preset, window, cx),
+        Screen::Namespaces => shell_view(store, screen, preset, window, cx),
+        Screen::Events => shell_view(store, screen, preset, window, cx),
+        Screen::Resources => shell_view(store, screen, preset, window, cx),
+        Screen::AddCluster => shell_view(store, screen, preset, window, cx),
+        Screen::AddClusterCheck => shell_view(store, screen, preset, window, cx),
+        Screen::Gitops => shell_view(store, screen, preset, window, cx),
+        Screen::Workload => shell_view(store, screen, preset, window, cx),
+        Screen::Pods => shell_view(store, screen, preset, window, cx),
+        Screen::PodsShell => shell_view(store, screen, preset, window, cx),
+        Screen::Kustomization => shell_view(store, screen, preset, window, cx),
+        Screen::Helmrelease => shell_view(store, screen, preset, window, cx),
+        Screen::Source => shell_view(store, screen, preset, window, cx),
         #[cfg(feature = "loco")]
-        Screen::LocoPlatform => shell_view(updates, commands, screen, preset, window, cx),
+        Screen::LocoPlatform => shell_view(store, screen, preset, window, cx),
         #[cfg(feature = "loco")]
-        Screen::LocoApps => shell_view(updates, commands, screen, preset, window, cx),
+        Screen::LocoApps => shell_view(store, screen, preset, window, cx),
         #[cfg(feature = "loco")]
-        Screen::LocoBuilds => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::Compare => shell_view(updates, commands, screen, preset, window, cx),
-        Screen::ClusterSettings => shell_view(updates, commands, screen, preset, window, cx),
+        Screen::LocoBuilds => shell_view(store, screen, preset, window, cx),
+        Screen::Compare => shell_view(store, screen, preset, window, cx),
+        Screen::ClusterSettings => shell_view(store, screen, preset, window, cx),
         #[cfg(feature = "loco")]
-        Screen::LocoRoutes => shell_view(updates, commands, screen, preset, window, cx),
+        Screen::LocoRoutes => shell_view(store, screen, preset, window, cx),
     }
 }
 
 fn shell_view(
-    updates: Receiver<Update>,
-    commands: Sender<Command>,
+    store: Entity<Store>,
     screen: Screen,
     preset: &Preset,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyView {
     let initial = screen.commands(preset);
-    let shell = cx.new(|cx| Shell::new(updates, commands, initial, window, cx));
+    let shell = cx.new(|cx| Shell::new(store, initial, window, cx));
     if let Screen::Command = screen {
         shell.update(cx, |shell, cx| shell.open_palette(SAMPLE_QUERY, window, cx));
     }

@@ -8,15 +8,16 @@ use std::collections::BTreeMap;
 
 use fleet_core::palette::{COMPARE_KEY, LOGS_KEY, OWNER_KEY, resource_commands};
 use fleet_core::resource::short_kind;
-use fleet_core::{AddClusterStep, AppState, ClusterId, Command, Receiver, Sender, Status, Update};
+use fleet_core::{AddClusterStep, AppState, ClusterId, Command, Sender, Status, Update};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement,
     IntoElement, MouseButton, ParentElement, Render, Styled, Subscription, Task, Window, div,
 };
 
+use crate::Store;
 use crate::actions::{
-    CompareAcrossClusters, FollowLogs, ShowFluxOwner, ToggleClustersPanel, ToggleCommandPalette,
-    ToggleResourcesPanel,
+    CloseWindow, CompareAcrossClusters, FollowLogs, ShowFluxOwner, ToggleClustersPanel,
+    ToggleCommandPalette, ToggleResourcesPanel,
 };
 use crate::kit::{ActionMenu, Toast, toast};
 use crate::screens::add_cluster::{AddClusterDialog, AddClusterEvent};
@@ -32,8 +33,13 @@ use crate::screens::workload::WorkloadScreen;
 use crate::screens::{ClusterPages, ScreenEvent};
 use crate::theme::{self, ActiveTheme, NAV_MIN_WIDTH, RULE, STRIP, TEXT_UI};
 
+pub struct NewWindowRequest(pub Vec<Command>);
+
+impl gpui::EventEmitter<NewWindowRequest> for Shell {}
+
 pub struct Shell {
     state: AppState,
+    window_id: u64,
     commands: Sender<Command>,
     pending: Vec<Command>,
     clusters_generation: usize,
@@ -55,6 +61,8 @@ pub struct Shell {
     compare: Entity<CompareScreen>,
     settings: Entity<SettingsScreen>,
     _updates: Task<()>,
+    _store: Entity<Store>,
+    _window_closed: Subscription,
     _appearance: Subscription,
     _fleet_commands: Subscription,
     _palette_events: Subscription,
@@ -68,12 +76,16 @@ pub struct Shell {
 
 impl Shell {
     pub fn new(
-        updates: Receiver<Update>,
-        commands: Sender<Command>,
+        store: Entity<Store>,
         initial: Vec<Command>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let commands = store.read(cx).commands();
+        let updates = store.update(cx, |store, _| store.subscribe());
+        let window_id = cx.entity_id().as_u64();
+        let close_commands = commands.clone();
+        let window_closed = Self::watch_close(window, window_id, close_commands, cx);
         let listen = cx.spawn_in(window, async move |this, cx| {
             while let Ok(update) = updates.recv().await {
                 let applied = this.update_in(cx, |shell, window, cx| {
@@ -121,14 +133,10 @@ impl Shell {
         window.focus(&focus, cx);
         theme::follow_window(window, cx);
         let palette = cx.new(|cx| CommandPalette::new(window, cx));
-        let palette_events = cx.subscribe_in(
-            &palette,
-            window,
-            |this, palette, PaletteEvent::Run(command), window, cx| {
-                palette.update(cx, |palette, cx| palette.close(window, cx));
-                this.dispatch(command.clone(), cx);
-            },
-        );
+        let palette_events =
+            cx.subscribe_in(&palette, window, |this, palette, event, window, cx| {
+                this.palette_event(palette, event, window, cx);
+            });
         let pages = ClusterPages::new(window, cx, Self::screen_event);
         let flux_object = cx.new(FluxObjectPage::new);
         let flux_commands = cx.subscribe(&flux_object, |shell, _, command: &Command, cx| {
@@ -136,6 +144,7 @@ impl Shell {
         });
         Self {
             state: AppState::default(),
+            window_id,
             commands,
             pending: initial,
             clusters_generation: 0,
@@ -157,6 +166,8 @@ impl Shell {
             compare,
             settings,
             _updates: listen,
+            _store: store,
+            _window_closed: window_closed,
             _appearance: appearance,
             _fleet_commands: fleet_commands,
             _palette_events: palette_events,
@@ -169,20 +180,47 @@ impl Shell {
         }
     }
 
+    fn watch_close(
+        window: &Window,
+        window_id: u64,
+        commands: Sender<Command>,
+        cx: &mut Context<Self>,
+    ) -> Subscription {
+        let handle = window.window_handle();
+        cx.on_window_closed(move |_, closed| {
+            if closed == handle.window_id() {
+                let _ = commands.try_send(Command::WindowClosed(window_id));
+            }
+        })
+    }
+
+    fn palette_event(
+        &mut self,
+        palette: &Entity<CommandPalette>,
+        event: &PaletteEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            PaletteEvent::Run(command) => {
+                palette.update(cx, |palette, cx| palette.close(window, cx));
+                self.dispatch(command.clone(), cx);
+            }
+            PaletteEvent::NewWindow(command) => {
+                if let Some(commands) = self.state.window_commands(command) {
+                    palette.update(cx, |palette, cx| palette.close(window, cx));
+                    cx.emit(NewWindowRequest(commands));
+                }
+            }
+        }
+    }
+
     fn receive(&mut self, update: Update, window: &mut Window, cx: &mut Context<Self>) {
         if let Some((dialog, _)) = &self.add_cluster {
             dialog.update(cx, |dialog, cx| dialog.receive(&update, window, cx));
         }
         if let Update::Snapshot(_) = update {
             self.loaded = true;
-        }
-        if let Update::Notice(notice) = &update {
-            let shown = Toast::new(notice.status, notice.title.clone());
-            let shown = match &notice.detail {
-                Some(detail) => shown.detail(detail.clone()),
-                None => shown,
-            };
-            toast(shown, cx);
         }
         self.state.update(update);
         self.sync_cluster_menus(cx);
@@ -268,7 +306,10 @@ impl Shell {
     }
 
     fn send(&self, command: Command) {
-        if let Err(error) = self.commands.try_send(command) {
+        if let Err(error) = self
+            .commands
+            .try_send(Command::ForWindow(self.window_id, Box::new(command)))
+        {
             tracing::warn!(%error, "backend stopped accepting commands");
         }
     }
@@ -301,6 +342,8 @@ impl Shell {
 
     fn dispatch(&mut self, command: Command, cx: &mut Context<Self>) {
         match command {
+            Command::ForWindow(_, _) => {}
+            Command::WindowClosed(_) => {}
             Command::ToggleClustersPanel => self.clusters_generation += 1,
             Command::ToggleResourcesPanel => self.resources_generation += 1,
             Command::SelectCluster(_) => {}
@@ -461,6 +504,7 @@ impl Render for Shell {
         div()
             .id("shell")
             .track_focus(&self.focus)
+            .on_action(|_: &CloseWindow, window, _| window.remove_window())
             .on_action(cx.listener(|this, _: &ToggleClustersPanel, _, cx| {
                 this.dispatch(Command::ToggleClustersPanel, cx);
             }))
@@ -498,5 +542,142 @@ impl Render for Shell {
             .child(self.palette.clone())
             .children(self.add_cluster.as_ref().map(|(dialog, _)| dialog.clone()))
             .child(crate::kit::overlay_layer(cx))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Root, Store};
+    use gpui::{AnyWindowHandle, KeyBinding, TestAppContext, WindowOptions};
+
+    fn open_window(
+        store: &Entity<Store>,
+        initial: Vec<Command>,
+        cx: &mut App,
+    ) -> (Entity<Shell>, AnyWindowHandle) {
+        let mut shell = None;
+        let opened = cx.open_window(WindowOptions::default(), |window, cx| {
+            let view = cx.new(|cx| Shell::new(store.clone(), initial, window, cx));
+            shell = Some(view.clone());
+            cx.new(|cx| Root::new(view, window, cx))
+        });
+        let handle = opened.unwrap_or_else(|error| panic!("test window: {error}"));
+        let shell = shell.unwrap_or_else(|| panic!("test shell missing"));
+        (shell, handle.into())
+    }
+
+    #[gpui::test]
+    fn palette_new_window_keeps_source_selection_and_shares_snapshots(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(Some(theme::Appearance::Dark), cx)
+                .unwrap_or_else(|error| panic!("UI init: {error}"));
+            cx.bind_keys([
+                KeyBinding::new(
+                    "alt-enter",
+                    crate::actions::OpenSelectedNewWindow,
+                    Some("CommandPalette"),
+                ),
+                KeyBinding::new("cmd-w", CloseWindow, None),
+            ]);
+        });
+        let (backend, updates) = async_channel::unbounded();
+        let (commands, received) = async_channel::unbounded();
+        let store = cx.new(|cx| Store::new(updates, commands, cx));
+        let (first, first_window) = cx.update(|cx| open_window(&store, Vec::new(), cx));
+        let (requests, opened) = async_channel::unbounded();
+        cx.update(|cx| {
+            cx.subscribe(&first, move |_, request: &NewWindowRequest, _| {
+                assert!(requests.try_send(request.0.clone()).is_ok());
+            })
+            .detach();
+        });
+        assert!(backend.try_send(Update::Snapshot(Box::default())).is_ok());
+        cx.run_until_parked();
+        let before = first.read_with(cx, |shell, _| shell.state.clone());
+        assert!(
+            first_window
+                .update(cx, |_, window, cx| {
+                    first.update(cx, |shell, cx| shell.open_palette("GitOps", window, cx));
+                })
+                .is_ok()
+        );
+        cx.simulate_keystrokes(first_window, "alt-enter");
+        let initial = opened
+            .try_recv()
+            .unwrap_or_else(|error| panic!("new window request: {error}"));
+        assert_eq!(initial, vec![Command::SelectPage(fleet_core::Page::GitOps)]);
+        let (second, second_window) = cx.update(|cx| open_window(&store, initial, cx));
+        cx.run_until_parked();
+        assert_eq!(first.read_with(cx, |shell, _| shell.state.clone()), before);
+        assert_eq!(
+            second.read_with(cx, |shell, _| shell.state.page),
+            fleet_core::Page::GitOps
+        );
+        let mut snapshot = fleet_core::Snapshot::default();
+        snapshot.home.problems.push(fleet_core::home::Problem {
+            target: fleet_core::ResourceRef {
+                cluster: ClusterId::new("test"),
+                kind: "Pod".into(),
+                namespace: None,
+                name: "unavailable".into(),
+            },
+            status: Status::Err,
+            message: "unavailable".into(),
+            age: std::time::Duration::ZERO,
+        });
+        assert!(
+            backend
+                .try_send(Update::Snapshot(Box::new(snapshot.clone())))
+                .is_ok()
+        );
+        cx.run_until_parked();
+        assert_eq!(
+            first.read_with(cx, |shell, _| shell.state.snapshot.clone()),
+            snapshot
+        );
+        assert_eq!(
+            second.read_with(cx, |shell, _| shell.state.snapshot.clone()),
+            snapshot
+        );
+        cx.simulate_keystrokes(second_window, "cmd-w");
+        assert_eq!(cx.read(|cx| cx.windows().len()), 1);
+        drop(second);
+        cx.run_until_parked();
+        let sent: Vec<_> = std::iter::from_fn(|| received.try_recv().ok()).collect();
+        assert!(
+            sent.iter()
+                .any(|command| matches!(command, Command::WindowClosed(_)))
+        );
+    }
+
+    #[gpui::test]
+    fn palette_new_window_does_not_run_panel_commands(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(Some(theme::Appearance::Light), cx)
+                .unwrap_or_else(|error| panic!("UI init: {error}"));
+            cx.bind_keys([KeyBinding::new(
+                "alt-enter",
+                crate::actions::OpenSelectedNewWindow,
+                Some("CommandPalette"),
+            )]);
+        });
+        let (_, updates) = async_channel::unbounded();
+        let (commands, received) = async_channel::unbounded();
+        let store = cx.new(|cx| Store::new(updates, commands, cx));
+        let (shell, window) = cx.update(|cx| open_window(&store, Vec::new(), cx));
+        assert!(
+            window
+                .update(cx, |_, window, cx| {
+                    shell.update(cx, |shell, cx| {
+                        shell.open_palette(">toggle clusters", window, cx);
+                    });
+                })
+                .is_ok()
+        );
+        cx.simulate_keystrokes(window, "alt-enter");
+        assert!(received.is_empty());
+        assert!(shell.read_with(cx, |shell, cx| shell.palette.read(cx).is_open()));
+        assert!(shell.read_with(cx, |shell, _| shell.state.clusters_open));
     }
 }

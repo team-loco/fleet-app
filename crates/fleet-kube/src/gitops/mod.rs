@@ -32,7 +32,7 @@ const CHANGE_BUFFER: usize = 1;
 
 pub struct GitOpsState {
     clusters: BTreeMap<ClusterId, ClusterFlux>,
-    focus: Option<Focus>,
+    focus: BTreeMap<u64, Focus>,
     mirrors: Mirrors,
     requests: Requests,
     changed_tx: async_channel::Sender<()>,
@@ -51,7 +51,7 @@ impl GitOpsState {
         let (changed_tx, changed_rx) = async_channel::bounded(CHANGE_BUFFER);
         Self {
             clusters: BTreeMap::new(),
-            focus: None,
+            focus: BTreeMap::new(),
             mirrors: Mirrors::start(git_timeout, changed_tx.clone()),
             requests: Requests::default(),
             changed_tx,
@@ -79,38 +79,50 @@ impl GitOpsState {
                 self.clusters.insert(id.clone(), flux);
             }
         }
-        let focus_gone = self
-            .focus
-            .as_ref()
-            .is_some_and(|focus| !self.clusters.contains_key(&focus.key.cluster));
-        if focus_gone {
-            self.focus = None;
-        }
+        self.focus
+            .retain(|_, focus| self.clusters.contains_key(&focus.key.cluster));
     }
 
-    pub fn command(&mut self, command: &Command) {
+    pub fn close_window(&mut self, window: u64) {
+        self.focus.remove(&window);
+    }
+
+    pub fn command(&mut self, window: u64, command: &Command) {
         match command {
-            Command::OpenFluxObject(key) => self.open(key),
-            Command::SelectCluster(_) => self.focus = None,
-            Command::SelectPage(_) => self.focus = None,
+            Command::OpenFluxObject(key) => self.open(window, key),
+            Command::SelectCluster(_) => {
+                self.focus.remove(&window);
+            }
+            Command::SelectPage(_) => {
+                self.focus.remove(&window);
+            }
             Command::OpenResource(resource) => match flux_key(resource) {
-                Some(key) => self.open(&key),
-                None => self.focus = None,
+                Some(key) => self.open(window, &key),
+                None => {
+                    self.focus.remove(&window);
+                }
             },
-            Command::OpenCommit(_) => self.focus = None,
+            Command::OpenCommit(_) => {
+                self.focus.remove(&window);
+            }
             Command::Flux(key, action) => self.requests.record(key, *action, Timestamp::now()),
             _ => {}
         }
     }
 
-    fn open(&mut self, key: &FluxKey) {
-        if self.focus.as_ref().is_some_and(|focus| &focus.key == key) {
+    fn open(&mut self, window: u64, key: &FluxKey) {
+        if self
+            .focus
+            .get(&window)
+            .is_some_and(|focus| &focus.key == key)
+        {
             return;
         }
-        self.focus = self
-            .clusters
-            .get(&key.cluster)
-            .map(|flux| Focus::start(key.clone(), &flux.handle, self.changed_tx.clone()));
+        self.focus.remove(&window);
+        if let Some(flux) = self.clusters.get(&key.cluster) {
+            let focus = Focus::start(key.clone(), &flux.handle, self.changed_tx.clone());
+            self.focus.insert(window, focus);
+        }
     }
 
     pub fn health(&self, cluster: &ClusterId, now: Timestamp) -> Option<Vec<FluxHealth>> {
@@ -155,8 +167,8 @@ impl GitOpsState {
             for parsed in &cluster.objects {
                 let focused = self
                     .focus
-                    .as_ref()
-                    .filter(|focus| convert::key(&cluster.id, parsed).as_ref() == Some(&focus.key));
+                    .values()
+                    .find(|focus| convert::key(&cluster.id, parsed).as_ref() == Some(&focus.key));
                 let detail = focused.map(|focus| lock(&focus.detail));
                 let history = detail.as_ref().and_then(|d| d.history(now));
                 let releases = detail.as_ref().and_then(|d| d.releases(now));
@@ -301,6 +313,55 @@ fn nav_counts(objects: &[Parsed]) -> [(Page, Counts); 3] {
 mod tests {
     use super::*;
     use convert::tests::{git_repository, kustomization, parsed};
+
+    const FIRST_WINDOW: u64 = 1;
+    const SECOND_WINDOW: u64 = 2;
+
+    #[tokio::test]
+    async fn flux_detail_watches_follow_each_window_until_it_closes() {
+        let settings = crate::settings::KubeSettings::default();
+        let env = Arc::new(crate::shell_env::ShellEnv {
+            vars: BTreeMap::new(),
+            path: Vec::new(),
+            origin: crate::shell_env::EnvOrigin::Fallback {
+                reason: "test".into(),
+            },
+        });
+        let runtime = tokio::runtime::Handle::current();
+        let (manager, _) = crate::manager::ClusterManager::new(runtime, settings.clone(), env);
+        let context = crate::discovery::KubeContext {
+            id: fleet_core::ContextRef {
+                file: "/missing-c77-test-kubeconfig".into(),
+                context: "test".into(),
+            },
+            cluster: "test".into(),
+            user: None,
+            namespace: None,
+            server: None,
+            provider: crate::provider::Provider::Generic,
+            auth: crate::provider::AuthKind::None,
+            is_current: false,
+        };
+        let handle = manager.connect(context);
+        let cluster = ClusterId::new("test");
+        let mut gitops = GitOpsState::new(settings.git_timeout);
+        gitops.sync(std::iter::once((&cluster, &handle)));
+        let first = FluxKey::new("test", FluxKind::HelmRelease, "apps", "first");
+        let second = FluxKey::new("test", FluxKind::Kustomization, "apps", "second");
+        gitops.command(FIRST_WINDOW, &Command::OpenFluxObject(first.clone()));
+        gitops.command(SECOND_WINDOW, &Command::OpenFluxObject(second));
+        assert_eq!(gitops.focus.len(), 2);
+        gitops.command(SECOND_WINDOW, &Command::SelectPage(Page::GitOps));
+        assert_eq!(gitops.focus.len(), 1);
+        assert!(
+            gitops
+                .focus
+                .get(&FIRST_WINDOW)
+                .is_some_and(|focus| focus.key == first)
+        );
+        gitops.close_window(FIRST_WINDOW);
+        assert!(gitops.focus.is_empty());
+    }
 
     #[test]
     fn flux_resources_map_to_flux_keys() {

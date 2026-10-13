@@ -35,3 +35,13 @@ Settled; change only with a new entry that says why.
     row per nav entry that has problems (worst status first, tooltip = entry name, click
     navigates); with no problems it is the chevron alone. `kit::VerticalLabel` and `ttf-parser` are
     removed.
+17. **Multiple windows**: one backend and one UI Store distribute snapshots to every window;
+    each shell owns its navigation, screens, focus and streams. Backend navigation commands carry
+    the shell entity id so page watches, YAML, workload streams and Flux details stay independent
+    until that window closes; connections and the backend runtime remain shared. ⌥↵ opens a palette
+    navigation result in another window, ⌘N opens Fleet home, and ⌘W closes the current window. Fleet quits only when
+    the last window closes, matching gpui's close-window example rather than remaining headless.
+    Palette mutations and panel toggles run only in the current window. Split navigation is deferred:
+    the shell owns screen entities, dialogs, subscriptions and focus alongside selection; the kit's
+    Split primitive divides layout but does not isolate those owners. A follow-up must extract pane
+    ownership before adding independent navigation and focused-pane close behavior.

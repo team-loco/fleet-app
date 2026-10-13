@@ -45,6 +45,7 @@ use crate::watch::KubeconfigWatcher;
 
 const THREAD_NAME: &str = "fleet-kube";
 const BASELINE_KINDS: [WatchKind; 2] = [WatchKind::Nodes, WatchKind::Pods];
+const DEFAULT_WINDOW: u64 = 0;
 const MISSING_STATE: &str = "Not in kubeconfig";
 const DISCONNECTED_STATE: &str = "Disconnected";
 const SET_ASIDE_TITLE: &str = "Saved clusters could not be read";
@@ -91,7 +92,7 @@ enum Fetched {
     NodeUsage(ContextRef, Option<Vec<NodeUsage>>),
     PodUsage(ContextRef, Vec<PodUsage>),
     Prometheus(ContextRef, Option<Prometheus>),
-    Yaml(ResourceRef, inspect::Inspected),
+    Yaml(u64, ResourceRef, inspect::Inspected),
 }
 
 struct Connected {
@@ -109,7 +110,43 @@ struct Inspecting {
     shown: Option<String>,
 }
 
+struct Navigation {
+    selected: Option<ClusterId>,
+    page: Page,
+    page_subscriptions: Vec<Subscription>,
+    yaml: Option<(ResourceRef, String)>,
+    inspecting: Option<Inspecting>,
+    yaml_task: Option<TaskGuard>,
+    workload_task: Option<TaskGuard>,
+    #[cfg(feature = "loco")]
+    loco: crate::loco::LocoBackend,
+}
+
+impl Navigation {
+    fn new(updates: &Sender<Update>) -> Self {
+        #[cfg(not(feature = "loco"))]
+        let _ = updates;
+        Self {
+            selected: None,
+            page: Page::Overview,
+            page_subscriptions: Vec::new(),
+            yaml: None,
+            inspecting: None,
+            yaml_task: None,
+            workload_task: None,
+            #[cfg(feature = "loco")]
+            loco: crate::loco::LocoBackend::new(
+                crate::loco::LocoSettings::default(),
+                updates.clone(),
+            ),
+        }
+    }
+}
+
 struct Live {
+    window_id: u64,
+    navigation: Navigation,
+    windows: BTreeMap<u64, Navigation>,
     manager: ClusterManager,
     store: ClusterStore,
     discovery: Discovery,
@@ -121,18 +158,9 @@ struct Live {
     home: Option<PathBuf>,
     clusters: BTreeMap<ContextRef, Connected>,
     disconnected: BTreeSet<ClusterId>,
-    selected: Option<ClusterId>,
-    page: Page,
     actions: Actions,
     gitops: GitOpsState,
-    page_subscriptions: Vec<Subscription>,
     fetched: Sender<Fetched>,
-    yaml: Option<(ResourceRef, String)>,
-    inspecting: Option<Inspecting>,
-    yaml_task: Option<TaskGuard>,
-    workload_task: Option<TaskGuard>,
-    #[cfg(feature = "loco")]
-    loco: crate::loco::LocoBackend,
 }
 
 fn reachable(status: &ConnectionStatus) -> bool {
@@ -143,6 +171,23 @@ fn reachable(status: &ConnectionStatus) -> bool {
 }
 
 impl Live {
+    fn for_each_window(&mut self, mut action: impl FnMut(&mut Self)) {
+        action(self);
+        let windows = std::mem::take(&mut self.windows);
+        for (id, mut navigation) in windows {
+            std::mem::swap(&mut self.navigation, &mut navigation);
+            let previous = std::mem::replace(&mut self.window_id, id);
+            action(self);
+            self.window_id = previous;
+            std::mem::swap(&mut self.navigation, &mut navigation);
+            self.windows.insert(id, navigation);
+        }
+    }
+
+    fn navigations(&self) -> impl Iterator<Item = &Navigation> {
+        std::iter::once(&self.navigation).chain(self.windows.values())
+    }
+
     fn start(&mut self) {
         if let Some(notice) = set_aside_notice(&self.store) {
             self.publish(Update::Notice(notice));
@@ -196,11 +241,11 @@ impl Live {
         }
         self.gitops
             .sync(self.clusters.values().map(|c| (&c.id, &c.handle)));
-        self.resubscribe_page();
+        self.for_each_window(Self::resubscribe_page);
     }
 
     fn selected_handle(&self) -> Option<&ClusterHandle> {
-        let selected = self.selected.as_ref()?;
+        let selected = self.navigation.selected.as_ref()?;
         self.clusters
             .values()
             .find(|cluster| &cluster.id == selected)
@@ -208,7 +253,7 @@ impl Live {
     }
 
     fn selected_key(&self) -> Option<ContextRef> {
-        let selected = self.selected.as_ref()?;
+        let selected = self.navigation.selected.as_ref()?;
         self.clusters
             .iter()
             .find(|(_, cluster)| &cluster.id == selected)
@@ -219,24 +264,24 @@ impl Live {
         let subscriptions = self
             .selected_handle()
             .map(|handle| {
-                page_kinds(self.page)
+                page_kinds(self.navigation.page)
                     .into_iter()
                     .map(|kind| handle.subscribe(kind))
                     .collect()
             })
             .unwrap_or_default();
-        self.page_subscriptions = subscriptions;
+        self.navigation.page_subscriptions = subscriptions;
         self.poll_page();
         #[cfg(feature = "loco")]
-        self.loco.sync(
+        self.navigation.loco.sync(
             self.clusters.values().map(|c| (&c.id, &c.handle)),
-            self.selected.as_ref(),
-            self.page,
+            self.navigation.selected.as_ref(),
+            self.navigation.page,
         );
     }
 
     fn poll_page(&mut self) {
-        match self.page {
+        match self.navigation.page {
             Page::ClusterOverview => self.poll_prometheus(),
             Page::Namespaces => self.poll_pod_usage(),
             Page::Pods => self.poll_pod_usage(),
@@ -259,9 +304,11 @@ impl Live {
                 let _ = fetched.send(Fetched::NodeUsage(key, usage)).await;
             }));
         }
-        if matches!(self.page, Page::Namespaces | Page::Pods) {
-            self.poll_pod_usage();
-        }
+        self.for_each_window(|live| {
+            if matches!(live.navigation.page, Page::Namespaces | Page::Pods) {
+                live.poll_pod_usage();
+            }
+        });
     }
 
     fn poll_pod_usage(&mut self) {
@@ -318,7 +365,7 @@ impl Live {
 
     fn cluster_event(&mut self, event: &ClusterEvent) {
         if let ClusterEvent::Changed { id, .. } = event {
-            self.refresh_yaml(id);
+            self.for_each_window(|live| live.refresh_yaml(id));
         }
     }
 
@@ -340,31 +387,37 @@ impl Live {
                     cluster.extras.prometheus = found;
                 }
             }
-            Fetched::Yaml(target, inspected) => {
-                if let Some(inspecting) = self.inspecting.as_mut()
+            Fetched::Yaml(window, target, inspected) => {
+                let navigation = if window == self.window_id {
+                    Some(&mut self.navigation)
+                } else {
+                    self.windows.get_mut(&window)
+                };
+                if let Some(navigation) = navigation
+                    && let Some(inspecting) = navigation.inspecting.as_mut()
                     && inspecting.target == target
                 {
                     inspecting.shown = inspected.version;
-                    self.yaml = Some((target, inspected.yaml));
+                    navigation.yaml = Some((target, inspected.yaml));
                 }
             }
         }
     }
 
     fn watch_workload(&mut self, target: &ResourceRef, sink: &Sink<Workload>) {
-        self.workload_task = None;
+        self.navigation.workload_task = None;
         let Some(handle) = self.handle(&target.cluster).cloned() else {
             return;
         };
         let refresh = self.settings.workload_refresh;
         let watch = crate::workload::watch(handle, target.clone(), sink.clone(), refresh);
-        self.workload_task = Some(TaskGuard::spawn(watch));
+        self.navigation.workload_task = Some(TaskGuard::spawn(watch));
     }
 
     fn inspect(&mut self, target: &ResourceRef) {
-        self.yaml = None;
-        self.yaml_task = None;
-        self.inspecting = Some(Inspecting {
+        self.navigation.yaml = None;
+        self.navigation.yaml_task = None;
+        self.navigation.inspecting = Some(Inspecting {
             target: target.clone(),
             shown: None,
         });
@@ -372,7 +425,7 @@ impl Live {
     }
 
     fn refresh_yaml(&mut self, changed: &ContextRef) {
-        let Some(inspecting) = self.inspecting.as_ref() else {
+        let Some(inspecting) = self.navigation.inspecting.as_ref() else {
             return;
         };
         let Some(cluster) = self.clusters.get(changed) else {
@@ -388,14 +441,20 @@ impl Live {
     }
 
     fn fetch_yaml(&mut self) {
-        let Some(target) = self.inspecting.as_ref().map(|i| i.target.clone()) else {
+        let Some(target) = self
+            .navigation
+            .inspecting
+            .as_ref()
+            .map(|i| i.target.clone())
+        else {
             return;
         };
         let Some(handle) = self.handle(&target.cluster).cloned() else {
             return;
         };
         let fetched = self.fetched.clone();
-        self.yaml_task = Some(TaskGuard::spawn(async move {
+        let window = self.window_id;
+        self.navigation.yaml_task = Some(TaskGuard::spawn(async move {
             let inspected = match inspect::yaml(&handle, &target).await {
                 Ok(inspected) => inspected,
                 Err(error) => inspect::Inspected {
@@ -403,16 +462,53 @@ impl Live {
                     yaml: format!("# {error}"),
                 },
             };
-            let _ = fetched.send(Fetched::Yaml(target, inspected)).await;
+            let _ = fetched.send(Fetched::Yaml(window, target, inspected)).await;
         }));
     }
 
     fn apply(&mut self, command: &Command) -> bool {
-        self.gitops.command(command);
         match command {
+            Command::ForWindow(id, command) => self.apply_window(*id, command),
+            Command::WindowClosed(id) => {
+                self.windows.remove(id);
+                self.gitops.close_window(*id);
+                true
+            }
+            _ => self.apply_current(command),
+        }
+    }
+
+    fn apply_window(&mut self, id: u64, command: &Command) -> bool {
+        if id == DEFAULT_WINDOW
+            || matches!(command, Command::ForWindow(..) | Command::WindowClosed(_))
+        {
+            return false;
+        }
+        let mut navigation = self
+            .windows
+            .remove(&id)
+            .unwrap_or_else(|| Navigation::new(&self.updates));
+        std::mem::swap(&mut self.navigation, &mut navigation);
+        let previous = std::mem::replace(&mut self.window_id, id);
+        self.windows.insert(previous, navigation);
+        let changed = self.apply_current(command);
+        let Some(mut navigation) = self.windows.remove(&previous) else {
+            unreachable!("the previous window navigation must survive a command");
+        };
+        self.window_id = previous;
+        std::mem::swap(&mut self.navigation, &mut navigation);
+        self.windows.insert(id, navigation);
+        changed
+    }
+
+    fn apply_current(&mut self, command: &Command) -> bool {
+        self.gitops.command(self.window_id, command);
+        match command {
+            Command::ForWindow(..) => unreachable!(),
+            Command::WindowClosed(_) => unreachable!(),
             Command::SelectCluster(id) => {
-                self.selected.clone_from(id);
-                self.page = if id.is_some() {
+                self.navigation.selected.clone_from(id);
+                self.navigation.page = if id.is_some() {
                     Page::ClusterOverview
                 } else {
                     Page::Overview
@@ -420,16 +516,20 @@ impl Live {
                 self.resubscribe_page();
             }
             Command::SelectPage(page) => {
-                self.page = *page;
+                if page.is_fleet() {
+                    self.navigation.selected = None;
+                }
+                self.navigation.page = *page;
                 self.resubscribe_page();
             }
             Command::OpenCommit(_) => {
-                self.page = Page::Changes;
+                self.navigation.selected = None;
+                self.navigation.page = Page::Changes;
                 self.resubscribe_page();
             }
             Command::OpenFluxObject(key) => {
-                self.selected = Some(key.cluster.clone());
-                self.page = key.kind.page();
+                self.navigation.selected = Some(key.cluster.clone());
+                self.navigation.page = key.kind.page();
                 self.resubscribe_page();
             }
             Command::Flux(..) => self.act(command),
@@ -467,7 +567,9 @@ impl Live {
             Command::Loco(command) => {
                 let cluster = command.target().cluster.clone();
                 let handle = self.clusters.values().find(|c| c.id == cluster);
-                self.loco.command(command, handle.map(|c| &c.handle));
+                self.navigation
+                    .loco
+                    .command(command, handle.map(|c| &c.handle));
             }
             Command::CopySpec { .. } => {}
             Command::ShowClusterSettings(_) => {}
@@ -565,9 +667,9 @@ impl Live {
         if let Err(error) = self.store.remove(id) {
             tracing::error!(%error, path = %self.store.path().display(), "saving clusters failed");
         }
-        if self.selected.as_ref() == Some(id) {
-            self.selected = None;
-            self.page = Page::Overview;
+        if self.navigation.selected.as_ref() == Some(id) {
+            self.navigation.selected = None;
+            self.navigation.page = Page::Overview;
         }
         self.reconcile();
     }
@@ -627,13 +729,30 @@ impl Live {
 
     fn open(&mut self, resource: &ResourceRef) {
         let page = page_for_kind(&resource.kind);
-        let moved = self.selected.as_ref() != Some(&resource.cluster) || self.page != page;
-        self.selected = Some(resource.cluster.clone());
-        self.page = page;
+        let moved = self.navigation.selected.as_ref() != Some(&resource.cluster)
+            || self.navigation.page != page;
+        self.navigation.selected = Some(resource.cluster.clone());
+        self.navigation.page = page;
         if moved {
             self.resubscribe_page();
         }
         self.inspect(resource);
+    }
+
+    #[cfg(feature = "loco")]
+    fn loco_snapshot(
+        &self,
+        clusters: &mut [ClusterSummary],
+    ) -> BTreeMap<ClusterId, fleet_core::loco::LocoCluster> {
+        let mut loco = self.navigation.loco.snapshot(clusters);
+        for navigation in self.windows.values() {
+            if crate::loco::is_loco_page(navigation.page) {
+                let selected = navigation.selected.as_ref();
+                let snapshot = navigation.loco.snapshot(clusters);
+                loco.extend(snapshot.into_iter().filter(|(id, _)| Some(id) == selected));
+            }
+        }
+        loco
     }
 
     fn snapshot(&self) -> Snapshot {
@@ -644,10 +763,17 @@ impl Live {
         let mut flux = Counts::default();
         let mut pods = Vec::new();
         for cluster in self.clusters.values() {
-            let selected = self.selected.as_ref() == Some(&cluster.id);
+            let selected = self
+                .navigations()
+                .any(|navigation| navigation.selected.as_ref() == Some(&cluster.id));
+            let yaml: Vec<_> = self
+                .navigations()
+                .filter_map(|navigation| navigation.yaml.as_ref())
+                .filter(|(target, _)| target.cluster == cluster.id)
+                .collect();
             let selection = selected.then_some(Selection {
                 event_limit: self.settings.event_limit,
-                yaml: self.yaml.as_ref(),
+                yaml: &yaml,
             });
             let health = self.gitops.health(&cluster.id, now);
             let built = assemble::cluster(
@@ -677,7 +803,7 @@ impl Live {
         let mut clusters: Vec<_> = connected.into_iter().chain(missing).collect();
         clusters.sort_by(|a, b| a.name.cmp(&b.name));
         #[cfg(feature = "loco")]
-        let loco = self.loco.snapshot(&mut clusters);
+        let loco = self.loco_snapshot(&mut clusters);
         let connected_settings = self.clusters.values().map(|cluster| {
             let expired = matches!(cluster.handle.status(), ConnectionStatus::AuthExpired(_));
             let saved = self.store.get(&cluster.id).map(|c| &c.preferences);
@@ -818,6 +944,9 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
     let gitops = GitOpsState::new(settings.git_timeout);
     let home = sources.home.clone();
     let mut live = Live {
+        window_id: DEFAULT_WINDOW,
+        navigation: Navigation::new(&updates),
+        windows: BTreeMap::new(),
         manager,
         store,
         discovery,
@@ -829,18 +958,9 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
         home,
         clusters: BTreeMap::new(),
         disconnected: BTreeSet::new(),
-        selected: None,
-        page: Page::Overview,
         actions,
         gitops,
-        page_subscriptions: Vec::new(),
         fetched,
-        yaml: None,
-        inspecting: None,
-        yaml_task: None,
-        workload_task: None,
-        #[cfg(feature = "loco")]
-        loco: crate::loco::LocoBackend::new(crate::loco::LocoSettings::default(), updates.clone()),
     };
     let gitops_changed = live.gitops.changed();
     live.start();
@@ -871,9 +991,9 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
             }
             _ = usage_tick.tick() => live.poll_usage(),
             _ = prometheus_tick.tick() => {
-                if live.page == Page::ClusterOverview {
-                    live.poll_prometheus();
-                }
+                live.for_each_window(|live| {
+                    if live.navigation.page == Page::ClusterOverview { live.poll_prometheus(); }
+                });
             }
             command = commands.recv() => {
                 let Ok(command) = command else { return };
@@ -885,9 +1005,9 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
             }
             _ = publish.tick() => {
                 #[cfg(feature = "loco")]
-                if live.loco.refresh() {
-                    dirty = true;
-                }
+                live.for_each_window(|live| {
+                    dirty |= live.navigation.loco.refresh();
+                });
                 if dirty {
                     dirty = false;
                     if updates.send(Update::Snapshot(Box::new(live.snapshot()))).await.is_err() {
@@ -1043,6 +1163,168 @@ mod tests {
             auth: AuthKind::None,
             is_current: false,
         }
+    }
+
+    const FIRST_WINDOW: u64 = 1;
+    const SECOND_WINDOW: u64 = 2;
+
+    fn test_live(path: &Path) -> Live {
+        let settings = KubeSettings::default();
+        let env = Arc::new(ShellEnv {
+            vars: BTreeMap::new(),
+            path: Vec::new(),
+            origin: crate::shell_env::EnvOrigin::Fallback {
+                reason: "test".into(),
+            },
+        });
+        let (updates, _) = async_channel::unbounded();
+        let (manager, _) = ClusterManager::new(
+            tokio::runtime::Handle::current(),
+            settings.clone(),
+            env.clone(),
+        );
+        let (actions, _) = Actions::new(updates.clone());
+        let gitops = GitOpsState::new(settings.git_timeout);
+        Live {
+            window_id: DEFAULT_WINDOW,
+            navigation: Navigation::new(&updates),
+            windows: BTreeMap::new(),
+            manager,
+            store: ClusterStore::empty(path),
+            discovery: Discovery::default(),
+            sources: DiscoverySources::default(),
+            sources_changed: false,
+            env,
+            settings,
+            updates,
+            home: None,
+            clusters: BTreeMap::new(),
+            disconnected: BTreeSet::new(),
+            actions,
+            gitops,
+            fetched: async_channel::unbounded().0,
+        }
+    }
+
+    fn window_command(window: u64, command: Command) -> Command {
+        Command::ForWindow(window, Box::new(command))
+    }
+
+    #[tokio::test]
+    async fn windows_keep_cluster_page_watches_and_yaml_independent() {
+        let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let mut live = test_live(dir.path());
+        for name in ["a", "b"] {
+            let context = context("/missing-c77-test-kubeconfig", name);
+            let handle = live.manager.connect(context.clone());
+            let id = ClusterId::new(name);
+            let extras = Extras::new(live.settings.usage_samples());
+            live.clusters.insert(
+                context.id,
+                Connected {
+                    id,
+                    handle,
+                    extras,
+                    _baseline: Vec::new(),
+                    usage_task: None,
+                    pod_usage_task: None,
+                    prometheus_task: None,
+                },
+            );
+        }
+        live.apply(&window_command(
+            FIRST_WINDOW,
+            Command::SelectCluster(Some(ClusterId::new("a"))),
+        ));
+        live.apply(&window_command(
+            FIRST_WINDOW,
+            Command::SelectPage(Page::Secrets),
+        ));
+        live.apply(&window_command(
+            SECOND_WINDOW,
+            Command::SelectCluster(Some(ClusterId::new("b"))),
+        ));
+        live.apply(&window_command(
+            SECOND_WINDOW,
+            Command::SelectPage(Page::Services),
+        ));
+        let first = live
+            .windows
+            .get(&FIRST_WINDOW)
+            .unwrap_or_else(|| panic!("first navigation"));
+        assert_eq!(first.selected, Some(ClusterId::new("a")));
+        assert_eq!(first.page, Page::Secrets);
+        assert!(
+            first
+                .page_subscriptions
+                .iter()
+                .any(|subscription| subscription.kind() == &WatchKind::Secrets)
+        );
+        let second = live
+            .windows
+            .get(&SECOND_WINDOW)
+            .unwrap_or_else(|| panic!("second navigation"));
+        assert_eq!(second.page, Page::Services);
+        let target = ResourceRef {
+            cluster: ClusterId::new("a"),
+            kind: "Secret".into(),
+            namespace: Some("default".into()),
+            name: "test".into(),
+        };
+        live.apply(&window_command(
+            FIRST_WINDOW,
+            Command::InspectResource(target.clone()),
+        ));
+        live.fetched(Fetched::Yaml(
+            FIRST_WINDOW,
+            target.clone(),
+            inspect::Inspected {
+                version: Some("1".into()),
+                yaml: "kind: Secret".into(),
+            },
+        ));
+        let first = live
+            .windows
+            .get(&FIRST_WINDOW)
+            .unwrap_or_else(|| panic!("first navigation"));
+        assert_eq!(first.yaml, Some((target, "kind: Secret".into())));
+        assert!(
+            live.windows
+                .get(&SECOND_WINDOW)
+                .is_some_and(|window| window.yaml.is_none())
+        );
+        let snapshot = live.snapshot();
+        assert!(snapshot.details.contains_key(&ClusterId::new("a")));
+        assert!(snapshot.details.contains_key(&ClusterId::new("b")));
+        live.apply(&Command::WindowClosed(FIRST_WINDOW));
+        assert!(!live.windows.contains_key(&FIRST_WINDOW));
+        let snapshot = live.snapshot();
+        assert!(!snapshot.details.contains_key(&ClusterId::new("a")));
+        assert!(snapshot.details.contains_key(&ClusterId::new("b")));
+    }
+
+    #[tokio::test]
+    async fn malformed_window_commands_cannot_nest_or_close_another_window() {
+        let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let mut live = test_live(dir.path());
+        live.apply(&window_command(
+            FIRST_WINDOW,
+            Command::SelectPage(Page::GitOps),
+        ));
+        assert!(!live.apply(&window_command(
+            SECOND_WINDOW,
+            Command::WindowClosed(FIRST_WINDOW)
+        )));
+        assert!(!live.apply(&window_command(
+            SECOND_WINDOW,
+            window_command(FIRST_WINDOW, Command::SelectPage(Page::Changes))
+        )));
+        assert_eq!(live.windows.len(), 1);
+        assert!(
+            live.windows
+                .get(&FIRST_WINDOW)
+                .is_some_and(|window| window.page == Page::GitOps)
+        );
     }
 
     #[test]

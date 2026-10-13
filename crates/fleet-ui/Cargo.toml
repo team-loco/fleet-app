@@ -21,5 +21,7 @@ tracing.workspace = true
 [dev-dependencies]
 ttf-parser = { version = "0.25.1", default-features = false, features = ["std"] }
 
+gpui = { workspace = true, features = ["test-support"] }
+
 [lints]
 workspace = true

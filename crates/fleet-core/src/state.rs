@@ -9,6 +9,8 @@ use crate::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    ForWindow(u64, Box<Command>),
+    WindowClosed(u64),
     SelectCluster(Option<ClusterId>),
     SelectPage(Page),
     OpenCommit(String),
@@ -106,8 +108,31 @@ impl Default for AppState {
 }
 
 impl AppState {
+    pub fn window_commands(&self, command: &Command) -> Option<Vec<Command>> {
+        match command {
+            Command::SelectCluster(_) => Some(vec![command.clone()]),
+            Command::SelectPage(page) => {
+                let mut commands = Vec::new();
+                if !page.is_fleet() {
+                    commands.push(Command::SelectCluster(self.cluster.clone()));
+                }
+                commands.push(command.clone());
+                Some(commands)
+            }
+            Command::OpenResource(_) => Some(vec![command.clone()]),
+            Command::FollowLogs(_) => Some(vec![command.clone()]),
+            Command::Compare(_) => Some(vec![command.clone()]),
+            Command::OpenFluxObject(_) => Some(vec![command.clone()]),
+            Command::OpenCommit(_) => Some(vec![command.clone()]),
+            Command::ShowClusterSettings(_) => Some(vec![command.clone()]),
+            _ => None,
+        }
+    }
+
     pub fn apply(&mut self, command: &Command) {
         match command {
+            Command::ForWindow(_, _) => {}
+            Command::WindowClosed(_) => {}
             Command::SelectCluster(Some(id)) => {
                 if self.snapshot.cluster(id).is_some() {
                     self.cluster = Some(id.clone());
@@ -264,6 +289,61 @@ mod tests {
         let mut state = AppState::default();
         state.update(Update::Snapshot(Box::new(sample())));
         state
+    }
+
+    #[test]
+    fn new_window_selection_is_independent_and_preserves_page_scope() {
+        let mut source = loaded();
+        source.apply(&Command::SelectCluster(Some(ClusterId::new("a"))));
+        let before = source.clone();
+        let commands = source
+            .window_commands(&Command::SelectPage(Page::Pods))
+            .unwrap_or_default();
+        let mut destination = loaded();
+        for command in commands {
+            destination.apply(&command);
+        }
+        assert_eq!(destination.cluster, source.cluster);
+        assert_eq!(destination.page, Page::Pods);
+        destination.apply(&Command::OpenResource(deployment("b")));
+        assert_eq!(source, before);
+        assert_eq!(destination.resource, Some(deployment("b")));
+        destination.update(Update::Snapshot(Box::default()));
+        assert_eq!(destination.page, Page::Overview);
+        assert_eq!(source, before);
+    }
+
+    #[test]
+    fn new_window_flux_selection_does_not_change_the_source_window() {
+        let (source, key) = with_flux();
+        let before = source.clone();
+        let mut destination = source.clone();
+        let commands = source
+            .window_commands(&Command::OpenFluxObject(key.clone()))
+            .unwrap_or_default();
+        for command in commands {
+            destination.apply(&command);
+        }
+        assert_eq!(destination.flux_object, Some(key));
+        assert_eq!(source, before);
+        destination.update(Update::Snapshot(Box::new(sample())));
+        assert_eq!(destination.flux_object, None);
+        assert_eq!(source, before);
+    }
+
+    #[test]
+    fn new_windows_open_fleet_targets_and_never_execute_writes() {
+        let mut source = loaded();
+        source.apply(&Command::SelectCluster(Some(ClusterId::new("a"))));
+        assert_eq!(
+            source.window_commands(&Command::SelectPage(Page::GitOps)),
+            Some(vec![Command::SelectPage(Page::GitOps)])
+        );
+        assert_eq!(
+            source.window_commands(&Command::RestartRollout(deployment("a"))),
+            None
+        );
+        assert_eq!(source.window_commands(&Command::ToggleClustersPanel), None);
     }
 
     #[test]

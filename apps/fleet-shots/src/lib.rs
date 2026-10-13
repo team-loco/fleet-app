@@ -7,7 +7,7 @@ use fleet::{Preset, Screen, WINDOW_HEIGHT, WINDOW_WIDTH, bind_keys, root_view};
 use fleet_core::{AppState, Backend, Command, Receiver, Sender, Update};
 use fleet_demo::DemoBackend;
 use fleet_ui::theme::Appearance;
-use fleet_ui::{Root, Shell, assets::Assets};
+use fleet_ui::{NewWindowRequest, Root, Shell, Store, assets::Assets};
 use gpui::{
     AnyView, AnyWindowHandle, App, AppContext, Bounds, Entity, HeadlessAppContext, Keystroke,
     Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, PlatformInput,
@@ -52,7 +52,8 @@ fn view(
     cx: &mut App,
 ) -> (AnyView, Option<Entity<Shell>>) {
     let (updates, commands) = demo();
-    let view = root_view(screen, preset, updates, commands, window, cx);
+    let store = cx.new(|cx| Store::new(updates, commands, cx));
+    let view = root_view(screen, preset, store, window, cx);
     let shell = view.clone().downcast::<Shell>().ok();
     (view, shell)
 }
@@ -197,6 +198,7 @@ pub fn save(image: &RgbaImage, path: &Path) -> anyhow::Result<()> {
 
 pub struct Ui {
     cx: VisualTestContext,
+    new_windows: Receiver<Vec<Command>>,
     shell: Entity<Shell>,
     screen: Screen,
     preset: Preset,
@@ -220,7 +222,15 @@ impl Ui {
             Root::new(view, window, cx)
         });
         let shell = shell.ok_or_else(|| anyhow!("{screen:?} is not a shell screen"))?;
+        let (opened, new_windows) = async_channel::unbounded();
+        app.update(|cx| {
+            cx.subscribe(&shell, move |_, request: &NewWindowRequest, _| {
+                let _ = opened.try_send(request.0.clone());
+            })
+            .detach();
+        });
         let mut ui = Self {
+            new_windows,
             cx: VisualTestContext::from_window(window.into(), &app),
             shell,
             screen,
@@ -230,6 +240,10 @@ impl Ui {
         };
         ui.settle()?;
         Ok(ui)
+    }
+
+    pub fn take_new_window(&self) -> Option<Vec<Command>> {
+        self.new_windows.try_recv().ok()
     }
 
     pub fn state(&self) -> AppState {
