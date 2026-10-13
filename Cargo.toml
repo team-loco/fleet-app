@@ -50,6 +50,7 @@ serde_norway = "0.9.42"
 chrono = { version = "0.4.45", default-features = false, features = ["std", "serde"] }
 tempfile = "3.27.0"
 thiserror = "2.0.21"
+tower-service = "0.3.3"
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "sync", "time", "net", "process", "io-util", "fs"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

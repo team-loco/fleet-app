@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use futures::{StreamExt, TryStreamExt, stream};
 use k8s_openapi::api::core::v1::Pod;
 use kube::Api;
 use kube::ResourceExt;
@@ -14,6 +15,7 @@ const DAEMON_SET: &str = "DaemonSet";
 const NODE_FIELD: &str = "spec.nodeName";
 const EVICTION_RETRY: Duration = Duration::from_secs(5);
 const EVICTION_TIMEOUT: Duration = Duration::from_secs(60);
+const EVICTION_LIMIT: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Blocked {
@@ -63,16 +65,30 @@ pub async fn drain(handle: &ClusterHandle, node: &str) -> Result<Vec<Blocked>> {
     let all: Api<Pod> = Api::all(client.clone());
     let selector = format!("{NODE_FIELD}={node}");
     let listed = all.list(&ListParams::default().fields(&selector)).await?;
-    let mut blocked = Vec::new();
-    for pod in drain_candidates(&listed.items) {
-        let namespace = pod.namespace().unwrap_or_default();
-        let name = pod.name_any();
-        let pods: Api<Pod> = Api::namespaced(client.clone(), &namespace);
-        if !evict(&pods, &name).await? {
-            blocked.push(Blocked { namespace, name });
-        }
-    }
-    Ok(blocked)
+    let targets: Vec<(String, String)> = drain_candidates(&listed.items)
+        .into_iter()
+        .map(|pod| (pod.namespace().unwrap_or_default(), pod.name_any()))
+        .collect();
+    let evictions = targets
+        .into_iter()
+        .enumerate()
+        .map(|(ix, (namespace, name))| {
+            let pods: Api<Pod> = Api::namespaced(client.clone(), &namespace);
+            async move {
+                let evicted = evict(&pods, &name).await?;
+                let blocked = (!evicted).then_some(Blocked { namespace, name });
+                Ok::<_, Error>((ix, blocked))
+            }
+        });
+    let mut outcomes: Vec<(usize, Option<Blocked>)> = stream::iter(evictions)
+        .buffer_unordered(EVICTION_LIMIT)
+        .try_collect()
+        .await?;
+    outcomes.sort_by_key(|(ix, _)| *ix);
+    Ok(outcomes
+        .into_iter()
+        .filter_map(|(_, blocked)| blocked)
+        .collect())
 }
 
 pub fn blocked_line(blocked: &[Blocked]) -> String {
@@ -139,6 +155,66 @@ mod tests {
             .map(|pod| pod.name_any())
             .collect();
         assert_eq!(names, ["web-1", "bare", "db-0"]);
+    }
+
+    const ROUND_TRIP: Duration = Duration::from_secs(1);
+    const BLOCKED_POD: &str = "checkout-1";
+    const PODS: usize = 10;
+    const TOO_MANY: &str = r#"{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"TooManyRequests","code":429,"message":"Cannot evict pod as it would violate the pod's disruption budget."}"#;
+    const EVICTED: &str = r#"{"kind":"Status","apiVersion":"v1","status":"Success","code":201}"#;
+
+    fn pod_list() -> String {
+        let items: Vec<String> = (1..PODS)
+            .map(|ix| format!("web-{ix}"))
+            .chain(std::iter::once(BLOCKED_POD.to_owned()))
+            .map(|name| {
+                format!(r#"{{"metadata":{{"name":"{name}","namespace":"apps"}},"spec":{{"containers":[]}}}}"#)
+            })
+            .collect();
+        format!(
+            r#"{{"kind":"PodList","apiVersion":"v1","metadata":{{}},"items":[{}]}}"#,
+            items.join(",")
+        )
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn evictions_overlap_and_budget_blocked_pods_keep_retrying() {
+        let list = pod_list();
+        let (client, traffic) = crate::fake::client(ROUND_TRIP, move |method, path| {
+            if method == http::Method::POST && path.contains(&format!("/pods/{BLOCKED_POD}/")) {
+                return Some((http::StatusCode::TOO_MANY_REQUESTS, TOO_MANY.to_owned()));
+            }
+            if method == http::Method::POST {
+                return Some((http::StatusCode::CREATED, EVICTED.to_owned()));
+            }
+            path.starts_with("/api/v1/pods")
+                .then(|| (http::StatusCode::OK, list.clone()))
+        });
+        let (_manager, handle) = crate::fake::handle(&client);
+        let started = tokio::time::Instant::now();
+        let drained = drain(&handle, "n1").await;
+        let took = started.elapsed();
+        let Ok(blocked) = drained else {
+            panic!("drain failed: {drained:?}");
+        };
+        assert_eq!(
+            blocked,
+            [Blocked {
+                namespace: "apps".into(),
+                name: BLOCKED_POD.into()
+            }]
+        );
+        assert!(traffic.peak() >= EVICTION_LIMIT, "{}", traffic.peak());
+        assert!(
+            took < EVICTION_TIMEOUT + EVICTION_RETRY + ROUND_TRIP * 3,
+            "{took:?}"
+        );
+        let retries = traffic
+            .requests()
+            .iter()
+            .filter(|(method, path)| method == http::Method::POST && path.contains(BLOCKED_POD))
+            .count();
+        assert!(retries > 1, "{retries}");
     }
 
     #[test]

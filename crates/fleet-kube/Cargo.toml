@@ -34,8 +34,9 @@ tracing.workspace = true
 [dev-dependencies]
 dhat.workspace = true
 tempfile.workspace = true
-tracing-subscriber.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+tower-service.workspace = true
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true

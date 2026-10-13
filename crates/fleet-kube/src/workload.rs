@@ -8,6 +8,7 @@ use fleet_core::workload::{
     Port, Probe, ProbeAction, Resources, Revision,
 };
 use fleet_core::{ResourceRef, Workload, WorkloadKind};
+use futures::{StreamExt, stream};
 use jiff::Timestamp;
 use k8s_openapi::api::apps::v1::{
     ControllerRevision, DaemonSet, Deployment, ReplicaSet, StatefulSet,
@@ -16,8 +17,8 @@ use k8s_openapi::api::core::v1::{self as core, ConfigMap, PodTemplateSpec, Secre
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
-use kube::Api;
 use kube::api::ListParams;
+use kube::{Api, Client};
 
 use crate::clock::{age, since};
 use crate::detail;
@@ -43,6 +44,7 @@ const DEFAULT_REPLICAS: i32 = 1;
 const DEFAULT_PERIOD_SECS: i32 = 10;
 const DEFAULT_PROTOCOL: &str = "TCP";
 const SHA_MIN: usize = 7;
+const KEY_LOOKUP_LIMIT: usize = 8;
 const SHA_MAX: usize = 40;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -456,41 +458,53 @@ pub fn watch_kinds(kind: WorkloadKind) -> Vec<WatchKind> {
     kinds
 }
 
+async fn secret_keys(
+    client: Client,
+    namespace: &str,
+    name: &str,
+) -> Option<Option<BTreeSet<String>>> {
+    let api: Api<Secret> = Api::namespaced(client, namespace);
+    let secret = api.get_opt(name).await.ok()?;
+    Some(secret.map(|s| {
+        let data = s.data.unwrap_or_default().into_keys();
+        let strings = s.string_data.unwrap_or_default().into_keys();
+        data.chain(strings).collect()
+    }))
+}
+
+async fn config_map_keys(
+    client: Client,
+    namespace: &str,
+    name: &str,
+) -> Option<Option<BTreeSet<String>>> {
+    let api: Api<ConfigMap> = Api::namespaced(client, namespace);
+    let map = api.get_opt(name).await.ok()?;
+    Some(map.map(|m| {
+        let data = m.data.unwrap_or_default().into_keys();
+        let binary = m.binary_data.unwrap_or_default().into_keys();
+        data.chain(binary).collect()
+    }))
+}
+
 async fn keys(handle: &ClusterHandle, namespace: &str, refs: BTreeSet<(RefKind, String)>) -> Keys {
     let Ok(client) = handle.client() else {
         return Keys::new();
     };
-    let mut found = Keys::new();
-    for (kind, name) in refs {
-        let present = match kind {
-            RefKind::Secret => {
-                let api: Api<Secret> = Api::namespaced(client.clone(), namespace);
-                match api.get_opt(&name).await {
-                    Ok(secret) => Some(secret.map(|s| {
-                        let data = s.data.unwrap_or_default().into_keys();
-                        let strings = s.string_data.unwrap_or_default().into_keys();
-                        data.chain(strings).collect()
-                    })),
-                    Err(_) => None,
-                }
-            }
-            RefKind::ConfigMap => {
-                let api: Api<ConfigMap> = Api::namespaced(client.clone(), namespace);
-                match api.get_opt(&name).await {
-                    Ok(map) => Some(map.map(|m| {
-                        let data = m.data.unwrap_or_default().into_keys();
-                        let binary = m.binary_data.unwrap_or_default().into_keys();
-                        data.chain(binary).collect()
-                    })),
-                    Err(_) => None,
-                }
-            }
-        };
-        if let Some(present) = present {
-            found.insert((kind, name), present);
+    let lookups = refs.into_iter().map(|(kind, name)| {
+        let client = client.clone();
+        async move {
+            let present = match kind {
+                RefKind::Secret => secret_keys(client, namespace, &name).await,
+                RefKind::ConfigMap => config_map_keys(client, namespace, &name).await,
+            };
+            present.map(|present| ((kind, name), present))
         }
-    }
-    found
+    });
+    stream::iter(lookups)
+        .buffer_unordered(KEY_LOOKUP_LIMIT)
+        .filter_map(std::future::ready)
+        .collect()
+        .await
 }
 
 struct Spec {
@@ -577,26 +591,28 @@ pub async fn build(
         .filter(|p| p.metadata.namespace.as_deref() == Some(namespace.as_str()))
         .filter(|p| owner_of(p) == owner)
         .collect();
-    let revisions = match kind {
-        WorkloadKind::Deployment => {
-            let deployment = find(handle.objects::<Deployment>(), target)?;
-            replica_set_revisions(&deployment, &handle.objects::<ReplicaSet>(), now)
+    let history = async {
+        match kind {
+            WorkloadKind::Deployment => find(handle.objects::<Deployment>(), target)
+                .map(|deployment| {
+                    replica_set_revisions(&deployment, &handle.objects::<ReplicaSet>(), now)
+                })
+                .unwrap_or_default(),
+            WorkloadKind::StatefulSet => {
+                let current = spec.current_revision.as_deref();
+                controller_history(handle, kind, target, current, &raw, now).await
+            }
+            WorkloadKind::DaemonSet => {
+                controller_history(handle, kind, target, None, &raw, now).await
+            }
         }
-        WorkloadKind::StatefulSet => {
-            controller_history(
-                handle,
-                kind,
-                target,
-                spec.current_revision.as_deref(),
-                &raw,
-                now,
-            )
-            .await
-        }
-        WorkloadKind::DaemonSet => controller_history(handle, kind, target, None, &raw, now).await,
     };
-    let keys = keys(handle, &namespace, env_refs(spec.template.as_ref())).await;
-    let usage = handle.pod_usage(Some(&namespace)).await.unwrap_or_default();
+    let (revisions, keys, usage) = tokio::join!(
+        history,
+        keys(handle, &namespace, env_refs(spec.template.as_ref())),
+        handle.pod_usage(Some(&namespace)),
+    );
+    let usage = usage.unwrap_or_default();
     let owners: BTreeSet<String> = revisions.iter().map(|r| r.owner.clone()).collect();
     let pod_names = names(&raw);
     let events = events(
@@ -672,6 +688,40 @@ mod tests {
 
     use super::*;
     use crate::problems::tests::{at, crash_status, now, parse, ready_status, replica_pod};
+
+    const ROUND_TRIP: Duration = Duration::from_secs(1);
+    const SECRET: &str =
+        r#"{"apiVersion":"v1","kind":"Secret","metadata":{"name":"s"},"data":{"token":"eA=="}}"#;
+
+    #[tokio::test(start_paused = true)]
+    async fn env_sources_are_looked_up_together_up_to_the_limit() {
+        let (client, traffic) = crate::fake::client(ROUND_TRIP, |_, path| {
+            path.contains("/secrets/")
+                .then(|| (http::StatusCode::OK, SECRET.to_owned()))
+        });
+        let (_manager, handle) = crate::fake::handle(&client);
+        let refs: BTreeSet<(RefKind, String)> = (0..KEY_LOOKUP_LIMIT)
+            .map(|ix| (RefKind::Secret, format!("secret-{ix}")))
+            .chain(std::iter::once((RefKind::ConfigMap, "missing".to_owned())))
+            .collect();
+        let started = tokio::time::Instant::now();
+        let found = keys(&handle, "apps", refs).await;
+        assert!(
+            started.elapsed() <= ROUND_TRIP * 2,
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(traffic.peak() >= KEY_LOOKUP_LIMIT);
+        assert_eq!(found.len(), KEY_LOOKUP_LIMIT + 1);
+        assert_eq!(
+            found.get(&(RefKind::Secret, "secret-0".to_owned())),
+            Some(&Some(BTreeSet::from(["token".to_owned()])))
+        );
+        assert_eq!(
+            found.get(&(RefKind::ConfigMap, "missing".to_owned())),
+            Some(&None)
+        );
+    }
 
     fn target(kind: &str, name: &str) -> ResourceRef {
         ResourceRef {

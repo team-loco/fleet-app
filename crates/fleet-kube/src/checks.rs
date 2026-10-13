@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
-use futures::future::join_all;
+use futures::future::{BoxFuture, FutureExt, join_all};
+use futures::stream::{FuturesOrdered, StreamExt};
 use kube::Client;
 use tokio::net::TcpStream;
 
@@ -393,145 +394,213 @@ impl Session<'_> {
         }
     }
 
-    async fn version(&mut self, client: &Client) {
-        let timeout = self.settings.check_timeout;
-        let (info, took) = timed(timeout, async { Ok(client.apiserver_version().await?) }).await;
-        let (nodes, _) = timed(timeout, probe::sample_nodes(client)).await;
-        let (pods, _) = timed(timeout, probe::count_pods(client)).await;
-        let info = match info {
-            Ok(info) => info,
-            Err(err) => {
-                let failure = classify(&err, self.context);
-                self.record(failed(CheckKind::Version, &failure, took));
-                return;
+    fn learn(&mut self, learned: Learned) {
+        match learned {
+            Learned::Nothing => {}
+            Learned::Version {
+                provider,
+                version,
+                nodes,
+                pods,
+            } => {
+                self.facts.provider = provider;
+                self.facts.version = Some(version);
+                self.facts.nodes = nodes;
+                self.facts.pods = pods;
             }
-        };
-        let nodes = nodes.ok();
-        let node_count = nodes.as_ref().map(|sample| sample.count);
-        let provider_id = nodes
-            .as_ref()
-            .and_then(|sample| sample.provider_id.as_deref());
-        self.facts.provider =
-            refine_provider(self.facts.provider, Some(&info.git_version), provider_id);
-        self.facts.nodes = node_count;
-        self.facts.pods = pods.ok();
-        let detail = version_detail(&info.git_version, self.facts.nodes, self.facts.pods);
-        self.facts.version = Some(info.git_version);
-        self.record(result(CheckKind::Version, CheckStatus::Ok, detail, took));
+            Learned::Flux(info) => self.facts.flux = Some(info),
+            Learned::Metrics { server, prometheus } => {
+                self.facts.metrics_server = server;
+                self.facts.prometheus = prometheus;
+            }
+            #[cfg(feature = "loco")]
+            Learned::Loco(found) => self.facts.loco = found,
+        }
     }
 
-    async fn permissions(&mut self, client: &Client, groups: &ApiGroups) {
-        let started = Instant::now();
-        let flux = groups.has(FLUX_KUSTOMIZE_GROUP);
-        let requests: Vec<&AccessRequest> = CORE_ACCESS
+    async fn survey(&mut self, client: &Client) {
+        let context = self.context;
+        let settings = self.settings;
+        let groups = timed(settings.check_timeout, probe::api_groups(client))
+            .map(|(groups, _)| groups.unwrap_or_default())
+            .shared();
+        let mut steps: FuturesOrdered<BoxFuture<'_, Step>> = FuturesOrdered::new();
+        steps.push_back(version(client, context, settings).boxed());
+        let flux_groups = groups.clone();
+        steps.push_back(async move { flux(client, &flux_groups.await, settings).await }.boxed());
+        steps.push_back(metrics(client, settings).boxed());
+        let permission_groups = groups.clone();
+        steps.push_back(
+            async move { permissions(client, context, &permission_groups.await, settings).await }
+                .boxed(),
+        );
+        #[cfg(feature = "loco")]
+        steps.push_back(async move { loco(&groups.await) }.boxed());
+        while let Some((check, learned)) = steps.next().await {
+            self.learn(learned);
+            self.record(check);
+        }
+    }
+}
+
+type Step = (CheckResult, Learned);
+
+enum Learned {
+    Nothing,
+    Version {
+        provider: Provider,
+        version: String,
+        nodes: Option<u64>,
+        pods: Option<u64>,
+    },
+    Flux(FluxInfo),
+    Metrics {
+        server: bool,
+        prometheus: Option<PrometheusTarget>,
+    },
+    #[cfg(feature = "loco")]
+    Loco(bool),
+}
+
+async fn version(client: &Client, context: &KubeContext, settings: &KubeSettings) -> Step {
+    let timeout = settings.check_timeout;
+    let ((info, took), (nodes, _), (pods, _)) = tokio::join!(
+        timed(timeout, async { Ok(client.apiserver_version().await?) }),
+        timed(timeout, probe::sample_nodes(client)),
+        timed(timeout, probe::count_pods(client)),
+    );
+    let info = match info {
+        Ok(info) => info,
+        Err(err) => {
+            let failure = classify(&err, context);
+            return (failed(CheckKind::Version, &failure, took), Learned::Nothing);
+        }
+    };
+    let nodes = nodes.ok();
+    let node_count = nodes.as_ref().map(|sample| sample.count);
+    let provider_id = nodes
+        .as_ref()
+        .and_then(|sample| sample.provider_id.as_deref());
+    let provider = refine_provider(context.provider, Some(&info.git_version), provider_id);
+    let pods = pods.ok();
+    let detail = version_detail(&info.git_version, node_count, pods);
+    let check = result(CheckKind::Version, CheckStatus::Ok, detail, took);
+    let learned = Learned::Version {
+        provider,
+        version: info.git_version,
+        nodes: node_count,
+        pods,
+    };
+    (check, learned)
+}
+
+async fn permissions(
+    client: &Client,
+    context: &KubeContext,
+    groups: &ApiGroups,
+    settings: &KubeSettings,
+) -> Step {
+    let started = Instant::now();
+    let flux = groups.has(FLUX_KUSTOMIZE_GROUP);
+    let requests: Vec<&AccessRequest> = CORE_ACCESS
+        .iter()
+        .chain(FLUX_ACCESS.iter().filter(|_| flux))
+        .collect();
+    let timeout = settings.check_timeout;
+    let answers = join_all(
+        requests
             .iter()
-            .chain(FLUX_ACCESS.iter().filter(|_| flux))
-            .collect();
-        let timeout = self.settings.check_timeout;
-        let answers = join_all(
-            requests
-                .iter()
-                .map(|request| timed(timeout, probe::can(client, request))),
-        )
-        .await;
-        let mut denied = Vec::new();
-        for (request, (answer, _)) in requests.iter().zip(answers) {
-            match answer {
-                Ok(true) => {}
-                Ok(false) => denied.push(request.label),
-                Err(err) => {
-                    let failure = classify(&err, self.context);
-                    self.record(failed(CheckKind::Permissions, &failure, started.elapsed()));
-                    return;
-                }
+            .map(|request| timed(timeout, probe::can(client, request))),
+    )
+    .await;
+    let mut denied = Vec::new();
+    for (request, (answer, _)) in requests.iter().zip(answers) {
+        match answer {
+            Ok(true) => {}
+            Ok(false) => denied.push(request.label),
+            Err(err) => {
+                let failure = classify(&err, context);
+                let check = failed(CheckKind::Permissions, &failure, started.elapsed());
+                return (check, Learned::Nothing);
             }
         }
-        let (status, detail) = permissions_detail(&denied, requests.len());
-        self.record(result(
-            CheckKind::Permissions,
-            status,
-            detail,
-            started.elapsed(),
-        ));
     }
+    let (status, detail) = permissions_detail(&denied, requests.len());
+    let check = result(CheckKind::Permissions, status, detail, started.elapsed());
+    (check, Learned::Nothing)
+}
 
-    async fn flux(&mut self, client: &Client, groups: &ApiGroups) {
-        let started = Instant::now();
-        let Some(kustomize_version) = groups.preferred_version(FLUX_KUSTOMIZE_GROUP) else {
-            self.record(result(
-                CheckKind::Flux,
-                CheckStatus::Info,
-                "Flux not installed".to_owned(),
-                started.elapsed(),
-            ));
-            return;
-        };
-        let timeout = self.settings.check_timeout;
-        let kustomizations = probe::dynamic_api(
-            client,
-            FLUX_KUSTOMIZE_GROUP,
-            kustomize_version,
-            KUSTOMIZATION_KIND,
-            KUSTOMIZATION_PLURAL,
-        );
-        let (version, _) = timed(timeout, probe::flux_version(client)).await;
-        let (kustomization_count, _) = timed(timeout, probe::count(&kustomizations)).await;
-        let helm_count = match groups.preferred_version(FLUX_HELM_GROUP) {
-            Some(helm_version) => {
-                let releases = probe::dynamic_api(
-                    client,
-                    FLUX_HELM_GROUP,
-                    helm_version,
-                    HELM_RELEASE_KIND,
-                    HELM_RELEASE_PLURAL,
-                );
-                timed(timeout, probe::count(&releases)).await.0.ok()
-            }
-            None => None,
-        };
-        let info = FluxInfo {
-            version: version.ok().flatten(),
-            kustomizations: kustomization_count.ok(),
-            helm_releases: helm_count,
-        };
-        let detail = flux_detail(&info);
-        self.facts.flux = Some(info);
-        self.record(result(
+async fn count_releases(client: &Client, groups: &ApiGroups, timeout: Duration) -> Option<u64> {
+    let helm_version = groups.preferred_version(FLUX_HELM_GROUP)?;
+    let releases = probe::dynamic_api(
+        client,
+        FLUX_HELM_GROUP,
+        helm_version,
+        HELM_RELEASE_KIND,
+        HELM_RELEASE_PLURAL,
+    );
+    timed(timeout, probe::count(&releases)).await.0.ok()
+}
+
+async fn flux(client: &Client, groups: &ApiGroups, settings: &KubeSettings) -> Step {
+    let started = Instant::now();
+    let Some(kustomize_version) = groups.preferred_version(FLUX_KUSTOMIZE_GROUP) else {
+        let detail = "Flux not installed".to_owned();
+        let check = result(
             CheckKind::Flux,
-            CheckStatus::Ok,
+            CheckStatus::Info,
             detail,
             started.elapsed(),
-        ));
-    }
+        );
+        return (check, Learned::Nothing);
+    };
+    let timeout = settings.check_timeout;
+    let kustomizations = probe::dynamic_api(
+        client,
+        FLUX_KUSTOMIZE_GROUP,
+        kustomize_version,
+        KUSTOMIZATION_KIND,
+        KUSTOMIZATION_PLURAL,
+    );
+    let ((version, _), (kustomization_count, _), helm_count) = tokio::join!(
+        timed(timeout, probe::flux_version(client)),
+        timed(timeout, probe::count(&kustomizations)),
+        count_releases(client, groups, timeout),
+    );
+    let info = FluxInfo {
+        version: version.ok().flatten(),
+        kustomizations: kustomization_count.ok(),
+        helm_releases: helm_count,
+    };
+    let detail = flux_detail(&info);
+    let check = result(CheckKind::Flux, CheckStatus::Ok, detail, started.elapsed());
+    (check, Learned::Flux(info))
+}
 
-    async fn metrics(&mut self, client: &Client) {
-        let started = Instant::now();
-        let timeout = self.settings.check_timeout;
-        let (metrics_server, _) = timed(timeout, probe::metrics_server_available(client)).await;
-        let (prometheus, _) =
-            timed(timeout, async { Ok(probe::find_prometheus(client).await) }).await;
-        self.facts.metrics_server = metrics_server.unwrap_or(false);
-        self.facts.prometheus = prometheus.ok().flatten();
-        let (status, detail) =
-            metrics_detail(self.facts.metrics_server, self.facts.prometheus.as_ref());
-        self.record(result(
-            CheckKind::Metrics,
-            status,
-            detail,
-            started.elapsed(),
-        ));
-    }
+async fn metrics(client: &Client, settings: &KubeSettings) -> Step {
+    let started = Instant::now();
+    let timeout = settings.check_timeout;
+    let ((metrics_server, _), (prometheus, _)) = tokio::join!(
+        timed(timeout, probe::metrics_server_available(client)),
+        timed(timeout, async { Ok(probe::find_prometheus(client).await) }),
+    );
+    let server = metrics_server.unwrap_or(false);
+    let prometheus = prometheus.ok().flatten();
+    let (status, detail) = metrics_detail(server, prometheus.as_ref());
+    let check = result(CheckKind::Metrics, status, detail, started.elapsed());
+    (check, Learned::Metrics { server, prometheus })
+}
 
-    #[cfg(feature = "loco")]
-    fn loco(&mut self, groups: &ApiGroups) {
-        self.facts.loco = groups.has(probe::LOCO_GROUP);
-        let (status, detail) = if self.facts.loco {
-            (CheckStatus::Ok, "Loco detected".to_owned())
-        } else {
-            (CheckStatus::Info, "Loco not installed".to_owned())
-        };
-        self.record(result(CheckKind::Loco, status, detail, Duration::ZERO));
-    }
+#[cfg(feature = "loco")]
+fn loco(groups: &ApiGroups) -> Step {
+    let found = groups.has(probe::LOCO_GROUP);
+    let (status, detail) = if found {
+        (CheckStatus::Ok, "Loco detected".to_owned())
+    } else {
+        (CheckStatus::Info, "Loco not installed".to_owned())
+    };
+    let check = result(CheckKind::Loco, status, detail, Duration::ZERO);
+    (check, Learned::Loco(found))
 }
 
 pub async fn run_checks(
@@ -589,14 +658,7 @@ async fn run_session(
             return session.finish(verdict, Some(failure));
         }
     };
-    session.version(&client).await;
-    let (groups, _) = timed(settings.check_timeout, probe::api_groups(&client)).await;
-    let groups = groups.unwrap_or_default();
-    session.flux(&client, &groups).await;
-    session.metrics(&client).await;
-    session.permissions(&client, &groups).await;
-    #[cfg(feature = "loco")]
-    session.loco(&groups);
+    session.survey(&client).await;
     session.finish(Verdict::Ready, None)
 }
 
@@ -711,6 +773,66 @@ mod tests {
             streamed.push(check);
         }
         assert_eq!(streamed, report.checks);
+    }
+
+    const ROUND_TRIP: Duration = Duration::from_secs(1);
+
+    fn session<'a>(context: &'a KubeContext, settings: &'a KubeSettings) -> Session<'a> {
+        Session {
+            context,
+            settings,
+            progress: None,
+            checks: Vec::new(),
+            facts: ClusterFacts {
+                provider: context.provider,
+                version: None,
+                user: None,
+                nodes: None,
+                pods: None,
+                flux: None,
+                metrics_server: false,
+                prometheus: None,
+                #[cfg(feature = "loco")]
+                loco: false,
+            },
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn independent_checks_overlap_and_report_in_order() {
+        let context = KubeContext {
+            id: ContextRef {
+                file: "/k".into(),
+                context: "fake".to_owned(),
+            },
+            cluster: "fake".to_owned(),
+            user: None,
+            namespace: None,
+            server: None,
+            provider: Provider::Generic,
+            auth: crate::provider::AuthKind::Token,
+            is_current: false,
+        };
+        let settings = KubeSettings::default();
+        let (client, traffic) = crate::fake::client(ROUND_TRIP, |_, _| None);
+        let mut session = session(&context, &settings);
+        let started = tokio::time::Instant::now();
+        session.survey(&client).await;
+        let took = started.elapsed();
+        assert!(took <= ROUND_TRIP * 2, "{took:?}");
+        assert!(traffic.peak() > CORE_ACCESS.len(), "{}", traffic.peak());
+        let kinds: Vec<CheckKind> = session.checks.iter().map(|check| check.kind).collect();
+        let core = [
+            CheckKind::Version,
+            CheckKind::Flux,
+            CheckKind::Metrics,
+            CheckKind::Permissions,
+        ];
+        #[cfg(not(feature = "loco"))]
+        let expected = core.to_vec();
+        #[cfg(feature = "loco")]
+        let expected = [core.as_slice(), &[CheckKind::Loco]].concat();
+        assert_eq!(kinds, expected);
     }
 
     #[tokio::test]

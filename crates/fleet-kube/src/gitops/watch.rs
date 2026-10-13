@@ -4,6 +4,7 @@ use std::time::Duration;
 use fleet_core::Status;
 use fleet_core::gitops::Controller;
 use fleet_flux::ObjectKind;
+use futures::future::join_all;
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::core::v1::Namespace;
 use kube::api::{DynamicObject, ListParams};
@@ -82,12 +83,25 @@ async fn detect(
 ) {
     let mut subscriptions: Vec<Subscription> = Vec::new();
     loop {
-        let mut waiting = false;
-        for kind in KINDS {
-            if lock(&info).kinds.contains(&kind) {
-                continue;
+        let missing: Vec<ObjectKind> = KINDS
+            .into_iter()
+            .filter(|kind| !lock(&info).kinds.contains(kind))
+            .collect();
+        let subscribing = join_all(
+            missing
+                .iter()
+                .map(|kind| handle.subscribe_custom(custom_kind(*kind))),
+        );
+        let installed = async {
+            match handle.client() {
+                Ok(client) => Some(install(client).await),
+                Err(_) => None,
             }
-            match handle.subscribe_custom(custom_kind(kind)).await {
+        };
+        let (subscribed, installed) = tokio::join!(subscribing, installed);
+        let mut waiting = false;
+        for (kind, outcome) in missing.into_iter().zip(subscribed) {
+            match outcome {
                 Ok(subscription) => {
                     subscriptions.push(subscription);
                     lock(&info).kinds.push(kind);
@@ -96,8 +110,7 @@ async fn detect(
                 Err(error) => tracing::debug!(%error, kind = kind.as_str(), "Flux kind not served"),
             }
         }
-        if let Ok(client) = handle.client() {
-            let (version, controllers) = install(client).await;
+        if let Some((version, controllers)) = installed {
             let mut info = lock(&info);
             info.version = version;
             info.controllers = controllers;
@@ -113,7 +126,13 @@ async fn detect(
 
 async fn install(client: Client) -> (Option<String>, Vec<Controller>) {
     let namespaces: Api<Namespace> = Api::all(client.clone());
-    let version = match namespaces.get_opt(FLUX_NAMESPACE).await {
+    let deployments: Api<Deployment> = Api::namespaced(client, FLUX_NAMESPACE);
+    let listing = ListParams::default().labels(PART_OF_FLUX);
+    let (namespace, listed) = tokio::join!(
+        namespaces.get_opt(FLUX_NAMESPACE),
+        deployments.list(&listing)
+    );
+    let version = match namespace {
         Ok(namespace) => namespace
             .and_then(|namespace| namespace.metadata.labels)
             .and_then(|labels| labels.get(VERSION_LABEL).cloned()),
@@ -122,10 +141,6 @@ async fn install(client: Client) -> (Option<String>, Vec<Controller>) {
             None
         }
     };
-    let deployments: Api<Deployment> = Api::namespaced(client, FLUX_NAMESPACE);
-    let listed = deployments
-        .list(&ListParams::default().labels(PART_OF_FLUX))
-        .await;
     let deployed = match listed {
         Ok(list) => list.items,
         Err(error) => {
@@ -179,6 +194,24 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    const ROUND_TRIP: Duration = Duration::from_secs(1);
+
+    #[tokio::test(start_paused = true)]
+    async fn flux_kinds_and_install_are_probed_together() {
+        let (client, traffic) = crate::fake::client(ROUND_TRIP, |_, _| None);
+        let (_manager, handle) = crate::fake::handle(&client);
+        let (changed, passes) = async_channel::unbounded();
+        let started = tokio::time::Instant::now();
+        let _flux = ClusterFlux::start(handle, changed);
+        assert!(passes.recv().await.is_ok());
+        assert!(
+            started.elapsed() <= ROUND_TRIP * 2,
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(traffic.peak() >= KINDS.len(), "{}", traffic.peak());
+    }
 
     fn deployment(name: &str, replicas: i32, ready: i32) -> Deployment {
         let parsed = serde_json::from_value(json!({

@@ -15,6 +15,7 @@ use fleet_loco::platform::{
     Observation, WorkloadHealth, agent_sync, component_catalog, deployment_health,
 };
 use fleet_loco::{API_VERSION, BUILD_NAMESPACE, WORKSPACE_PREFIX};
+use futures::future::join_all;
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
@@ -453,7 +454,12 @@ async fn probe_loop(
 }
 
 async fn observe(client: &Client) -> Option<Observed> {
-    let resources = match client.list_api_group_resources(API_VERSION).await {
+    let deployments: Api<Deployment> = Api::namespaced(client.clone(), LOCO_NAMESPACE);
+    let (resources, agent) = tokio::join!(
+        client.list_api_group_resources(API_VERSION),
+        deployments.get_opt(AGENT_DEPLOYMENT)
+    );
+    let resources = match resources {
         Ok(resources) => resources,
         Err(kube::Error::Api(status)) if status.code == NOT_FOUND => {
             return Some(Observed::default());
@@ -467,8 +473,7 @@ async fn observe(client: &Client) -> Option<Observed> {
         Observation::Observed(enabled) => Some(enabled),
         Observation::Unavailable => None,
     };
-    let deployments: Api<Deployment> = Api::namespaced(client.clone(), LOCO_NAMESPACE);
-    let agent = match deployments.get_opt(AGENT_DEPLOYMENT).await {
+    let agent = match agent {
         Ok(found) => found.and_then(|deployment| deployment_health(&deployment).ok()),
         Err(error) => {
             tracing::debug!(%error, "loco agent deployment unreadable");
@@ -489,9 +494,16 @@ fn start_watch(cluster: &ClusterId, handle: &ClusterHandle) -> PageWatch {
         .collect();
     let subscriber = handle.clone();
     let custom = TaskGuard::spawn(async move {
+        let kinds = custom_kinds();
+        let outcomes = join_all(
+            kinds
+                .iter()
+                .map(|kind| subscriber.subscribe_custom(kind.clone())),
+        )
+        .await;
         let mut held = Vec::new();
-        for kind in custom_kinds() {
-            match subscriber.subscribe_custom(kind.clone()).await {
+        for (kind, outcome) in kinds.iter().zip(outcomes) {
+            match outcome {
                 Ok(subscription) => held.push(subscription),
                 Err(error) => tracing::debug!(%error, kind = %kind.kind, "loco watch unavailable"),
             }
@@ -674,4 +686,27 @@ fn build_containers(handle: &ClusterHandle, limit: usize) -> BTreeSet<(String, S
         })
         .filter(|(pod, _)| !pod.is_empty())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ROUND_TRIP: Duration = Duration::from_secs(1);
+
+    #[tokio::test(start_paused = true)]
+    async fn discovery_and_agent_are_probed_together() {
+        let group = format!("/apis/{API_VERSION}");
+        let listing = format!(
+            r#"{{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"{API_VERSION}","resources":[]}}"#
+        );
+        let (client, traffic) = crate::fake::client(ROUND_TRIP, move |_, path| {
+            (path == group).then(|| (http::StatusCode::OK, listing.clone()))
+        });
+        let started = tokio::time::Instant::now();
+        let observed = observe(&client).await;
+        assert!(started.elapsed() < ROUND_TRIP * 2);
+        assert_eq!(traffic.peak(), 2);
+        assert_eq!(observed.map(|o| o.installed), Some(true));
+    }
 }

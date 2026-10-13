@@ -3,6 +3,7 @@ use std::sync::Arc;
 use fleet_core::changes::{LineChange, PatchLine};
 use fleet_core::compare::{Observed, SpecDiff, build};
 use fleet_core::{ClusterId, Comparison, ResourceRef, WorkloadKind};
+use futures::{StreamExt, stream};
 use jiff::Timestamp;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::autoscaling::v2::HorizontalPodAutoscaler;
@@ -19,6 +20,7 @@ const CONTEXT_LINES: usize = 3;
 const CPU: &str = "cpu";
 const ROLLING_UPDATE: &str = "RollingUpdate";
 const SEPARATOR: &str = " · ";
+const CLUSTER_LIMIT: usize = 8;
 
 pub struct Probe {
     pub observed: Observed,
@@ -148,8 +150,11 @@ pub async fn observe(
         ..target.clone()
     };
     let (template, strategy) = spec_of(handle, &on)?;
-    let workload = crate::workload::build(handle, &on, now).await?;
-    let range = autoscaler(handle, &on).await;
+    let (workload, range) = tokio::join!(
+        crate::workload::build(handle, &on, now),
+        autoscaler(handle, &on)
+    );
+    let workload = workload?;
     let replicas = replicas_label(workload.desired, range.as_deref());
     Some(Probe {
         observed: Observed {
@@ -240,12 +245,15 @@ pub async fn compare(
     chosen: Option<&ClusterId>,
     now: Timestamp,
 ) -> Option<Comparison> {
-    let mut probes = Vec::new();
-    for (id, handle) in clusters {
-        if let Some(probe) = observe(handle, id, target, now).await {
-            probes.push(probe);
-        }
-    }
+    let observations: Vec<_> = clusters
+        .iter()
+        .map(|(id, handle)| observe(handle, id, target, now))
+        .collect();
+    let probes: Vec<Probe> = stream::iter(observations)
+        .buffered(CLUSTER_LIMIT)
+        .filter_map(std::future::ready)
+        .collect()
+        .await;
     comparison(target, chosen, &probes)
 }
 
