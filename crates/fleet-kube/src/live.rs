@@ -130,6 +130,8 @@ struct Live {
     yaml: Option<(ResourceRef, String)>,
     inspecting: Option<ResourceRef>,
     yaml_task: Option<TaskGuard>,
+    #[cfg(feature = "loco")]
+    loco: crate::loco::LocoBackend,
 }
 
 fn reachable(status: &ConnectionStatus) -> bool {
@@ -226,6 +228,12 @@ impl Live {
             .unwrap_or_default();
         self.page_subscriptions = subscriptions;
         self.poll_page();
+        #[cfg(feature = "loco")]
+        self.loco.sync(
+            self.clusters.values().map(|c| (&c.id, &c.handle)),
+            self.selected.as_ref(),
+            self.page,
+        );
     }
 
     fn poll_page(&mut self) {
@@ -448,7 +456,11 @@ impl Live {
             Command::Scale { .. } => self.act(command),
             Command::Rollback { .. } => self.act(command),
             #[cfg(feature = "loco")]
-            Command::Loco(_) => {}
+            Command::Loco(command) => {
+                let cluster = command.target().cluster.clone();
+                let handle = self.clusters.values().find(|c| c.id == cluster);
+                self.loco.command(command, handle.map(|c| &c.handle));
+            }
             Command::CopySpec { .. } => {}
             Command::ShowClusterSettings(_) => {}
             Command::SetPreferences(id, preferences) => {
@@ -600,6 +612,8 @@ impl Live {
             .map(missing_summary);
         let mut clusters: Vec<_> = connected.into_iter().chain(missing).collect();
         clusters.sort_by(|a, b| a.name.cmp(&b.name));
+        #[cfg(feature = "loco")]
+        let loco = self.loco.snapshot(&mut clusters);
         let settings: Vec<ClusterSettings> = self
             .clusters
             .values()
@@ -630,7 +644,7 @@ impl Live {
             gitops: GitOps::default(),
             flux: Vec::new(),
             #[cfg(feature = "loco")]
-            loco: BTreeMap::new(),
+            loco,
             comparisons: Vec::new(),
             catalog: ClusterCatalog {
                 sources: sources.len(),
@@ -734,6 +748,8 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
         yaml: None,
         inspecting: None,
         yaml_task: None,
+        #[cfg(feature = "loco")]
+        loco: crate::loco::LocoBackend::new(crate::loco::LocoSettings::default()),
     };
     let gitops_changed = live.gitops.changed();
     live.reconcile();
@@ -782,6 +798,10 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
                 dirty = true;
             }
             _ = publish.tick() => {
+                #[cfg(feature = "loco")]
+                if live.loco.refresh() {
+                    dirty = true;
+                }
                 if dirty {
                     dirty = false;
                     if updates.send(Update::Snapshot(Box::new(live.snapshot()))).await.is_err() {

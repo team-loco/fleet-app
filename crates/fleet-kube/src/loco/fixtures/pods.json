@@ -1,0 +1,13 @@
+[
+  {
+    "metadata": {"name": "build-b1-x7k2p", "namespace": "loco-builds", "creationTimestamp": "2026-10-12T21:07:00Z",
+      "labels": {"loco.io/build-id": "b1", "app.kubernetes.io/managed-by": "loco-controller"},
+      "ownerReferences": [{"apiVersion": "batch/v1", "kind": "Job", "name": "build-b1", "uid": "job-b1-uid", "controller": true}]},
+    "spec": {"nodeName": "fleet-b-worker", "containers": [{"name": "push", "image": "builder"}]},
+    "status": {"phase": "Pending",
+      "initContainerStatuses": [
+        {"name": "fetch", "image": "builder", "imageID": "", "ready": true, "restartCount": 0, "state": {"terminated": {"exitCode": 0}}},
+        {"name": "build", "image": "buildkit", "imageID": "", "ready": false, "restartCount": 0, "state": {"running": {"startedAt": "2026-10-12T21:07:05Z"}}}
+      ]}
+  }
+]

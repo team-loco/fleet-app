@@ -8,6 +8,7 @@ const IMAGES: &str = "sha-8c1f2e7";
 const CONTROL_PLANE: &str = "api.loco.build";
 const UPTIME: Duration = Duration::from_mins(192);
 const LAST_HEARTBEAT: Duration = Duration::from_secs(4);
+const AGENT_READY: (u32, u32) = (1, 1);
 
 pub fn platform() -> Platform {
     Platform {
@@ -26,6 +27,7 @@ pub fn platform() -> Platform {
                 reason: Some("stream closed by server (GOAWAY)".into()),
             }),
             builds_enabled: Some(true),
+            ready: Some(AGENT_READY),
         },
         components: components(),
         log: log(),
@@ -57,7 +59,7 @@ fn components() -> Vec<Component> {
             ok,
             "loco-agent",
             NAMESPACE,
-            (1, 1),
+            AGENT_READY,
             IMAGES,
             "sync stream up 3h 12m",
         ),

@@ -13,6 +13,8 @@ pub mod gitops;
 pub mod inspect;
 pub mod lists;
 pub mod live;
+#[cfg(feature = "loco")]
+pub mod loco;
 pub mod manager;
 pub mod metrics;
 pub mod ops;

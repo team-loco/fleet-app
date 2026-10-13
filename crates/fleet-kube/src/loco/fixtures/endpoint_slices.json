@@ -1,0 +1,18 @@
+[
+  {
+    "metadata": {"name": "resource-web-abcde", "namespace": "ws-0192c3f1", "labels": {"kubernetes.io/service-name": "resource-web"}},
+    "addressType": "IPv4",
+    "endpoints": [
+      {"addresses": ["10.0.0.1"], "conditions": {"ready": true}, "targetRef": {"kind": "Pod", "uid": "web-1"}},
+      {"addresses": ["10.0.0.2"], "conditions": {"ready": true}, "targetRef": {"kind": "Pod", "uid": "web-2"}}
+    ]
+  },
+  {
+    "metadata": {"name": "resource-api-fghij", "namespace": "ws-0192c3e7", "labels": {"kubernetes.io/service-name": "resource-api"}},
+    "addressType": "IPv4",
+    "endpoints": [
+      {"addresses": ["10.0.1.1"], "conditions": {"ready": false}, "targetRef": {"kind": "Pod", "uid": "api-1"}},
+      {"addresses": ["10.0.1.2"], "conditions": {"ready": false}, "targetRef": {"kind": "Pod", "uid": "api-2"}}
+    ]
+  }
+]

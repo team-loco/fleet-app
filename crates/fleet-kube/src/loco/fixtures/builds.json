@@ -1,0 +1,14 @@
+[
+  {
+    "apiVersion": "infra.loco.io/v1alpha1", "kind": "Build",
+    "metadata": {"name": "build-b0", "namespace": "loco-builds", "uid": "build-b0-uid", "creationTimestamp": "2026-10-12T20:30:50Z"},
+    "spec": {"buildId": "b0", "workspaceId": "0192c3f1", "resourceId": "web", "sourceURL": "https://source.invalid/b0.tar.gz", "dockerfilePath": "Dockerfile", "context": ".", "imageRepository": "registry/web"},
+    "status": {"phase": "Succeeded", "startedAt": "2026-10-12T20:31:00Z", "finishedAt": "2026-10-12T20:33:11Z", "imageDigest": "sha256:9e1cca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b980778544d0"}
+  },
+  {
+    "apiVersion": "infra.loco.io/v1alpha1", "kind": "Build",
+    "metadata": {"name": "build-b1", "namespace": "loco-builds", "uid": "build-b1-uid", "creationTimestamp": "2026-10-12T21:06:59Z"},
+    "spec": {"buildId": "b1", "workspaceId": "0192c3f1", "resourceId": "web", "sourceURL": "https://source.invalid/b1.tar.gz", "dockerfilePath": "Dockerfile", "context": ".", "imageRepository": "registry/web"},
+    "status": {"phase": "Running", "startedAt": "2026-10-12T21:07:00Z", "message": "building"}
+  }
+]

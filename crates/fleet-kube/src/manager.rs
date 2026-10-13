@@ -88,6 +88,10 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Shared {
+    pub(crate) fn current_client(&self) -> Option<Client> {
+        lock(&self.client).clone()
+    }
+
     fn start(&self, kind: &WatchKind, entry: &mut WatchEntry, client: &Client) {
         let signals = self.signals.clone();
         entry.running = match (kind, &entry.resource) {

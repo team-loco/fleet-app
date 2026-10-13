@@ -33,9 +33,22 @@ pub struct AgentSync {
     pub controller_healthy: Option<bool>,
     pub reconnects: Option<Reconnects>,
     pub builds_enabled: Option<bool>,
+    pub ready: Option<(u32, u32)>,
 }
 
 impl AgentSync {
+    pub fn readiness(&self) -> Option<Status> {
+        let (ready, desired) = self.ready?;
+        let status = if desired > 0 && ready == desired {
+            Status::Ok
+        } else if ready == 0 {
+            Status::Err
+        } else {
+            Status::Warn
+        };
+        Some(status)
+    }
+
     pub fn stream(&self) -> Option<(Status, String)> {
         let connected = self.connected?;
         let target = self
@@ -218,6 +231,19 @@ mod tests {
             reconnects.summary(),
             "2 · last 18:04 · stream closed by server (GOAWAY)"
         );
+    }
+
+    #[test]
+    fn readiness_follows_the_agent_deployment() {
+        let ready = |ready| AgentSync {
+            ready,
+            ..AgentSync::default()
+        };
+        assert_eq!(ready(None).readiness(), None);
+        assert_eq!(ready(Some((1, 1))).readiness(), Some(Status::Ok));
+        assert_eq!(ready(Some((1, 2))).readiness(), Some(Status::Warn));
+        assert_eq!(ready(Some((0, 1))).readiness(), Some(Status::Err));
+        assert_eq!(ready(Some((0, 0))).readiness(), Some(Status::Err));
     }
 
     #[test]

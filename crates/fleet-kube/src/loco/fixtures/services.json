@@ -1,0 +1,14 @@
+[
+  {
+    "metadata": {"name": "resource-web", "namespace": "ws-0192c3f1",
+      "labels": {"app": "resource-web", "app.kubernetes.io/managed-by": "loco-controller"},
+      "annotations": {"loco.io/application-name": "resource-web", "loco.io/application-namespace": "loco-system"}},
+    "spec": {"type": "ClusterIP", "ports": [{"port": 80, "targetPort": 8080}]}
+  },
+  {
+    "metadata": {"name": "resource-api", "namespace": "ws-0192c3e7",
+      "labels": {"app": "resource-api", "app.kubernetes.io/managed-by": "loco-controller"},
+      "annotations": {"loco.io/application-name": "resource-api", "loco.io/application-namespace": "loco-system"}},
+    "spec": {"type": "ClusterIP", "ports": [{"port": 80, "targetPort": 8080}]}
+  }
+]
