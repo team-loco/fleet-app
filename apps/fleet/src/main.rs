@@ -59,6 +59,7 @@ enum Screen {
     KitPanes,
     AddCluster,
     AddClusterCheck,
+    Workload,
 }
 
 impl Screen {
@@ -85,6 +86,7 @@ impl Screen {
             Self::KitPanes => Vec::new(),
             Self::AddCluster => vec![Command::OpenAddCluster(AddClusterStep::Pick)],
             Self::AddClusterCheck => vec![Command::OpenAddCluster(AddClusterStep::Check)],
+            Self::Workload => vec![sample, Command::OpenResource(fleet_demo::sample_workload())],
         }
     }
 }
@@ -150,6 +152,7 @@ fn launch(
         KeyBinding::new("cmd-k", ToggleCommandPalette, None),
         KeyBinding::new("cmd-q", Quit, None),
     ]);
+    cx.bind_keys(fleet_ui::screens::workload::key_bindings());
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_window_closed(|cx, _| cx.quit()).detach();
 
@@ -192,6 +195,7 @@ fn launch(
             Screen::AddCluster => shell_view(updates, commands, screen, window, cx),
             Screen::AddClusterCheck => shell_view(updates, commands, screen, window, cx),
             Screen::Gitops => shell_view(updates, commands, screen, window, cx),
+            Screen::Workload => shell_view(updates, commands, screen, window, cx),
         };
         cx.new(|cx| Root::new(view, window, cx))
     })

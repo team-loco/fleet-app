@@ -3,16 +3,17 @@ use std::rc::Rc;
 use fleet_core::Status;
 use gpui::{
     Anchor, AnchoredPositionMode, Animation, AnimationExt, App, AppContext, Context, ElementId,
-    Entity, FocusHandle, FontWeight, Global, InteractiveElement, IntoElement, KeyDownEvent,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, anchored,
-    deferred, div, ease_out_quint, point, prelude::FluentBuilder, relative,
+    Entity, FocusHandle, Focusable, FontWeight, Global, InteractiveElement, IntoElement,
+    KeyDownEvent, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
+    anchored, deferred, div, ease_out_quint, point, prelude::FluentBuilder, relative,
 };
 
 use super::button::{Button, IconButton};
+use super::input::{TextField, TextFieldState};
 use super::popover;
 use super::status::StatusGlyph;
 use crate::theme::{
-    ActiveTheme, DIALOG_TOP, DIALOG_WIDTH, FONT_MONO, LINE_PROSE, PAGE_HEADER, POPOVER_IN,
+    ActiveTheme, DIALOG_TOP, DIALOG_WIDTH, FONT_MONO, LINE_PROSE, PAGE_HEADER, POPOVER_IN, Palette,
     RADIUS_MENU, RULE, SPACE_2, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8, STATUS_BAR, TEXT_BODY,
     TEXT_SMALL, TEXT_TITLE, TOAST_TIMEOUT, TOAST_WIDTH,
 };
@@ -30,6 +31,8 @@ pub struct ConfirmDialog {
     title: SharedString,
     body: SharedString,
     details: Vec<SharedString>,
+    field: Option<Entity<TextFieldState>>,
+    primary: bool,
     confirm: SharedString,
     on_confirm: ConfirmHandler,
 }
@@ -45,6 +48,8 @@ impl ConfirmDialog {
             title: title.into(),
             body: body.into(),
             details: Vec::new(),
+            field: None,
+            primary: false,
             confirm: confirm.into(),
             on_confirm: Rc::new(on_confirm),
         }
@@ -52,6 +57,16 @@ impl ConfirmDialog {
 
     pub fn detail(mut self, line: impl Into<SharedString>) -> Self {
         self.details.push(line.into());
+        self
+    }
+
+    pub fn field(mut self, state: Entity<TextFieldState>) -> Self {
+        self.field = Some(state);
+        self
+    }
+
+    pub fn primary(mut self) -> Self {
+        self.primary = true;
         self
     }
 }
@@ -121,9 +136,13 @@ pub fn toast(toast: Toast, cx: &mut App) {
 impl Overlays {
     fn open(&mut self, dialog: ConfirmDialog, window: &mut Window, cx: &mut Context<Self>) {
         self.next += 1;
-        self.dialog = Some((self.next, dialog));
         self.restore = window.focused(cx);
-        window.focus(&self.focus, cx);
+        let focus = dialog.field.as_ref().map_or_else(
+            || self.focus.clone(),
+            |field| field.read(cx).focus_handle(cx),
+        );
+        self.dialog = Some((self.next, dialog));
+        window.focus(&focus, cx);
         cx.notify();
     }
 
@@ -169,6 +188,36 @@ impl Overlays {
             _ => return,
         }
         cx.stop_propagation();
+    }
+
+    fn render_footer(
+        dialog: &ConfirmDialog,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let confirm = Button::new("dialog-confirm", dialog.confirm.clone())
+            .shortcut(CONFIRM_KEYS)
+            .on_click(cx.listener(|this, _, window, cx| this.accept(window, cx)));
+        let confirm = if dialog.primary {
+            confirm.primary()
+        } else {
+            confirm.danger()
+        };
+        div()
+            .flex()
+            .items_center()
+            .justify_end()
+            .gap(SPACE_4)
+            .px(SPACE_7)
+            .py(SPACE_6)
+            .border_t(RULE)
+            .border_color(palette.line)
+            .bg(palette.chrome)
+            .child(
+                Button::new("dialog-cancel", CANCEL)
+                    .on_click(cx.listener(|this, _, window, cx| this.dismiss(window, cx))),
+            )
+            .child(confirm)
     }
 
     fn render_dialog(
@@ -217,27 +266,11 @@ impl Overlays {
             .child(dialog.body.clone())
             .when(!dialog.details.is_empty(), |body| {
                 body.child(div().flex().flex_col().gap(SPACE_2).children(details))
+            })
+            .when_some(dialog.field.as_ref(), |body, field| {
+                body.child(TextField::new(field))
             });
-        let footer = div()
-            .flex()
-            .items_center()
-            .justify_end()
-            .gap(SPACE_4)
-            .px(SPACE_7)
-            .py(SPACE_6)
-            .border_t(RULE)
-            .border_color(palette.line)
-            .bg(palette.chrome)
-            .child(
-                Button::new("dialog-cancel", CANCEL)
-                    .on_click(cx.listener(|this, _, window, cx| this.dismiss(window, cx))),
-            )
-            .child(
-                Button::new("dialog-confirm", dialog.confirm.clone())
-                    .danger()
-                    .shortcut(CONFIRM_KEYS)
-                    .on_click(cx.listener(|this, _, window, cx| this.accept(window, cx))),
-            );
+        let footer = Self::render_footer(dialog, &palette, cx);
         let panel = div()
             .id("dialog")
             .w(DIALOG_WIDTH)

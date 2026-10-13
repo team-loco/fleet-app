@@ -8,6 +8,7 @@ mod namespaces;
 mod nodes;
 mod overview;
 mod resources;
+pub mod workload;
 
 use fleet_core::{ClusterDetail, ClusterSummary, Command, Page, ResourceKind, ResourceRef, Status};
 use gpui::{AnyElement, App, AppContext, Context, Entity, IntoElement, Subscription, Window};

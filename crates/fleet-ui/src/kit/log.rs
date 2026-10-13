@@ -2,9 +2,9 @@ use std::collections::VecDeque;
 use std::ops::Range;
 
 use gpui::{
-    AnyElement, Context, ElementId, HighlightStyle, InteractiveElement, IntoElement, ParentElement,
-    Render, ScrollStrategy, SharedString, Styled, StyledText, UniformListScrollHandle, Window, div,
-    prelude::FluentBuilder, uniform_list,
+    AnyElement, Context, ElementId, HighlightStyle, InteractiveElement, IntoElement, ListAlignment,
+    ListState, ParentElement, Pixels, Render, ScrollStrategy, SharedString, Styled, StyledText,
+    UniformListScrollHandle, Window, div, list, prelude::FluentBuilder, px, uniform_list,
 };
 
 use crate::theme::{
@@ -19,6 +19,7 @@ const BEL: char = '\u{7}';
 const CSI_FINAL: std::ops::RangeInclusive<char> = '\u{40}'..='\u{7e}';
 const TIMESTAMP_DATE_DASH: usize = 4;
 const TIMESTAMP_MIN_LEN: usize = 20;
+const WRAP_OVERDRAW: Pixels = px(200.);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
@@ -222,6 +223,8 @@ pub struct LogView {
     timestamps: bool,
     query: SharedString,
     scroll: UniformListScrollHandle,
+    wrap: bool,
+    wrapped: ListState,
 }
 
 impl LogView {
@@ -233,6 +236,28 @@ impl LogView {
             timestamps: true,
             query: SharedString::default(),
             scroll: UniformListScrollHandle::new(),
+            wrap: false,
+            wrapped: ListState::new(0, ListAlignment::Top, WRAP_OVERDRAW),
+        }
+    }
+
+    pub fn wrap(&self) -> bool {
+        self.wrap
+    }
+
+    pub fn set_wrap(&mut self, wrap: bool, cx: &mut Context<Self>) {
+        self.wrap = wrap;
+        self.sync_wrapped();
+        cx.notify();
+    }
+
+    fn sync_wrapped(&mut self) {
+        if !self.wrap {
+            return;
+        }
+        self.wrapped.reset(self.buffer.len());
+        if self.follow {
+            self.wrapped.scroll_to_end();
         }
     }
 
@@ -250,6 +275,7 @@ impl LogView {
 
     pub fn clear(&mut self, cx: &mut Context<Self>) {
         self.buffer.clear();
+        self.sync_wrapped();
         cx.notify();
     }
 
@@ -261,6 +287,7 @@ impl LogView {
         self.follow = follow;
         if follow {
             self.scroll.scroll_to_bottom();
+            self.sync_wrapped();
         }
         cx.notify();
     }
@@ -294,6 +321,7 @@ impl LogView {
         if self.follow {
             self.scroll.scroll_to_bottom();
         }
+        self.sync_wrapped();
         cx.notify();
     }
 
@@ -333,9 +361,11 @@ impl LogView {
         div()
             .flex()
             .gap(SPACE_6)
-            .h(LOG_LINE)
             .px(SPACE_6)
-            .whitespace_nowrap()
+            .when(self.wrap, |row| row.min_h(LOG_LINE).line_height(LOG_LINE))
+            .when(!self.wrap, |row| {
+                row.h(LOG_LINE).w_full().whitespace_nowrap()
+            })
             .when_some(row_bg, Styled::bg)
             .when(self.timestamps, |row| {
                 row.child(
@@ -353,7 +383,12 @@ impl LogView {
                     .text_color(level_color)
                     .children(line.level.map(Level::label)),
             )
-            .child(div().text_color(palette.fg).child(message))
+            .child(
+                div()
+                    .when(self.wrap, |text| text.flex_1().min_w_0())
+                    .text_color(palette.fg)
+                    .child(message),
+            )
             .into_any_element()
     }
 }
@@ -361,15 +396,33 @@ impl LogView {
 impl Render for LogView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
-        let list = uniform_list(
-            ElementId::Name(self.id.clone()),
-            self.buffer.len(),
-            cx.processor(Self::render_lines),
-        )
-        .track_scroll(&self.scroll)
-        .flex_1()
-        .min_h_0()
-        .py(SPACE_3);
+        let lines = if self.wrap {
+            list(
+                self.wrapped.clone(),
+                cx.processor(|this, ix: usize, _, cx| {
+                    let palette = *cx.palette();
+                    this.buffer.get(ix).map_or_else(
+                        || div().into_any_element(),
+                        |line| this.render_line(line, &palette),
+                    )
+                }),
+            )
+            .flex_1()
+            .min_h_0()
+            .py(SPACE_3)
+            .into_any_element()
+        } else {
+            uniform_list(
+                ElementId::Name(self.id.clone()),
+                self.buffer.len(),
+                cx.processor(Self::render_lines),
+            )
+            .track_scroll(&self.scroll)
+            .flex_1()
+            .min_h_0()
+            .py(SPACE_3)
+            .into_any_element()
+        };
         div()
             .id(ElementId::NamedInteger(self.id.clone(), 0))
             .size_full()
@@ -379,7 +432,12 @@ impl Render for LogView {
             .font_family(FONT_MONO)
             .text_size(TEXT_MONO)
             .on_scroll_wheel(cx.listener(|this, _, _, cx| {
-                if this.follow && this.scroll.is_scrolled_to_end() == Some(false) {
+                let at_end = if this.wrap {
+                    this.wrapped.is_scrolled_to_end()
+                } else {
+                    this.scroll.is_scrolled_to_end()
+                };
+                if this.follow && at_end == Some(false) {
                     this.follow = false;
                     cx.notify();
                 }
@@ -395,7 +453,7 @@ impl Render for LogView {
                         .child(NO_LINES),
                 )
             })
-            .child(list)
+            .child(lines)
     }
 }
 

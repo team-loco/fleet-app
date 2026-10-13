@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Screenshot a demo screen: mise run shot -- <screen> [dark|light]"
-#USAGE arg "<screen>" help="fleet, cluster, collapsed, command, changes, gitops, overview, nodes, namespaces, events, resources, kit, kit-overlays, kit-panes, add-cluster or add-cluster-check"
+#USAGE arg "<screen>" help="fleet, cluster, collapsed, command, changes, gitops, overview, nodes, namespaces, events, resources, kit, kit-overlays, kit-panes, add-cluster, add-cluster-check or workload"
 #USAGE arg "[appearance]" default="dark" help="dark or light"
 set -euo pipefail
 

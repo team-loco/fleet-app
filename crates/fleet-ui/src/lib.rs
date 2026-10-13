@@ -1,7 +1,7 @@
 pub mod assets;
 mod gallery;
 pub mod kit;
-mod screens;
+pub mod screens;
 mod shell;
 pub mod theme;
 
