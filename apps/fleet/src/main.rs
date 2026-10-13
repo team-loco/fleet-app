@@ -10,7 +10,7 @@ use fleet_kube::discovery::DiscoverySources;
 use fleet_kube::settings::KubeSettings;
 use fleet_ui::actions::{ToggleClustersPanel, ToggleResourcesPanel};
 use fleet_ui::theme::{Appearance, TRAFFIC_LIGHT_X, TRAFFIC_LIGHT_Y};
-use fleet_ui::{Gallery, Root, Shell, assets};
+use fleet_ui::{Gallery, GalleryPage, Root, Shell, assets};
 use gpui::{
     App, AppContext as _, Bounds, KeyBinding, Size, TitlebarOptions, WindowBounds, WindowOptions,
     point, px, size,
@@ -47,6 +47,7 @@ enum Screen {
     Collapsed,
     Kit,
     KitOverlays,
+    KitPanes,
 }
 
 impl Screen {
@@ -62,6 +63,7 @@ impl Screen {
             ],
             Self::Kit => Vec::new(),
             Self::KitOverlays => Vec::new(),
+            Self::KitPanes => Vec::new(),
         }
     }
 }
@@ -146,8 +148,15 @@ fn launch(
     };
     cx.open_window(options, |window, cx| {
         let view: gpui::AnyView = match screen {
-            Screen::Kit => cx.new(|cx| Gallery::new(false, window, cx)).into(),
-            Screen::KitOverlays => cx.new(|cx| Gallery::new(true, window, cx)).into(),
+            Screen::Kit => cx
+                .new(|cx| Gallery::new(GalleryPage::Primitives, window, cx))
+                .into(),
+            Screen::KitOverlays => cx
+                .new(|cx| Gallery::new(GalleryPage::Overlays, window, cx))
+                .into(),
+            Screen::KitPanes => cx
+                .new(|cx| Gallery::new(GalleryPage::Panes, window, cx))
+                .into(),
             Screen::Fleet => shell_view(updates, commands, screen, window, cx),
             Screen::Cluster => shell_view(updates, commands, screen, window, cx),
             Screen::Collapsed => shell_view(updates, commands, screen, window, cx),

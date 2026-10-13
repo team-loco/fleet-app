@@ -4,8 +4,9 @@
 `div`s; all colours, sizes and radii come from `fleet_ui::theme` (`cx.palette()` and the `theme::*`
 constants). If you need a value the theme lacks, add a named constant there.
 
-See every primitive running: `cargo run -p fleet -- --demo --screen kit` (or `kit-overlays` for
-the open menu, confirm dialog and a toast), `--appearance dark|light`. Screenshots:
+See every primitive running: `cargo run -p fleet -- --demo --screen kit` (`kit-overlays` opens
+the menu, confirm dialog and a toast; `kit-panes` shows charts, split, code, diff, dock and logs),
+`--appearance dark|light`. Screenshots:
 `mise run shot -- kit dark`. The gallery source (`crates/fleet-ui/src/gallery.rs`) is a working
 usage example for everything below.
 
@@ -192,6 +193,94 @@ rows are otherwise Sans 12.5), `.sortable(cmp)` / `.sort_by_key(key)`. Table opt
 element across the full width instead of cells (group headers). `set_columns(columns, cx)` swaps
 columns at runtime (e.g. one per cluster).
 Column widths are design values; define them as `const`s at the top of your screen file.
+
+## Split panes
+
+```rust
+Split::horizontal("workload-split", main_content, inspector)   // or Split::vertical
+    .ratio(0.6)                       // initial share of the first pane
+    .collapsed(self.inspector_hidden) // second pane animates to zero and back
+```
+
+Element; the divider drags (each pane keeps at least `SPLIT_MIN`) and the ratio is remembered per
+id for the session, so recreating the screen restores it. Children should fill their pane
+(`size_full`, own scrolling).
+
+## Dock (Logs / Events / Terminal)
+
+Matches `Workload.dc.html`: a 30px `chrome` bar of tabs (label + mono detail), the active tab
+joins the content, the active tab's tools sit on the right next to a collapse chevron. Clicking
+the active tab or the chevron collapses the dock to its bar with an animation.
+
+```rust
+let dock = cx.new(|_| DockState::new());          // keep in your view
+Dock::new(&self.dock)
+    .tab(DockTab::new("Logs").detail("x2lqp · api").tools(log_tools).content(self.logs.clone()))
+    .tab(DockTab::new("Events").detail("7").content(self.events.clone()))
+    .tab(DockTab::new("Terminal").detail("debug").content(terminal))
+    .height(px)                                    // default DOCK_HEIGHT 250
+dock.update(cx, |d, cx| d.select(0, cx));          // e.g. clicking a pod opens its logs
+```
+
+Place it as the last child of a flex column; it is `flex_none`.
+
+## LogView
+
+Virtualised (`uniform_list`) view over a ring buffer of `LOG_CAPACITY` lines; oldest lines drop.
+Columns: timestamp (toggle), level (coloured; ERROR/FATAL rows get `errbg`), message.
+
+```rust
+let logs = cx.new(|_| LogView::new("pod-logs"));
+logs.update(cx, |l, cx| l.push(LogLine::parse(raw_line), cx));   // strips ANSI, splits RFC3339 timestamp + level
+logs.update(cx, |l, cx| l.extend(lines, cx));
+LogLine::new(Some("21:12:20.231"), Some(Level::Error), "open /etc/checkout/stripe.env: …")
+l.set_follow(bool, cx)       // follow tail; scrolling up turns it off
+l.set_query(text, cx)        // case-insensitive highlight, jumps to first match
+l.set_timestamps(bool, cx)
+l.clear(cx)
+```
+
+`strip_ansi(&str)` is public for other text that comes from a terminal.
+
+## CodeView and DiffView
+
+```rust
+CodeView::new("spec", yaml_text).yaml()     // line numbers, horizontal scroll, Copy button (toast on copy)
+    .without_copy()
+```
+
+YAML highlighting is deliberately minimal: keys `acc`, comments and punctuation `mute`, values `fg`.
+
+```rust
+let files: Vec<DiffFile> = parse_unified(&git_diff_output);   // classifies +/-/context/@@/meta, numbers lines
+DiffView::new("diff", files).sides("live", "a41e07c")
+
+DiffFile::new("Deployment/payments/checkout-api · rendered for prod-us-east", vec![
+    DiffLine::new(LineKind::Context, Some(41), "      - name: api"),
+    DiffLine::new(LineKind::Added, Some(48), "              key: webhook_secret")
+        .note("set by overlays/prod-us-east/patches/stripe.yaml:9 · unchanged 214d"),  // warnbg + ← note
+])
+```
+
+Diffs are always rendered in full (no folding). Gutters: line number (new side for context and
+additions, old side for removals) and a `+` / `−` sign in `addfg` / `delfg` over `addbg` / `delbg`.
+
+## Meters and charts
+
+```rust
+Meter::new(0.61).request(0.74).limit(1.0)           // 6px bar, request marker fg2, limit marker warn; .color(c)
+MiniMeter::new(0.42)                                // 36×4 inline bar for table cells
+StackedBar::new(vec![(Status::Ok, 398.), (Status::Warn, 9.), (Status::Err, 5.)])   // .thin() for 4px
+LineChart::new(100.)                                 // y max
+    .series(Series::new("CPU", palette.acc, cpu).area(palette.accbg))
+    .series(Series::new("Memory", palette.ok, mem))
+    .threshold(74., "CPU requests", palette.warn)    // dashed line + legend entry
+    .y_labels(labels_top_to_bottom)                  // also sets the number of gridlines
+    .x_labels(labels_left_to_right)
+    .height(px)                                      // default CHART_HEIGHT 170
+```
+
+Values outside 0..=1 (or 0..=max) are clamped; NaN reads as 0.
 
 ## Relative time
 

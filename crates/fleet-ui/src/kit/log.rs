@@ -1,0 +1,454 @@
+use std::collections::VecDeque;
+use std::ops::Range;
+
+use gpui::{
+    AnyElement, Context, ElementId, HighlightStyle, InteractiveElement, IntoElement, ParentElement,
+    Render, ScrollStrategy, SharedString, Styled, StyledText, UniformListScrollHandle, Window, div,
+    prelude::FluentBuilder, uniform_list,
+};
+
+use crate::theme::{
+    ActiveTheme, FONT_MONO, LOG_LEVEL, LOG_LINE, LOG_TIMESTAMP, Palette, SPACE_3, SPACE_6,
+    TEXT_MONO, TEXT_UI,
+};
+
+pub const LOG_CAPACITY: usize = 10_000;
+const NO_LINES: &str = "No log lines yet.";
+const ESC: char = '\u{1b}';
+const BEL: char = '\u{7}';
+const CSI_FINAL: std::ops::RangeInclusive<char> = '\u{40}'..='\u{7e}';
+const TIMESTAMP_DATE_DASH: usize = 4;
+const TIMESTAMP_MIN_LEN: usize = 20;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Level {
+    Debug,
+    Info,
+    Warn,
+    Error,
+    Fatal,
+}
+
+impl Level {
+    fn parse(word: &str) -> Option<Self> {
+        match word.trim_matches(|c: char| !c.is_ascii_alphabetic()) {
+            "DEBUG" => Some(Self::Debug),
+            "debug" => Some(Self::Debug),
+            "INFO" => Some(Self::Info),
+            "info" => Some(Self::Info),
+            "WARN" => Some(Self::Warn),
+            "WARNING" => Some(Self::Warn),
+            "warn" => Some(Self::Warn),
+            "ERROR" => Some(Self::Error),
+            "error" => Some(Self::Error),
+            "FATAL" => Some(Self::Fatal),
+            "fatal" => Some(Self::Fatal),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Debug => "DEBUG",
+            Self::Info => "INFO",
+            Self::Warn => "WARN",
+            Self::Error => "ERROR",
+            Self::Fatal => "FATAL",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogLine {
+    pub timestamp: Option<SharedString>,
+    pub level: Option<Level>,
+    pub message: SharedString,
+}
+
+impl LogLine {
+    pub fn new(
+        timestamp: Option<&str>,
+        level: Option<Level>,
+        message: impl Into<SharedString>,
+    ) -> Self {
+        Self {
+            timestamp: timestamp.map(|t| SharedString::from(t.to_owned())),
+            level,
+            message: message.into(),
+        }
+    }
+
+    pub fn parse(raw: &str) -> Self {
+        let clean = strip_ansi(raw);
+        let (timestamp, rest) = split_timestamp(&clean);
+        let first_word = rest.split_whitespace().next().unwrap_or_default();
+        let level = Level::parse(first_word);
+        let message = match level {
+            Some(_) => {
+                let trimmed = rest.trim_start();
+                trimmed
+                    .strip_prefix(first_word)
+                    .unwrap_or(trimmed)
+                    .trim_start()
+            }
+            None => rest,
+        };
+        Self {
+            timestamp: timestamp.map(|t| SharedString::from(t.to_owned())),
+            level,
+            message: SharedString::from(message.to_owned()),
+        }
+    }
+}
+
+fn split_timestamp(line: &str) -> (Option<&str>, &str) {
+    let Some((first, rest)) = line.split_once(' ') else {
+        return (None, line);
+    };
+    let looks_like_rfc3339 = first.len() >= TIMESTAMP_MIN_LEN
+        && first.as_bytes().get(TIMESTAMP_DATE_DASH) == Some(&b'-')
+        && first.contains('T')
+        && first.ends_with('Z');
+    if looks_like_rfc3339 {
+        (Some(first), rest)
+    } else {
+        (None, line)
+    }
+}
+
+pub fn strip_ansi(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != ESC {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('[') => {
+                for c in chars.by_ref() {
+                    if CSI_FINAL.contains(&c) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                while let Some(c) = chars.next() {
+                    if c == BEL {
+                        break;
+                    }
+                    if c == ESC && chars.peek() == Some(&'\\') {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            Some(_) => {}
+            None => {}
+        }
+    }
+    out
+}
+
+#[derive(Debug)]
+pub struct LogBuffer {
+    lines: VecDeque<LogLine>,
+    capacity: usize,
+}
+
+impl Default for LogBuffer {
+    fn default() -> Self {
+        Self::with_capacity(LOG_CAPACITY)
+    }
+}
+
+impl LogBuffer {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            lines: VecDeque::new(),
+            capacity,
+        }
+    }
+
+    pub fn push(&mut self, line: LogLine) {
+        if self.capacity == 0 {
+            return;
+        }
+        if self.lines.len() == self.capacity {
+            self.lines.pop_front();
+        }
+        self.lines.push_back(line);
+    }
+
+    pub fn len(&self) -> usize {
+        self.lines.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.lines.is_empty()
+    }
+
+    pub fn get(&self, ix: usize) -> Option<&LogLine> {
+        self.lines.get(ix)
+    }
+
+    pub fn clear(&mut self) {
+        self.lines.clear();
+    }
+}
+
+pub fn find_matches(text: &str, query: &str) -> Vec<Range<usize>> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let lower_text = text.to_lowercase();
+    let lower_query = query.to_lowercase();
+    if lower_text.len() != text.len() {
+        return text
+            .match_indices(query)
+            .map(|(at, m)| at..at + m.len())
+            .collect();
+    }
+    lower_text
+        .match_indices(&lower_query)
+        .map(|(at, m)| at..at + m.len())
+        .collect()
+}
+
+pub struct LogView {
+    id: SharedString,
+    buffer: LogBuffer,
+    follow: bool,
+    timestamps: bool,
+    query: SharedString,
+    scroll: UniformListScrollHandle,
+}
+
+impl LogView {
+    pub fn new(id: impl Into<SharedString>) -> Self {
+        Self {
+            id: id.into(),
+            buffer: LogBuffer::default(),
+            follow: true,
+            timestamps: true,
+            query: SharedString::default(),
+            scroll: UniformListScrollHandle::new(),
+        }
+    }
+
+    pub fn push(&mut self, line: LogLine, cx: &mut Context<Self>) {
+        self.buffer.push(line);
+        self.after_append(cx);
+    }
+
+    pub fn extend(&mut self, lines: impl IntoIterator<Item = LogLine>, cx: &mut Context<Self>) {
+        for line in lines {
+            self.buffer.push(line);
+        }
+        self.after_append(cx);
+    }
+
+    pub fn clear(&mut self, cx: &mut Context<Self>) {
+        self.buffer.clear();
+        cx.notify();
+    }
+
+    pub fn follow(&self) -> bool {
+        self.follow
+    }
+
+    pub fn set_follow(&mut self, follow: bool, cx: &mut Context<Self>) {
+        self.follow = follow;
+        if follow {
+            self.scroll.scroll_to_bottom();
+        }
+        cx.notify();
+    }
+
+    pub fn set_timestamps(&mut self, show: bool, cx: &mut Context<Self>) {
+        self.timestamps = show;
+        cx.notify();
+    }
+
+    pub fn set_query(&mut self, query: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.query = query.into();
+        if let Some(first) = self.first_match() {
+            self.follow = false;
+            self.scroll.scroll_to_item(first, ScrollStrategy::Center);
+        }
+        cx.notify();
+    }
+
+    fn first_match(&self) -> Option<usize> {
+        if self.query.is_empty() {
+            return None;
+        }
+        (0..self.buffer.len()).find(|&ix| {
+            self.buffer
+                .get(ix)
+                .is_some_and(|line| !find_matches(&line.message, &self.query).is_empty())
+        })
+    }
+
+    fn after_append(&mut self, cx: &mut Context<Self>) {
+        if self.follow {
+            self.scroll.scroll_to_bottom();
+        }
+        cx.notify();
+    }
+
+    fn render_lines(
+        &mut self,
+        range: Range<usize>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let palette = *cx.palette();
+        range
+            .filter_map(|ix| {
+                self.buffer
+                    .get(ix)
+                    .map(|line| self.render_line(line, &palette))
+            })
+            .collect()
+    }
+
+    fn render_line(&self, line: &LogLine, palette: &Palette) -> AnyElement {
+        let (level_color, row_bg) = match line.level {
+            Some(Level::Error) => (palette.err, Some(palette.errbg)),
+            Some(Level::Fatal) => (palette.err, Some(palette.errbg)),
+            Some(Level::Warn) => (palette.warn, None),
+            Some(Level::Debug) => (palette.mute, None),
+            Some(Level::Info) => (palette.acc, None),
+            None => (palette.mute, None),
+        };
+        let highlight = HighlightStyle {
+            background_color: Some(palette.accbg),
+            color: Some(palette.fg),
+            ..HighlightStyle::default()
+        };
+        let matches = find_matches(&line.message, &self.query);
+        let message = StyledText::new(line.message.clone())
+            .with_highlights(matches.into_iter().map(|range| (range, highlight)));
+        div()
+            .flex()
+            .gap(SPACE_6)
+            .h(LOG_LINE)
+            .px(SPACE_6)
+            .whitespace_nowrap()
+            .when_some(row_bg, Styled::bg)
+            .when(self.timestamps, |row| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .min_w(LOG_TIMESTAMP)
+                        .text_color(palette.mute)
+                        .children(line.timestamp.clone()),
+                )
+            })
+            .child(
+                div()
+                    .w(LOG_LEVEL)
+                    .flex_none()
+                    .text_color(level_color)
+                    .children(line.level.map(Level::label)),
+            )
+            .child(div().text_color(palette.fg).child(message))
+            .into_any_element()
+    }
+}
+
+impl Render for LogView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = *cx.palette();
+        let list = uniform_list(
+            ElementId::Name(self.id.clone()),
+            self.buffer.len(),
+            cx.processor(Self::render_lines),
+        )
+        .track_scroll(&self.scroll)
+        .flex_1()
+        .min_h_0()
+        .py(SPACE_3);
+        div()
+            .id(ElementId::NamedInteger(self.id.clone(), 0))
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(palette.editor)
+            .font_family(FONT_MONO)
+            .text_size(TEXT_MONO)
+            .on_scroll_wheel(cx.listener(|this, _, _, cx| {
+                if this.follow && this.scroll.is_scrolled_to_end() == Some(false) {
+                    this.follow = false;
+                    cx.notify();
+                }
+            }))
+            .when(self.buffer.is_empty(), |view| {
+                view.child(
+                    div()
+                        .px(SPACE_6)
+                        .py(SPACE_3)
+                        .font_family(crate::theme::FONT_SANS)
+                        .text_size(TEXT_UI)
+                        .text_color(palette.mute)
+                        .child(NO_LINES),
+                )
+            })
+            .child(list)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strips_colour_cursor_and_title_sequences() {
+        let raw = "\u{1b}[31mERROR\u{1b}[0m boom \u{1b}[2K\u{1b}]0;title\u{7}done \u{1b}]8;;x\u{1b}\\link";
+        assert_eq!(strip_ansi(raw), "ERROR boom done link");
+        assert_eq!(strip_ansi("plain ✕ text"), "plain ✕ text");
+        assert_eq!(strip_ansi("trailing \u{1b}"), "trailing ");
+    }
+
+    #[test]
+    fn buffer_drops_oldest_lines_past_capacity() {
+        let mut buffer = LogBuffer::with_capacity(3);
+        for n in 0..5 {
+            buffer.push(LogLine::new(None, None, n.to_string()));
+        }
+        assert_eq!(buffer.len(), 3);
+        let first = buffer.get(0).map(|line| line.message.to_string());
+        assert_eq!(first.as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn default_buffer_is_bounded_by_the_constant() {
+        let mut buffer = LogBuffer::default();
+        for _ in 0..=LOG_CAPACITY {
+            buffer.push(LogLine::new(None, None, "x"));
+        }
+        assert_eq!(buffer.len(), LOG_CAPACITY);
+    }
+
+    #[test]
+    fn parses_kubectl_timestamps_and_levels() {
+        let line = LogLine::parse(
+            "2026-10-12T21:12:20.231Z \u{1b}[31mERROR\u{1b}[0m open stripe.env: no such file",
+        );
+        assert_eq!(line.timestamp.as_deref(), Some("2026-10-12T21:12:20.231Z"));
+        assert_eq!(line.level, Some(Level::Error));
+        assert_eq!(line.message.as_ref(), "open stripe.env: no such file");
+
+        let bare = LogLine::parse("GET /healthz 200 0.3ms");
+        assert_eq!(bare.timestamp, None);
+        assert_eq!(bare.level, None);
+        assert_eq!(bare.message.as_ref(), "GET /healthz 200 0.3ms");
+    }
+
+    #[test]
+    fn finds_matches_case_insensitively() {
+        assert_eq!(find_matches("Stripe stripe", "STRIPE"), [0..6, 7..13]);
+        assert_eq!(find_matches("anything", "").len(), 0);
+    }
+}

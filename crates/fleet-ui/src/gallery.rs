@@ -6,13 +6,15 @@ use gpui::{
 };
 
 use crate::kit::{
-    ActionMenu, Button, Checkbox, Column, ConfirmDialog, IconButton, Kbd, KeyValue, Link, MenuItem,
-    PageHeader, Rule, SectionHeader, Segmented, Select, StatusGlyph, StatusText, Table, TextField,
-    TextFieldState, Toast, Toggle, confirm, overlay_layer, toast,
+    ActionMenu, Button, Checkbox, CodeView, Column, ConfirmDialog, DiffFile, DiffLine, DiffView,
+    Dock, DockState, DockTab, IconButton, InputEvent, Kbd, KeyValue, Level, LineChart, LineKind,
+    Link, LogLine, LogView, MenuItem, Meter, MiniMeter, PageHeader, Rule, SectionHeader, Segmented,
+    Select, Series, Split, StackedBar, StatusGlyph, StatusText, Table, TextField, TextFieldState,
+    Toast, Toggle, confirm, overlay_layer, parse_unified, toast,
 };
 use crate::theme::{
-    self, ActiveTheme, FONT_MONO, Palette, RULE, SPACE_4, SPACE_6, SPACE_8, STRIP, TEXT_MONO,
-    TEXT_UI,
+    self, ActiveTheme, DOCK_HEIGHT, FONT_MONO, Palette, RULE, SPACE_4, SPACE_6, SPACE_8, STRIP,
+    TEXT_MONO, TEXT_SMALL, TEXT_UI,
 };
 
 const SELECT_WIDTH: Pixels = px(220.);
@@ -27,6 +29,110 @@ const NODE_WIDTH: Pixels = px(178.);
 const CPU_WIDTH: Pixels = px(52.);
 const MEM_WIDTH: Pixels = px(60.);
 const AGE_WIDTH: Pixels = px(34.);
+
+const METER_WIDTH: Pixels = px(240.);
+const SPLIT_HEIGHT: Pixels = px(300.);
+const EVENT_AGE_WIDTH: Pixels = px(48.);
+const EVENT_REASON_WIDTH: Pixels = px(170.);
+const EVENT_COUNT_WIDTH: Pixels = px(34.);
+const CHART_MAX: f32 = 100.;
+const CPU: [f32; 13] = [
+    39., 42., 45., 43., 48., 52., 50., 55., 58., 54., 59., 61., 60.,
+];
+const MEMORY: [f32; 13] = [
+    52., 53., 53., 53., 54., 55., 55., 55., 56., 56., 57., 57., 57.,
+];
+const CPU_REQUESTS: f32 = 74.;
+const LOGS: [(&str, Level, &str); 8] = [
+    (
+        "21:12:20.114",
+        Level::Info,
+        "starting checkout-api v2.14.0 (commit 9f3c1ab)",
+    ),
+    (
+        "21:12:20.119",
+        Level::Info,
+        "config: loading /etc/checkout/app.yaml",
+    ),
+    (
+        "21:12:20.125",
+        Level::Info,
+        "postgres: connecting payments-db.payments.svc:5432",
+    ),
+    ("21:12:20.228", Level::Info, "postgres: ok (pool 20)"),
+    (
+        "21:12:20.230",
+        Level::Warn,
+        "env STRIPE_WEBHOOK_SECRET is empty; falling back to /etc/checkout/stripe.env",
+    ),
+    (
+        "21:12:20.231",
+        Level::Error,
+        "open /etc/checkout/stripe.env: no such file or directory",
+    ),
+    (
+        "21:12:20.231",
+        Level::Fatal,
+        "config invalid: stripe webhook secret not set; exit 1",
+    ),
+    ("21:12:20.240", Level::Debug, "shutdown complete"),
+];
+const SPEC: &str = "apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps-payments # owned by platform
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./apps/payments/overlays/prod-us-east
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: fleet-infra
+  timeout: 5m";
+const PATCH: &str =
+    "diff --git a/apps/payments/base/configmap.yaml b/apps/payments/base/configmap.yaml
+--- a/apps/payments/base/configmap.yaml
++++ b/apps/payments/base/configmap.yaml
+@@ -8,5 +8,3 @@ configMapGenerator:
+   files:
+     - app.yaml
+-    - stripe.env
+-      # legacy: read by checkout-api < 2.14
+ generatorOptions:";
+
+#[derive(Clone)]
+struct Event {
+    age: &'static str,
+    status: Status,
+    reason: &'static str,
+    message: &'static str,
+    count: u32,
+}
+
+const EVENTS: [Event; 3] = [
+    Event {
+        age: "2m",
+        status: Status::Err,
+        reason: "BackOff",
+        message: "Back-off restarting failed container api in pod checkout-api-7f9c6d-x2lqp",
+        count: 14,
+    },
+    Event {
+        age: "3h",
+        status: Status::Err,
+        reason: "ProgressDeadlineExceeded",
+        message: "ReplicaSet \"checkout-api-7f9c6d\" has timed out progressing",
+        count: 1,
+    },
+    Event {
+        age: "3h",
+        status: Status::Ok,
+        reason: "ScalingReplicaSet",
+        message: "Scaled up replica set checkout-api-7f9c6d to 3 from 2",
+        count: 1,
+    },
+];
 
 const STATUSES: [(Status, &str); 6] = [
     (Status::Ok, "Ready"),
@@ -97,7 +203,15 @@ const PODS: [Pod; 4] = [
     },
 ];
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GalleryPage {
+    Primitives,
+    Overlays,
+    Panes,
+}
+
 pub struct Gallery {
+    page: GalleryPage,
     more: Entity<ActionMenu>,
     actions: Entity<ActionMenu>,
     select: Entity<Select>,
@@ -105,7 +219,10 @@ pub struct Gallery {
     empty: Entity<Table<Pod>>,
     path: Entity<TextFieldState>,
     filter: Entity<TextFieldState>,
-    follow: bool,
+    logs: Entity<LogView>,
+    events: Entity<Table<Event>>,
+    dock: Entity<DockState>,
+    split_collapsed: bool,
     notify: bool,
     include: bool,
     severity: usize,
@@ -114,7 +231,7 @@ pub struct Gallery {
 }
 
 impl Gallery {
-    pub fn new(open_overlays: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(page: GalleryPage, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let more = cx.new(|cx| ActionMenu::new("more", cx).items(more_items()));
         let actions = cx.new(|cx| {
             ActionMenu::new("actions", cx)
@@ -148,6 +265,31 @@ impl Gallery {
         });
         let path = cx.new(|cx| TextFieldState::new(window, cx).default_value("apps/payments"));
         let filter = cx.new(|cx| TextFieldState::new(window, cx).placeholder("filter  /regex/"));
+        let logs = cx.new(|cx| {
+            let mut view = LogView::new("logs");
+            let lines = LOGS.map(|(ts, level, msg)| LogLine::new(Some(ts), Some(level), msg));
+            view.extend(lines, cx);
+            view.push(
+                LogLine::parse("\u{1b}[2m── container exited 1 · restart 14 in 5m0s (back-off) ──"),
+                cx,
+            );
+            view
+        });
+        let query = logs.clone();
+        cx.subscribe(&filter, move |_, state, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                let text = state.read(cx).value();
+                query.update(cx, |logs, cx| logs.set_query(text, cx));
+            }
+        })
+        .detach();
+        let events = cx.new(|cx| {
+            Table::new("events", event_columns(), cx)
+                .rows(EVENTS.to_vec())
+                .headerless()
+                .row_height(theme::LOG_LINE)
+        });
+        let dock = cx.new(|_| DockState::new());
         let appearance = cx.observe_window_appearance(window, |_, window, cx| {
             theme::follow_window(window, cx);
             cx.notify();
@@ -155,10 +297,11 @@ impl Gallery {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         theme::follow_window(window, cx);
-        if open_overlays {
+        if page == GalleryPage::Overlays {
             open_samples(&more, window, cx);
         }
         Self {
+            page,
             more,
             actions,
             select,
@@ -166,13 +309,24 @@ impl Gallery {
             empty,
             path,
             filter,
-            follow: true,
+            logs,
+            events,
+            dock,
+            split_collapsed: false,
             notify: true,
             include: true,
             severity: 0,
             focus,
             _appearance: appearance,
         }
+    }
+
+    fn toggle_follow(&mut self, cx: &mut Context<Self>) {
+        self.logs.update(cx, |logs, cx| {
+            let follow = !logs.follow();
+            logs.set_follow(follow, cx);
+        });
+        cx.notify();
     }
 
     fn statuses(palette: &Palette) -> impl IntoElement {
@@ -238,11 +392,8 @@ impl Gallery {
             .child(
                 Button::new("b-follow", "follow")
                     .small()
-                    .selected(self.follow)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.follow = !this.follow;
-                        cx.notify();
-                    })),
+                    .selected(self.logs.read(cx).follow())
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_follow(cx))),
             )
             .child(IconButton::glyph("b-close", "×", "Close"))
             .child(self.actions.clone())
@@ -311,6 +462,154 @@ impl Gallery {
                     "last exit",
                     div().text_color(palette.err).child("1 (Error) · 2m ago"),
                 ),
+        )
+    }
+
+    fn charts(palette: &Palette) -> impl IntoElement {
+        let percent = |labels: [&'static str; 5]| labels.map(SharedString::from).to_vec();
+        div()
+            .flex()
+            .gap(SPACE_8 * 2.)
+            .px(SPACE_8)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(SPACE_6)
+                    .w(METER_WIDTH)
+                    .flex_none()
+                    .text_size(TEXT_SMALL)
+                    .text_color(palette.mute)
+                    .child("CPU 61% · requests 74% · limits 131%")
+                    .child(Meter::new(0.61).request(0.74).limit(1.0))
+                    .child("Pods 398 running · 9 pending · 5 failing")
+                    .child(StackedBar::new(vec![
+                        (Status::Ok, 398.),
+                        (Status::Warn, 9.),
+                        (Status::Err, 5.),
+                    ]))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(SPACE_4)
+                            .font_family(FONT_MONO)
+                            .child(MiniMeter::new(0.42))
+                            .child("42%"),
+                    ),
+            )
+            .child(
+                div().flex_1().child(
+                    LineChart::new(CHART_MAX)
+                        .series(Series::new("CPU", palette.acc, CPU.to_vec()).area(palette.accbg))
+                        .series(Series::new("Memory", palette.ok, MEMORY.to_vec()))
+                        .threshold(CPU_REQUESTS, "CPU requests", palette.warn)
+                        .y_labels(percent(["100%", "75%", "50%", "25%", "0"]))
+                        .x_labels(percent(["−60m", "−45m", "−30m", "−15m", "now"])),
+                ),
+            )
+    }
+
+    fn panes(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut removed = DiffLine::new(
+            LineKind::Removed,
+            Some(23),
+            "        image: ghcr.io/acme/checkout-api:2.13.4",
+        );
+        removed.old = Some(23);
+        let rendered = DiffFile::new(
+            "Deployment/payments/checkout-api · rendered for prod-us-east",
+            vec![
+                DiffLine::new(LineKind::Context, Some(41), "      - name: api"),
+                removed,
+                DiffLine::new(
+                    LineKind::Added,
+                    Some(42),
+                    "        image: ghcr.io/acme/checkout-api:2.14.0",
+                ),
+                DiffLine::new(
+                    LineKind::Added,
+                    Some(48),
+                    "              key: webhook_secret",
+                )
+                .note("set by overlays/prod-us-east/patches/stripe.yaml:9 · unchanged 214d"),
+            ],
+        );
+        let mut files = parse_unified(PATCH);
+        files.push(rendered);
+        let left = div()
+            .id("split-left")
+            .size_full()
+            .overflow_y_scroll()
+            .p(SPACE_8)
+            .child(CodeView::new("spec", SPEC).yaml());
+        let right = div()
+            .id("split-right")
+            .size_full()
+            .overflow_y_scroll()
+            .p(SPACE_8)
+            .child(DiffView::new("diff", files).sides("live", "a41e07c"));
+        div()
+            .flex()
+            .flex_col()
+            .gap(SPACE_4)
+            .child(
+                div().flex().px(SPACE_8).child(
+                    Button::new("split-toggle", "Collapse right pane")
+                        .small()
+                        .selected(self.split_collapsed)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.split_collapsed = !this.split_collapsed;
+                            cx.notify();
+                        })),
+                ),
+            )
+            .child(
+                div()
+                    .h(SPLIT_HEIGHT)
+                    .border_t(RULE)
+                    .border_b(RULE)
+                    .border_color(cx.palette().line)
+                    .child(
+                        Split::horizontal("gallery-split", left, right)
+                            .ratio(0.45)
+                            .collapsed(self.split_collapsed),
+                    ),
+            )
+    }
+
+    fn dock(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let tools = div()
+            .flex()
+            .items_center()
+            .gap(SPACE_4)
+            .child(TextField::search(&self.filter))
+            .child(
+                Button::new("dock-follow", "follow")
+                    .small()
+                    .selected(self.logs.read(cx).follow())
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_follow(cx))),
+            );
+        let terminal = div()
+            .p(SPACE_6)
+            .font_family(FONT_MONO)
+            .text_size(TEXT_MONO)
+            .child("/ # ls /etc/checkout")
+            .child("app.yaml");
+        div().h(DOCK_HEIGHT).flex().flex_col().justify_end().child(
+            Dock::new(&self.dock)
+                .tab(
+                    DockTab::new("Logs")
+                        .detail("x2lqp · api")
+                        .tools(tools)
+                        .content(self.logs.clone()),
+                )
+                .tab(
+                    DockTab::new("Events")
+                        .detail("7")
+                        .content(self.events.clone()),
+                )
+                .tab(DockTab::new("Terminal").detail("debug").content(terminal)),
         )
     }
 
@@ -392,6 +691,28 @@ fn workload_items() -> Vec<MenuItem> {
     ]
 }
 
+fn event_columns() -> Vec<Column<Event>> {
+    vec![
+        Column::colored_text("Age", |e: &Event| e.age.into(), |_, p| p.mute)
+            .mono()
+            .fixed(EVENT_AGE_WIDTH),
+        Column::new("Reason", |e: &Event, _| {
+            StatusText::new(e.status, e.reason).into_any_element()
+        })
+        .mono()
+        .fixed(EVENT_REASON_WIDTH),
+        Column::colored_text("Message", |e: &Event| e.message.into(), |_, p| p.fg2).mono(),
+        Column::colored_text(
+            "Count",
+            |e: &Event| format!("×{}", e.count).into(),
+            |_, p| p.mute,
+        )
+        .mono()
+        .end()
+        .fixed(EVENT_COUNT_WIDTH),
+    ]
+}
+
 fn pod_columns() -> Vec<Column<Pod>> {
     vec![
         Column::text("Name", |pod: &Pod| pod.name.into())
@@ -459,11 +780,55 @@ fn section(label: &'static str, count: Option<&'static str>, body: impl IntoElem
         .into_any_element()
 }
 
+impl Gallery {
+    fn primitive_sections(&self, palette: &Palette, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        vec![
+            self.header().into_any_element(),
+            section("Status", Some("shape and colour"), Self::statuses(palette)),
+            section("Buttons", None, self.buttons(cx)),
+            section("Controls", None, self.controls(cx)),
+            section("Key / value", None, Self::inspector(palette)),
+            section(
+                "Pods",
+                Some("4 · click a header to sort"),
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(Rule::horizontal())
+                    .child(self.pods.clone()),
+            ),
+            section("Empty table", None, self.empty.clone()),
+            section("Feedback", None, Self::feedback(cx)),
+        ]
+    }
+
+    fn pane_sections(&self, palette: &Palette, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        vec![
+            section("Charts", None, Self::charts(palette)),
+            section(
+                "Split · code · diff",
+                Some("drag the divider"),
+                self.panes(cx),
+            ),
+            section(
+                "Dock",
+                Some("click the active tab to collapse"),
+                self.dock(cx),
+            ),
+        ]
+    }
+}
+
 impl Render for Gallery {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
         let note: SharedString =
             "Every primitive in fleet_ui::kit, drawn from theme tokens.".into();
+        let sections = match self.page {
+            GalleryPage::Panes => self.pane_sections(&palette, cx),
+            GalleryPage::Primitives => self.primitive_sections(&palette, cx),
+            GalleryPage::Overlays => self.primitive_sections(&palette, cx),
+        };
         div()
             .id("gallery")
             .track_focus(&self.focus)
@@ -488,26 +853,7 @@ impl Render for Gallery {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .child(self.header())
-                    .child(section(
-                        "Status",
-                        Some("shape and colour"),
-                        Self::statuses(&palette),
-                    ))
-                    .child(section("Buttons", None, self.buttons(cx)))
-                    .child(section("Controls", None, self.controls(cx)))
-                    .child(section("Key / value", None, Self::inspector(&palette)))
-                    .child(section(
-                        "Pods",
-                        Some("4 · click a header to sort"),
-                        div()
-                            .flex()
-                            .flex_col()
-                            .child(Rule::horizontal())
-                            .child(self.pods.clone()),
-                    ))
-                    .child(section("Empty table", None, self.empty.clone()))
-                    .child(section("Feedback", None, Self::feedback(cx)))
+                    .children(sections)
                     .child(
                         div()
                             .px(SPACE_8)
