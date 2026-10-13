@@ -28,6 +28,7 @@ const WINDOW_WIDTH: f32 = 1440.;
 const WINDOW_HEIGHT: f32 = 900.;
 const MIN_WIDTH: f32 = 720.;
 const MIN_HEIGHT: f32 = 480.;
+const LOG_SNAPSHOTS_VAR: &str = "FLEET_LOG_SNAPSHOTS";
 const SAMPLE_CLUSTER: &str = "prod-us-east";
 const SAMPLE_QUERY: &str = "checkout";
 const SAMPLE_RELEASE_CLUSTER: &str = "staging";
@@ -245,6 +246,11 @@ fn main() -> anyhow::Result<()> {
         Box::new(LiveBackend::new(KubeSettings::default(), sources, store))
     };
     backend.start(update_tx, command_rx);
+    let update_rx = if std::env::var_os(LOG_SNAPSHOTS_VAR).is_some() {
+        log_snapshots(update_rx)
+    } else {
+        update_rx
+    };
 
     let forced = args.appearance.map(Appearance::from);
     let screen = args.screen;
@@ -263,6 +269,44 @@ fn main() -> anyhow::Result<()> {
             }
         });
     failure.take().map_or(Ok(()), Err)
+}
+
+fn log_snapshots(
+    updates: async_channel::Receiver<fleet_core::Update>,
+) -> async_channel::Receiver<fleet_core::Update> {
+    let (forward_tx, forward_rx) = async_channel::unbounded();
+    std::thread::spawn(move || {
+        while let Ok(update) = updates.recv_blocking() {
+            if let fleet_core::Update::Snapshot(snapshot) = &update {
+                let connected = snapshot
+                    .clusters
+                    .iter()
+                    .filter(|c| c.is_connected())
+                    .count();
+                let problems = &snapshot.home.problems;
+                tracing::info!(
+                    clusters = snapshot.clusters.len(),
+                    connected,
+                    problems = problems.len(),
+                    "snapshot"
+                );
+                for problem in problems {
+                    let target = &problem.target;
+                    tracing::info!(
+                        cluster = %target.cluster.as_str(),
+                        kind = %target.kind,
+                        namespace = target.namespace.as_deref().unwrap_or_default(),
+                        name = %target.name,
+                        "problem"
+                    );
+                }
+            }
+            if forward_tx.send_blocking(update).is_err() {
+                break;
+            }
+        }
+    });
+    forward_rx
 }
 
 fn cluster_store(

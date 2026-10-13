@@ -63,6 +63,15 @@ Upstream charts, Git branch, container tags, and metrics-server's release URL
 follow their published defaults; an upstream change can alter the fixtures.
 The verification script catches changes that break the expected states.
 
+`mise run e2e:test` is the one-command proof. It runs `e2e:up` (reusing existing
+clusters), `e2e/verify`, then every `FLEET_E2E` test with and without
+`--features fleet/loco`, against a temporary kubeconfig that holds only
+`kind-fleet-a` and `kind-fleet-b`. On macOS it also launches the real `fleet`
+binary with a seeded data directory and waits for both clusters and the
+scenario problems to appear in a live snapshot (the app logs these when
+`FLEET_LOG_SNAPSHOTS` is set). `--skip-up` requires existing clusters;
+`--no-teardown` keeps them (the default, except when `CI` is set).
+
 To remove both clusters when desktop testing is finished:
 
 ```sh

@@ -1721,6 +1721,8 @@ dependencies = [
  "fleet-ui",
  "gpui-pre",
  "gpui-pre-platform",
+ "serde_json",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
 ]
