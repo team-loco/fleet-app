@@ -22,15 +22,18 @@ pub use code::CodeView;
 pub use diff::{DiffFile, DiffLine, DiffView, LineKind, parse_unified};
 pub use dock::{Dock, DockState, DockTab};
 pub use header::PageHeader;
-pub use input::{InputEvent, TextField, TextFieldState};
+pub use input::{
+    InputEvent, TextField, TextFieldDown, TextFieldEscape, TextFieldState, TextFieldUp,
+};
 pub use log::{LOG_CAPACITY, Level, LogLine, LogView, strip_ansi};
 pub use menu::{ActionMenu, MenuItem};
 pub use overlay::{ConfirmDialog, Overlays, Toast, confirm, layer as overlay_layer, toast};
+pub(crate) use popover::{Step, shadow, step};
 pub use select::{Select, SelectEvent};
 pub use split::Split;
 pub use status::{StatusGlyph, StatusText};
 pub use table::{Align, Column, SortDirection, Table, TableEvent, Width};
-pub use text::{Kbd, KeyValue, Link, Rule, SectionHeader, SectionLabel};
+pub use text::{Highlighted, Kbd, KeyValue, Link, Rule, SectionHeader, SectionLabel};
 pub use tooltip::Tooltip;
 
 pub(crate) fn init(cx: &mut gpui::App) {

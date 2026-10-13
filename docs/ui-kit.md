@@ -42,6 +42,7 @@ SectionHeader::new("Problems").annotation(badges)  // any element right after th
 SectionLabel::new("Container")            // uppercase 11px mute label alone
 Rule::horizontal()  /  Rule::vertical()   // 1px `line`
 Link::new("rev", "a41e07c").mono().on_click(|_, window, cx| ..)
+Highlighted::new("checkout-api", vec![0..8])  // byte ranges drawn in `acc` (fuzzy match hits)
 Kbd::new("⌘K")
 KeyValue::new()                           // inspector / spec grid, label column 72px muted
     .row("image", "ghcr.io/acme/checkout-api:2.14.0")
@@ -98,7 +99,12 @@ cx.subscribe(&filter, |this, state, event: &InputEvent, cx| {
 
 TextField::new(&self.filter).prefix("path:").width(px)    // 24px, mono 12
 TextField::search(&self.filter)                            // 20px x 180px, mono 11.5 (dock filters)
+TextField::bare(&self.query, theme::TEXT_PALETTE)          // no box, mono at the given size (palette)
 ```
+
+The field's own key bindings win over a parent's. To steer a list from the field, catch its actions
+in the capture phase on the parent: `.capture_action(cx.listener(|this, _: &TextFieldUp, _, cx| ..))`
+(also `TextFieldDown`); `TextFieldEscape` and `InputEvent::PressEnter` bubble normally.
 
 ### Select
 

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use crate::{ClusterId, Counts, Page, ResourceRef, Status};
+use crate::{ClusterId, Counts, ResourceRef, Status};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClusterMetrics {
@@ -101,26 +101,6 @@ pub fn group_problems(problems: &[Problem], severity: Severity) -> Vec<ProblemGr
         }
     }
     groups
-}
-
-pub fn page_for_kind(kind: &str) -> Page {
-    match kind {
-        "Node" => Page::Nodes,
-        "Pod" => Page::Pods,
-        "Deployment" => Page::Deployments,
-        "StatefulSet" => Page::StatefulSets,
-        "DaemonSet" => Page::DaemonSets,
-        "Job" => Page::Jobs,
-        "CronJob" => Page::CronJobs,
-        "Kustomization" => Page::Kustomizations,
-        "HelmRelease" => Page::HelmReleases,
-        "Service" => Page::Services,
-        "Ingress" => Page::Ingresses,
-        "ConfigMap" => Page::ConfigMaps,
-        "Secret" => Page::Secrets,
-        "PersistentVolumeClaim" => Page::Pvcs,
-        _ => Page::ClusterOverview,
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -293,13 +273,5 @@ mod tests {
         );
         assert_eq!(commit.outcome(&ClusterId::new("dev")), Outcome::NotTargeted);
         assert_eq!(Outcome::NotTargeted.status(), None);
-    }
-
-    #[test]
-    fn kinds_open_their_list_page() {
-        assert_eq!(page_for_kind("Deployment"), Page::Deployments);
-        assert_eq!(page_for_kind("Kustomization"), Page::Kustomizations);
-        assert_eq!(page_for_kind("Cluster"), Page::ClusterOverview);
-        assert_eq!(page_for_kind("HPA"), Page::ClusterOverview);
     }
 }

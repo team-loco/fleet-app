@@ -2,7 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::thread;
 
-use fleet_core::{Backend, ClusterId, Command, Page, Receiver, Sender, Snapshot, Update};
+use fleet_core::resource::page_for_kind;
+use fleet_core::{
+    Backend, ClusterId, Command, FleetHome, Page, Receiver, ResourceRef, Sender, Snapshot, Update,
+};
 use tokio::time::MissedTickBehavior;
 
 use crate::discovery::{
@@ -166,7 +169,17 @@ impl Live {
             }
             Command::ToggleClustersPanel => {}
             Command::ToggleResourcesPanel => {}
+            Command::OpenResource(resource) => self.open(resource),
+            Command::FollowLogs(resource) => self.open(resource),
+            Command::Compare(_) => {}
+            Command::PortForward { .. } => {}
         }
+    }
+
+    fn open(&mut self, resource: &ResourceRef) {
+        self.selected = Some(resource.cluster.clone());
+        self.page = page_for_kind(&resource.kind);
+        self.resubscribe_page();
     }
 
     fn snapshot(&self) -> Snapshot {
@@ -179,6 +192,8 @@ impl Live {
         Snapshot {
             clusters,
             fleet_nav: BTreeMap::new(),
+            home: FleetHome::default(),
+            resources: Vec::new(),
         }
     }
 }
