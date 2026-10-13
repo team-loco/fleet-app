@@ -76,6 +76,11 @@ impl Select {
         self.options.get(self.selected)
     }
 
+    pub fn set_selected(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.selected = index.min(self.options.len().saturating_sub(1));
+        cx.notify();
+    }
+
     pub fn set_options(&mut self, options: Vec<SharedString>, cx: &mut Context<Self>) {
         self.options = options;
         self.selected = self.selected.min(self.options.len().saturating_sub(1));

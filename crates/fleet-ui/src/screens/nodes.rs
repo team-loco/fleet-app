@@ -1,0 +1,457 @@
+use fleet_core::nodes::{Node, NodeSummary, Usage};
+use fleet_core::overview::{number, percent};
+use fleet_core::time::age;
+use fleet_core::{ClusterDetail, ClusterId, ClusterSummary, Command, ResourceRef, Status};
+use gpui::{
+    AnyElement, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
+    Render, SharedString, Styled, WeakEntity, Window, div, px,
+};
+
+use super::{NODE_KIND, ScreenEvent};
+use crate::kit::{
+    ActionMenu, Button, Column, ConfirmDialog, IconButton, Inspector, KeyValue, MenuItem, Meter,
+    MiniMeter, SectionHeader, SectionLabel, StatusGlyph, StatusText, Table, TableEvent, confirm,
+};
+use crate::theme::{
+    ActiveTheme, FONT_MONO, Palette, SPACE_2, SPACE_3, SPACE_4, SPACE_5, TEXT_MONO, TEXT_SMALL,
+};
+
+const NONE: &str = "none";
+const VERSION_SEPARATOR: char = '-';
+const NAME_WEIGHT: f32 = 1.4;
+const NAME_MIN: Pixels = px(150.);
+const STATUS_WIDTH: Pixels = px(150.);
+const INSTANCE_WIDTH: Pixels = px(96.);
+const ZONE_WIDTH: Pixels = px(80.);
+const USAGE_WIDTH: Pixels = px(84.);
+const PODS_WIDTH: Pixels = px(60.);
+const VERSION_WIDTH: Pixels = px(64.);
+const AGE_WIDTH: Pixels = px(40.);
+const INSPECTOR_LABEL: Pixels = px(84.);
+const CONDITION_LABEL: Pixels = px(112.);
+
+pub struct NodesScreen {
+    cluster: Option<ClusterId>,
+    summary: NodeSummary,
+    nodes: Vec<Node>,
+    selected: Option<String>,
+    table: Entity<Table<Node>>,
+    menu: Entity<ActionMenu>,
+}
+
+impl EventEmitter<ScreenEvent> for NodesScreen {}
+
+impl NodesScreen {
+    pub fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
+        let table = cx.new(|cx| {
+            Table::new("nodes", columns(), cx)
+                .row_key(|n: &Node| n.name.clone().into())
+                .row_status(|n: &Node| (n.status != Status::Ok).then_some(n.status))
+                .empty("No nodes.")
+        });
+        cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
+            let TableEvent::Selected(ix) = event else {
+                return;
+            };
+            let name = table.read(cx).row(*ix).map(|n| n.name.clone());
+            this.select(name, cx);
+        })
+        .detach();
+        let menu = cx.new(|cx| ActionMenu::new("node-actions", cx));
+        Self {
+            cluster: None,
+            summary: NodeSummary::default(),
+            nodes: Vec::new(),
+            selected: None,
+            table,
+            menu,
+        }
+    }
+
+    pub fn set(
+        &mut self,
+        cluster: &ClusterSummary,
+        detail: &ClusterDetail,
+        cx: &mut Context<Self>,
+    ) {
+        if self.cluster.as_ref() != Some(&cluster.id) {
+            self.selected = None;
+        }
+        self.cluster = Some(cluster.id.clone());
+        if self.nodes == detail.nodes {
+            return;
+        }
+        self.nodes.clone_from(&detail.nodes);
+        self.summary = detail.node_summary();
+        if self
+            .selected
+            .as_ref()
+            .is_some_and(|name| !self.nodes.iter().any(|n| &n.name == name))
+        {
+            self.selected = None;
+        }
+        let rows = self.nodes.clone();
+        self.table.update(cx, |table, cx| table.set_rows(rows, cx));
+        self.select_in_table(cx);
+        self.refresh_menu(cx);
+        cx.notify();
+    }
+
+    pub fn reveal(&mut self, name: String, cx: &mut Context<Self>) {
+        self.selected = Some(name);
+        self.select_in_table(cx);
+        self.refresh_menu(cx);
+        cx.notify();
+    }
+
+    fn select_in_table(&mut self, cx: &mut Context<Self>) {
+        let Some(name) = self.selected.as_ref() else {
+            return;
+        };
+        let position = self.nodes.iter().position(|n| &n.name == name);
+        if position.is_some() {
+            self.table
+                .update(cx, |table, cx| table.select(position, cx));
+        }
+    }
+
+    pub fn header_note(&self) -> (Status, String) {
+        let summary = &self.summary;
+        let status = if summary.cordoned + summary.not_ready > 0 {
+            Status::Warn
+        } else {
+            Status::Ok
+        };
+        (
+            status,
+            format!("{} / {} ready", summary.ready, summary.total),
+        )
+    }
+
+    fn select(&mut self, name: Option<String>, cx: &mut Context<Self>) {
+        self.selected = name;
+        self.refresh_menu(cx);
+        cx.notify();
+    }
+
+    fn close(&mut self, cx: &mut Context<Self>) {
+        self.table.update(cx, |table, cx| table.select(None, cx));
+        self.select(None, cx);
+    }
+
+    fn selected_node(&self) -> Option<&Node> {
+        let name = self.selected.as_ref()?;
+        self.nodes.iter().find(|n| &n.name == name)
+    }
+
+    fn target(&self, node: &Node) -> Option<ResourceRef> {
+        let cluster = self.cluster.clone()?;
+        Some(ResourceRef {
+            cluster,
+            kind: NODE_KIND.into(),
+            namespace: None,
+            name: node.name.clone(),
+        })
+    }
+
+    fn refresh_menu(&mut self, cx: &mut Context<Self>) {
+        let target = self.selected_node().and_then(|n| self.target(n));
+        let items = target
+            .map(|target| drain_items(target, cx.weak_entity()))
+            .unwrap_or_default();
+        self.menu.update(cx, |menu, cx| menu.set_items(items, cx));
+    }
+
+    fn inspector(&self, node: &Node, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let target = self.target(node);
+        let primary = target.map(|target| {
+            let (label, command) = if node.schedulable {
+                ("Cordon", Command::Cordon(target))
+            } else {
+                ("Uncordon", Command::Uncordon(target))
+            };
+            Button::new("node-primary", label)
+                .primary()
+                .disabled(node.status == Status::Progress)
+                .on_click(cx.listener(move |_, _, _, cx| {
+                    cx.emit(ScreenEvent::Command(command.clone()));
+                }))
+        });
+        let close = IconButton::glyph("close-node", "×", "Close")
+            .on_click(cx.listener(|this, _, _, cx| this.close(cx)));
+        let facts = KeyValue::new()
+            .label_width(INSPECTOR_LABEL)
+            .row("instance", node.instance_type.clone())
+            .row("zone", node.zone.clone())
+            .row("internal IP", node.internal_ip.clone())
+            .row("kubelet", node.version.clone())
+            .row("OS image", node.os_image.clone())
+            .row("runtime", node.runtime.clone())
+            .row("age", age(node.age));
+        let capacity = div()
+            .flex()
+            .flex_col()
+            .gap(SPACE_5)
+            .child(usage_row("CPU", node.cpu, "cores", palette))
+            .child(usage_row("Memory", node.memory, "GiB", palette))
+            .child(usage_row(
+                "Pods",
+                Usage {
+                    used: count(node.pods),
+                    allocatable: count(node.pod_capacity),
+                },
+                "",
+                palette,
+            ));
+        let conditions = node.conditions.iter().map(|c| {
+            let status = if c.healthy { Status::Ok } else { Status::Err };
+            div()
+                .flex()
+                .items_center()
+                .gap(SPACE_4)
+                .child(StatusGlyph::new(status))
+                .child(
+                    div()
+                        .w(CONDITION_LABEL)
+                        .flex_none()
+                        .truncate()
+                        .child(c.kind.clone()),
+                )
+                .child(
+                    div()
+                        .font_family(FONT_MONO)
+                        .text_size(TEXT_SMALL)
+                        .text_color(palette.fg2)
+                        .flex_none()
+                        .child(c.value.clone()),
+                )
+                .child(
+                    div()
+                        .truncate()
+                        .text_color(palette.mute)
+                        .child(c.message.clone()),
+                )
+        });
+        Inspector::new("node-inspector", node.name.clone())
+            .mono()
+            .status(node.status, node.state.clone())
+            .actions(
+                div()
+                    .flex()
+                    .gap(SPACE_3)
+                    .children(primary)
+                    .child(self.menu.clone())
+                    .child(close),
+            )
+            .section(None, facts.into_any_element())
+            .section(Some("Capacity"), capacity.into_any_element())
+            .section(
+                Some("Conditions"),
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(SPACE_3)
+                    .children(conditions)
+                    .into_any_element(),
+            )
+            .section(Some("Taints"), label_list(&node.taints, palette))
+            .section(Some("Labels"), label_list(&node.labels, palette))
+            .into_any_element()
+    }
+}
+
+impl Render for NodesScreen {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = *cx.palette();
+        let summary = &self.summary;
+        let count = format!(
+            "{} · {} ready · {} cordoned · {}",
+            summary.total,
+            summary.ready,
+            summary.cordoned,
+            summary.instance_label()
+        );
+        let inspector = self
+            .selected_node()
+            .cloned()
+            .map(|node| self.inspector(&node, &palette, cx));
+        div()
+            .size_full()
+            .flex()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(SectionHeader::new("Nodes").count(count))
+                    .child(div().flex_1().min_h_0().child(self.table.clone())),
+            )
+            .children(inspector)
+    }
+}
+
+fn drain_items(target: ResourceRef, screen: WeakEntity<NodesScreen>) -> Vec<MenuItem> {
+    let detail = format!("{} · {}", target.cluster, target.name);
+    vec![
+        MenuItem::new("Drain…", move |window, cx| {
+            let screen = screen.clone();
+            let target = target.clone();
+            let dialog = ConfirmDialog::new(
+                "Drain node",
+                "The node is cordoned and every pod except DaemonSet pods is evicted. Pods without a controller are not recreated.",
+                "Drain node",
+                move |_, cx| {
+                    let command = Command::Drain(target.clone());
+                    let _ = screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+                },
+            )
+            .detail(detail.clone());
+            confirm(dialog, window, cx);
+        })
+        .destructive()
+        .description("Cordon, then evict every pod except DaemonSet pods."),
+    ]
+}
+
+fn label_list(items: &[String], palette: &Palette) -> AnyElement {
+    let lines: Vec<AnyElement> = if items.is_empty() {
+        vec![
+            div()
+                .text_color(palette.mute)
+                .child(NONE)
+                .into_any_element(),
+        ]
+    } else {
+        items
+            .iter()
+            .map(|item| div().truncate().child(item.clone()).into_any_element())
+            .collect()
+    };
+    div()
+        .flex()
+        .flex_col()
+        .gap(SPACE_2)
+        .font_family(FONT_MONO)
+        .text_size(TEXT_SMALL)
+        .text_color(palette.fg2)
+        .children(lines)
+        .into_any_element()
+}
+
+fn count(value: u32) -> f32 {
+    f32::from(u16::try_from(value).unwrap_or(u16::MAX))
+}
+
+fn short_version(version: &str) -> SharedString {
+    let short = version.split(VERSION_SEPARATOR).next().unwrap_or(version);
+    short.to_owned().into()
+}
+
+fn usage_row(label: &'static str, usage: Usage, unit: &str, palette: &Palette) -> impl IntoElement {
+    let amount = format!(
+        "{} / {} {unit}",
+        number(usage.used),
+        number(usage.allocatable)
+    );
+    div()
+        .flex()
+        .flex_col()
+        .gap(SPACE_3)
+        .child(
+            div()
+                .flex()
+                .child(SectionLabel::new(label))
+                .child(div().flex_1())
+                .child(
+                    div()
+                        .font_family(FONT_MONO)
+                        .text_size(TEXT_MONO)
+                        .text_color(palette.mute)
+                        .child(format!("{amount} · {}", percent(usage.fraction()))),
+                ),
+        )
+        .child(Meter::new(usage.fraction()))
+}
+
+fn usage_cell(usage: Usage) -> AnyElement {
+    div()
+        .flex()
+        .items_center()
+        .gap(SPACE_4)
+        .child(MiniMeter::new(usage.fraction()))
+        .child(percent(usage.fraction()))
+        .into_any_element()
+}
+
+fn columns() -> Vec<Column<Node>> {
+    vec![
+        Column::new("Name", |n: &Node, _| {
+            div()
+                .flex()
+                .items_center()
+                .gap(SPACE_4)
+                .min_w_0()
+                .child(StatusGlyph::new(n.status))
+                .child(div().truncate().child(n.name.clone()))
+                .into_any_element()
+        })
+        .mono()
+        .flex(NAME_WEIGHT, NAME_MIN)
+        .sort_by_key(|n: &Node| n.name.clone()),
+        Column::new("Status", |n: &Node, _| {
+            StatusText::new(n.status, n.state.clone()).into_any_element()
+        })
+        .fixed(STATUS_WIDTH)
+        .sort_by_key(|n: &Node| std::cmp::Reverse(n.status)),
+        Column::colored_text(
+            "Instance",
+            |n: &Node| n.instance_type.clone().into(),
+            |_, p| p.fg2,
+        )
+        .mono()
+        .fixed(INSTANCE_WIDTH)
+        .sort_by_key(|n: &Node| n.instance_type.clone()),
+        Column::colored_text("Zone", |n: &Node| n.zone.clone().into(), |_, p| p.fg2)
+            .mono()
+            .fixed(ZONE_WIDTH)
+            .sort_by_key(|n: &Node| n.zone.clone()),
+        Column::new("CPU", |n: &Node, _| usage_cell(n.cpu))
+            .mono()
+            .fixed(USAGE_WIDTH)
+            .sortable(|a: &Node, b: &Node| a.cpu.fraction().total_cmp(&b.cpu.fraction())),
+        Column::new("Memory", |n: &Node, _| usage_cell(n.memory))
+            .mono()
+            .fixed(USAGE_WIDTH)
+            .sortable(|a: &Node, b: &Node| a.memory.fraction().total_cmp(&b.memory.fraction())),
+        Column::text("Pods", |n: &Node| {
+            format!("{}/{}", n.pods, n.pod_capacity).into()
+        })
+        .mono()
+        .end()
+        .fixed(PODS_WIDTH)
+        .sort_by_key(|n: &Node| n.pods),
+        Column::colored_text(
+            "Version",
+            |n: &Node| short_version(&n.version),
+            |_, p| p.fg2,
+        )
+        .mono()
+        .fixed(VERSION_WIDTH),
+        Column::colored_text("Age", |n: &Node| age(n.age).into(), |_, p| p.mute)
+            .mono()
+            .fixed(AGE_WIDTH)
+            .sort_by_key(|n: &Node| n.age),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_drops_the_build_suffix() {
+        assert_eq!(short_version("v1.31.2-eks-7f9249a"), "v1.31.2");
+        assert_eq!(short_version("v1.29.8"), "v1.29.8");
+    }
+}

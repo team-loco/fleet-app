@@ -5,6 +5,7 @@ mod diff;
 mod dock;
 mod header;
 mod input;
+mod inspector;
 mod log;
 mod menu;
 mod overlay;
@@ -25,6 +26,7 @@ pub use header::PageHeader;
 pub use input::{
     InputEvent, TextField, TextFieldDown, TextFieldEscape, TextFieldState, TextFieldUp,
 };
+pub use inspector::Inspector;
 pub use log::{LOG_CAPACITY, Level, LogLine, LogView, strip_ansi};
 pub use menu::{ActionMenu, MenuItem};
 pub use overlay::{ConfirmDialog, Overlays, Toast, confirm, layer as overlay_layer, toast};

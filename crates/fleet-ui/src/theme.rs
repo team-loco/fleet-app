@@ -17,6 +17,7 @@ pub const TEXT_CONTROL: Pixels = px(12.);
 pub const TEXT_AXIS: Pixels = px(10.5);
 pub const TEXT_HEADING: Pixels = px(16.);
 pub const TEXT_SUBHEADING: Pixels = px(15.);
+pub const TEXT_FIGURE: Pixels = px(26.);
 pub const LINE_PROSE: f32 = 1.5;
 
 pub const RADIUS: Pixels = px(3.);
@@ -87,6 +88,7 @@ pub const TOGGLE_KNOB: Pixels = px(12.);
 pub const CHECKBOX: Pixels = px(14.);
 
 pub const KV_LABEL: Pixels = px(72.);
+pub const INSPECTOR: Pixels = px(360.);
 pub const DOCK_HEIGHT: Pixels = px(250.);
 pub const DOCK_BAR: Pixels = px(30.);
 pub const SPLITTER: Pixels = px(5.);

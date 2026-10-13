@@ -1,7 +1,7 @@
-use fleet_core::Page;
+use fleet_core::{Page, Status};
 use gpui::{
-    AnyElement, Context, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
-    SharedString, StatefulInteractiveElement, Styled, div,
+    AnyElement, App, Context, FontWeight, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, SharedString, StatefulInteractiveElement, Styled, div,
 };
 
 use super::Shell;
@@ -32,7 +32,7 @@ impl Shell {
             .min_w_0()
             .h_full()
             .bg(palette.editor)
-            .child(self.page_header(&palette))
+            .child(self.page_header(&palette, cx))
             .child(
                 div()
                     .id("page-content")
@@ -44,13 +44,18 @@ impl Shell {
             .into_any_element()
     }
 
-    fn page_header(&self, palette: &Palette) -> impl IntoElement {
-        let (status, status_color) = match self.selected_cluster() {
-            Some(cluster) => {
+    fn page_header(&self, palette: &Palette, cx: &App) -> impl IntoElement {
+        let note = self.pages.header_note(self.state.page, cx);
+        let (status, status_color) = match (self.selected_cluster(), note) {
+            (Some(_), Some((Status::Ok, text))) => (text, palette.mute),
+            (Some(_), Some((status, text))) => {
+                (format!("{} {text}", status.glyph()), palette.status(status))
+            }
+            (Some(cluster), None) => {
                 let text = format!("{} {}", cluster.status.glyph(), cluster.state);
                 (text, palette.status(cluster.status))
             }
-            None => (LIVE.to_owned(), palette.mute),
+            (None, _) => (LIVE.to_owned(), palette.mute),
         };
         let more = self.selected_cluster().map(|_| more_button(palette));
         div()
@@ -84,7 +89,14 @@ impl Shell {
         match self.state.page {
             Page::Overview => self.fleet.clone().into_any_element(),
             Page::Problems => self.fleet.clone().into_any_element(),
-            _ => self.placeholder(palette).into_any_element(),
+            page => {
+                let has_detail = self
+                    .selected_cluster()
+                    .is_some_and(|c| self.state.snapshot.detail(&c.id).is_some());
+                self.pages
+                    .render(page, has_detail)
+                    .unwrap_or_else(|| self.placeholder(palette).into_any_element())
+            }
         }
     }
 

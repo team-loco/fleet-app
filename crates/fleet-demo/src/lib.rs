@@ -1,8 +1,12 @@
 mod changes;
+mod detail;
 mod home;
+mod lists;
 mod resources;
+mod simulate;
 
 use std::collections::BTreeMap;
+use std::sync::mpsc;
 use std::thread;
 #[cfg(feature = "loco")]
 use std::time::Duration;
@@ -12,6 +16,7 @@ use fleet_core::{
     Update,
 };
 
+const PROD_US_EAST: &str = "prod-us-east";
 #[cfg(feature = "loco")]
 const AGENT_SYNCED_SECS: u64 = 4;
 
@@ -28,12 +33,71 @@ impl Backend for DemoBackend {
     }
 }
 
+enum Input {
+    Command(Command),
+    Settle(simulate::Settle),
+}
+
 fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
-    if updates.send_blocking(Update::Snapshot(snapshot())).is_err() {
+    let mut state = snapshot();
+    if updates
+        .send_blocking(Update::Snapshot(state.clone()))
+        .is_err()
+    {
         return;
     }
-    while let Ok(command) = commands.recv_blocking() {
-        tracing::debug!(?command, "demo backend received command");
+    let (input_tx, input_rx) = mpsc::channel();
+    let forward = input_tx.clone();
+    let commands = commands.clone();
+    let forwarder = thread::Builder::new()
+        .name("fleet-demo-commands".into())
+        .spawn(move || {
+            while let Ok(command) = commands.recv_blocking() {
+                if forward.send(Input::Command(command)).is_err() {
+                    break;
+                }
+            }
+        });
+    if let Err(error) = forwarder {
+        tracing::error!(%error, "demo command forwarder failed to start");
+        return;
+    }
+    while let Ok(input) = input_rx.recv() {
+        let changed = match input {
+            Input::Command(command) => {
+                tracing::debug!(?command, "demo backend received command");
+                let pending = simulate::apply(&mut state, &command);
+                let changed = pending.is_some();
+                if let Some(pending) = pending {
+                    schedule(&input_tx, pending);
+                }
+                changed
+            }
+            Input::Settle(pending) => {
+                simulate::settle(&mut state, &pending);
+                true
+            }
+        };
+        if changed
+            && updates
+                .send_blocking(Update::Snapshot(state.clone()))
+                .is_err()
+        {
+            return;
+        }
+    }
+}
+
+fn schedule(input: &mpsc::Sender<Input>, pending: simulate::Settle) {
+    let input = input.clone();
+    let timer = thread::Builder::new()
+        .name("fleet-demo-settle".into())
+        .spawn(move || {
+            thread::sleep(simulate::SETTLE);
+            let _ = input.send(Input::Settle(pending));
+        });
+    if let Err(error) = timer {
+        tracing::error!(%error, "demo settle timer failed to start");
     }
 }
 
@@ -100,6 +164,7 @@ pub fn snapshot() -> Snapshot {
         home: home::fleet_home(),
         resources: resources::resources(),
         changes: changes::log(),
+        details: BTreeMap::from([(ClusterId::new(PROD_US_EAST), detail::prod_us_east())]),
     }
 }
 
@@ -139,7 +204,7 @@ fn cluster(seed: ClusterSeed) -> ClusterSummary {
 
 fn prod_us_east() -> ClusterSummary {
     let mut summary = cluster(ClusterSeed {
-        name: "prod-us-east",
+        name: PROD_US_EAST,
         status: Status::Err,
         state: "Degraded",
         distro: "EKS",
