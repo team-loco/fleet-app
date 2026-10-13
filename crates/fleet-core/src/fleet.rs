@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 #[cfg(feature = "loco")]
 use std::time::Duration;
 
-use crate::{ClusterId, Counts, Page, Status};
+use crate::home::ClusterMetrics;
+use crate::{ClusterId, Counts, FleetHome, Page, Status};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClusterSummary {
@@ -16,6 +17,7 @@ pub struct ClusterSummary {
     pub nodes: Option<u32>,
     pub problems: Counts,
     pub nav: BTreeMap<Page, Counts>,
+    pub metrics: Option<ClusterMetrics>,
     #[cfg(feature = "loco")]
     pub loco_agent_synced: Option<Duration>,
 }
@@ -30,6 +32,7 @@ impl ClusterSummary {
 pub struct Snapshot {
     pub clusters: Vec<ClusterSummary>,
     pub fleet_nav: BTreeMap<Page, Counts>,
+    pub home: FleetHome,
 }
 
 impl Snapshot {
@@ -66,6 +69,7 @@ pub(crate) mod tests {
             nodes: None,
             problems,
             nav: BTreeMap::new(),
+            metrics: None,
             #[cfg(feature = "loco")]
             loco_agent_synced: None,
         }
@@ -79,6 +83,7 @@ pub(crate) mod tests {
                 cluster("c", Status::Offline, Counts::default()),
             ],
             fleet_nav: BTreeMap::new(),
+            home: FleetHome::default(),
         }
     }
 

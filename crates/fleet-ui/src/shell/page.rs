@@ -1,3 +1,4 @@
+use fleet_core::Page;
 use gpui::{
     AnyElement, Context, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
     SharedString, StatefulInteractiveElement, Styled, div,
@@ -29,7 +30,7 @@ impl Shell {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .child(self.placeholder(&palette)),
+                    .child(self.content(&palette)),
             )
             .into_any_element()
     }
@@ -68,6 +69,14 @@ impl Shell {
             )
             .child(div().flex_1())
             .children(more)
+    }
+
+    fn content(&self, palette: &Palette) -> AnyElement {
+        match self.state.page {
+            Page::Overview => self.fleet.clone().into_any_element(),
+            Page::Problems => self.fleet.clone().into_any_element(),
+            _ => self.placeholder(palette).into_any_element(),
+        }
     }
 
     fn placeholder(&self, palette: &Palette) -> impl IntoElement {

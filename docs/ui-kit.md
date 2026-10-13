@@ -37,6 +37,7 @@ Row tints for a status: `palette.tint(status)` returns `okbg` / `warnbg` / `errb
 
 ```rust
 SectionHeader::new("Pods").count("3 · click to follow logs").end(Segmented::new("f")...)
+SectionHeader::new("Problems").annotation(badges)  // any element right after the label
 SectionLabel::new("Container")            // uppercase 11px mute label alone
 Rule::horizontal()  /  Rule::vertical()   // 1px `line`
 Link::new("rev", "a41e07c").mono().on_click(|_, window, cx| ..)
@@ -184,7 +185,12 @@ pods.update(cx, |t, cx| t.set_rows(new_rows, cx));
 
 Column options: `.fixed(px)`, `.flex(weight, min)`, `.end()`, `.center()`, `.mono()` (Plex Mono 12;
 rows are otherwise Sans 12.5), `.sortable(cmp)` / `.sort_by_key(key)`. Table options:
-`.row_height(px)` (default `ROW_TABLE` 26), `.headerless()`, `.sorted_by(col, dir)`.
+`.row_height(px)` (default `ROW_TABLE` 26), `.headerless()`, `.sorted_by(col, dir)`,
+`.column_gap(px)` (default `SPACE_6`), `.inset(px)` (leading row padding, default `SPACE_8`),
+`.click_opens()` (a single click also emits `Opened`, for rows that act as links) and
+`.span_rows(|row, palette| Option<AnyElement>)`: rows for which it returns `Some` render that
+element across the full width instead of cells (group headers). `set_columns(columns, cx)` swaps
+columns at runtime (e.g. one per cluster).
 Column widths are design values; define them as `const`s at the top of your screen file.
 
 ## Relative time

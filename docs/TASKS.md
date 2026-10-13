@@ -24,7 +24,7 @@ Spec column points at `design/`.
 
 | id | unit | spec | owner | branch | status |
 |---|---|---|---|---|---|
-| S1 | Fleet home: clusters table, problems by cluster, recent GitOps commits | Fleet | | | todo |
+| S1 | Fleet home: clusters table, problems by cluster, recent GitOps commits | Fleet | claude | s1-fleet-home | done |
 | S2 | Command palette ⌘K | Command, v1/Palette | | | todo |
 | S3 | Workload (Deployment) page + logs / events / terminal dock | Workload | | | todo |
 | S4 | Flux object page (Kustomization + HelmRelease + sources) | Kustomization | | | todo |

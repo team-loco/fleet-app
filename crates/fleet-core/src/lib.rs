@@ -1,4 +1,5 @@
 pub mod fleet;
+pub mod home;
 pub mod id;
 pub mod nav;
 pub mod state;
@@ -7,6 +8,7 @@ pub mod time;
 
 pub use async_channel::{Receiver, Sender};
 pub use fleet::{ClusterSummary, Snapshot};
+pub use home::FleetHome;
 pub use id::{ClusterId, ResourceRef};
 pub use nav::{CLUSTER_NAV, FLEET_NAV, NavSection, Page};
 pub use state::{AppState, Command, Update};

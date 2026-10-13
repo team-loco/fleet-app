@@ -25,6 +25,7 @@ pub type CellRenderer<R> = Rc<dyn Fn(&R, &Palette) -> AnyElement>;
 pub type Comparator<R> = Rc<dyn Fn(&R, &R) -> Ordering>;
 type RowStatus<R> = Rc<dyn Fn(&R) -> Option<Status>>;
 type RowKey<R> = Rc<dyn Fn(&R) -> SharedString>;
+type SpanRow<R> = Rc<dyn Fn(&R, &Palette) -> Option<AnyElement>>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Width {
@@ -202,6 +203,10 @@ pub struct Table<R: 'static> {
     sort: Option<(usize, SortDirection)>,
     selected: Option<usize>,
     row_height: Pixels,
+    column_gap: Pixels,
+    inset: Pixels,
+    span: Option<SpanRow<R>>,
+    click_opens: bool,
     fit: bool,
     header: bool,
     status: Option<RowStatus<R>>,
@@ -229,6 +234,10 @@ impl<R: 'static> Table<R> {
             sort: None,
             selected: None,
             row_height: ROW_TABLE,
+            column_gap: SPACE_6,
+            inset: SPACE_8,
+            span: None,
+            click_opens: false,
             fit: false,
             header: true,
             status: None,
@@ -249,6 +258,29 @@ impl<R: 'static> Table<R> {
 
     pub fn row_height(mut self, height: Pixels) -> Self {
         self.row_height = height;
+        self
+    }
+
+    pub fn column_gap(mut self, gap: Pixels) -> Self {
+        self.column_gap = gap;
+        self
+    }
+
+    pub fn inset(mut self, inset: Pixels) -> Self {
+        self.inset = inset;
+        self
+    }
+
+    pub fn span_rows(
+        mut self,
+        span: impl Fn(&R, &Palette) -> Option<AnyElement> + 'static,
+    ) -> Self {
+        self.span = Some(Rc::new(span));
+        self
+    }
+
+    pub fn click_opens(mut self) -> Self {
+        self.click_opens = true;
         self
     }
 
@@ -296,6 +328,13 @@ impl<R: 'static> Table<R> {
         if let Some(position) = self.position_of(self.selected) {
             self.scroll.scroll_to_item(position, ScrollStrategy::Center);
         }
+        cx.notify();
+    }
+
+    pub fn set_columns(&mut self, columns: Vec<Column<R>>, cx: &mut Context<Self>) {
+        self.columns = Rc::new(columns);
+        self.sort = None;
+        self.resort();
         cx.notify();
     }
 
@@ -369,7 +408,7 @@ impl<R: 'static> Table<R> {
         window.focus(&self.focus, cx);
         self.selected = Some(row);
         cx.emit(TableEvent::Selected(row));
-        if event.click_count() > 1 {
+        if self.click_opens || event.click_count() > 1 {
             cx.emit(TableEvent::Opened(row));
         }
         cx.notify();
@@ -435,7 +474,7 @@ impl<R: 'static> Table<R> {
             .flex()
             .flex_none()
             .items_center()
-            .gap(SPACE_6)
+            .gap(self.column_gap)
             .h(ROW_TABLE_MIN)
             .px(SPACE_8)
             .border_b(RULE)
@@ -472,6 +511,17 @@ impl<R: 'static> Table<R> {
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if let Some(content) = self.span.as_ref().and_then(|span| span(row, palette)) {
+            return div()
+                .flex()
+                .items_center()
+                .w_full()
+                .h(self.row_height)
+                .border_b(RULE)
+                .border_color(palette.line)
+                .child(content)
+                .into_any_element();
+        }
         let selected = self.selected == Some(ix);
         let status = self.status.as_ref().and_then(|status| status(row));
         let tint = status.and_then(|status| palette.tint(status));
@@ -489,9 +539,10 @@ impl<R: 'static> Table<R> {
             .w_full()
             .flex()
             .items_center()
-            .gap(SPACE_6)
+            .gap(self.column_gap)
             .h(self.row_height)
-            .px(SPACE_8)
+            .pl(self.inset)
+            .pr(SPACE_8)
             .border_b(RULE)
             .border_color(palette.line)
             .text_size(TEXT_BODY)

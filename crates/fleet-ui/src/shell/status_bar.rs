@@ -1,5 +1,8 @@
-use fleet_core::Status;
-use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, div};
+use fleet_core::{Command, Page, Status};
+use gpui::{
+    AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
+    StatefulInteractiveElement, Styled, div,
+};
 
 use super::Shell;
 use crate::theme::{
@@ -41,8 +44,13 @@ impl Shell {
             .overflow_hidden()
             .child(
                 div()
+                    .id("status-problems")
                     .flex()
                     .gap(SPACE_5)
+                    .cursor_pointer()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.dispatch(Command::SelectPage(Page::Overview), cx);
+                    }))
                     .child(div().text_color(palette.err).child(format!(
                         "{} {}",
                         Status::Err.glyph(),

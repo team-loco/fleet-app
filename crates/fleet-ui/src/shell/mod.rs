@@ -4,11 +4,12 @@ mod status_bar;
 
 use fleet_core::{AppState, Command, Receiver, Sender, Update};
 use gpui::{
-    AnyElement, App, Context, FocusHandle, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Render, Styled, Subscription, Task, Window, div,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement,
+    IntoElement, MouseButton, ParentElement, Render, Styled, Subscription, Task, Window, div,
 };
 
 use crate::actions::{ToggleClustersPanel, ToggleResourcesPanel};
+use crate::screens::fleet::FleetScreen;
 use crate::theme::{self, ActiveTheme, NAV_MIN_WIDTH, RULE, STRIP, TEXT_UI};
 
 pub struct Shell {
@@ -18,8 +19,10 @@ pub struct Shell {
     clusters_generation: usize,
     resources_generation: usize,
     focus: FocusHandle,
+    fleet: Entity<FleetScreen>,
     _updates: Task<()>,
     _appearance: Subscription,
+    _fleet_commands: Subscription,
 }
 
 impl Shell {
@@ -42,6 +45,10 @@ impl Shell {
             theme::follow_window(window, cx);
             cx.notify();
         });
+        let fleet = cx.new(FleetScreen::new);
+        let fleet_commands = cx.subscribe(&fleet, |this, _, command: &Command, cx| {
+            this.dispatch(command.clone(), cx);
+        });
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         theme::follow_window(window, cx);
@@ -52,8 +59,10 @@ impl Shell {
             clusters_generation: 0,
             resources_generation: 0,
             focus,
+            fleet,
             _updates: listen,
             _appearance: appearance,
+            _fleet_commands: fleet_commands,
         }
     }
 
@@ -63,6 +72,10 @@ impl Shell {
         for command in pending {
             self.state.apply(&command);
         }
+        let snapshot = &self.state.snapshot;
+        self.fleet
+            .update(cx, |fleet, cx| fleet.set_snapshot(snapshot, cx));
+        self.sync_page(cx);
         cx.notify();
     }
 
@@ -72,12 +85,19 @@ impl Shell {
             Command::ToggleResourcesPanel => self.resources_generation += 1,
             Command::SelectCluster(_) => {}
             Command::SelectPage(_) => {}
+            Command::OpenResource(_) => {}
         }
         self.state.apply(&command);
+        self.sync_page(cx);
         if let Err(error) = self.commands.try_send(command) {
             tracing::warn!(%error, "backend stopped accepting commands");
         }
         cx.notify();
+    }
+
+    fn sync_page(&self, cx: &mut Context<Self>) {
+        let page = self.state.page;
+        self.fleet.update(cx, |fleet, cx| fleet.set_page(page, cx));
     }
 
     fn strip(cx: &App) -> impl IntoElement {
