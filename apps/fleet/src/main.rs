@@ -121,7 +121,13 @@ impl Screen {
             Self::KitPanes => Vec::new(),
             Self::AddCluster => vec![Command::OpenAddCluster(AddClusterStep::Pick)],
             Self::AddClusterCheck => vec![Command::OpenAddCluster(AddClusterStep::Check)],
-            Self::Workload => vec![sample, Command::OpenResource(fleet_demo::sample_workload())],
+            Self::Workload => {
+                let workload = ResourceRef {
+                    cluster: cluster.clone(),
+                    ..fleet_demo::sample_workload()
+                };
+                vec![sample, Command::OpenResource(workload)]
+            }
             Self::Pods => vec![sample, Command::SelectPage(Page::Pods)],
             Self::PodsShell => vec![sample, Command::SelectPage(Page::Pods)],
             Self::Kustomization => flux_screen(FluxKey::new(

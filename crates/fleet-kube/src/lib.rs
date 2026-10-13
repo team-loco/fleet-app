@@ -30,6 +30,7 @@ pub mod store;
 pub mod task;
 pub mod usage;
 pub mod watch;
+pub mod workload;
 
 pub use error::{Error, Result};
 pub use live::LiveBackend;
