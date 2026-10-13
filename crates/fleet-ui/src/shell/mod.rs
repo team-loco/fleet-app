@@ -5,7 +5,7 @@ mod switcher;
 
 use fleet_core::palette::{COMPARE_KEY, LOGS_KEY, OWNER_KEY, resource_commands};
 use fleet_core::resource::short_kind;
-use fleet_core::{AddClusterStep, AppState, Command, Sender, Status, Update};
+use fleet_core::{AddClusterStep, AppState, Command, Page, Sender, Status, Update};
 use gpui::{
     App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
     ParentElement, Render, Styled, Subscription, Task, Window, div,
@@ -13,11 +13,12 @@ use gpui::{
 
 use crate::Store;
 use crate::actions::{
-    CloseWindow, CompareAcrossClusters, FollowLogs, ShowFluxOwner, ToggleClusterSwitcher,
-    ToggleCommandPalette, ToggleSidebar,
+    CloseWindow, CompareAcrossClusters, FollowLogs, OpenSettings, ShowFluxOwner,
+    ToggleClusterSwitcher, ToggleCommandPalette, ToggleSidebar,
 };
 use crate::kit::{Toast, toast};
 use crate::screens::add_cluster::{AddClusterDialog, AddClusterEvent};
+use crate::screens::app_settings::AppSettingsScreen;
 use crate::screens::changes::ChangesScreen;
 use crate::screens::command::{CommandPalette, PaletteEvent};
 use crate::screens::compare::CompareScreen;
@@ -58,6 +59,7 @@ pub struct Shell {
     _loco_commands: Subscription,
     compare: Entity<CompareScreen>,
     settings: Entity<SettingsScreen>,
+    app_settings: Entity<AppSettingsScreen>,
     _updates: Task<()>,
     _store: Entity<Store>,
     _window_closed: Subscription,
@@ -69,7 +71,7 @@ pub struct Shell {
     pods: Entity<PodsScreen>,
     _pod_commands: Subscription,
     _flux_object: Subscription,
-    _screen_commands: [Subscription; 2],
+    _screen_commands: [Subscription; 3],
 }
 
 impl Shell {
@@ -115,13 +117,11 @@ impl Shell {
         });
         let compare = cx.new(CompareScreen::new);
         let settings = cx.new(|cx| SettingsScreen::new(window, cx));
+        let app_settings = cx.new(AppSettingsScreen::new);
         let screen_commands = [
-            cx.subscribe(&compare, |this, _, command: &Command, cx| {
-                this.dispatch(command.clone(), cx);
-            }),
-            cx.subscribe(&settings, |this, _, command: &Command, cx| {
-                this.dispatch(command.clone(), cx);
-            }),
+            Self::forward(&app_settings, cx),
+            Self::forward(&compare, cx),
+            Self::forward(&settings, cx),
         ];
         let pods = cx.new(|cx| PodsScreen::new(window, cx));
         let pod_commands = cx.subscribe(&pods, |this, _, command: &Command, cx| {
@@ -164,6 +164,7 @@ impl Shell {
             _loco_commands: loco_commands,
             compare,
             settings,
+            app_settings,
             _updates: listen,
             _store: store,
             _window_closed: window_closed,
@@ -177,6 +178,15 @@ impl Shell {
             _flux_object: flux_commands,
             _screen_commands: screen_commands,
         }
+    }
+
+    fn forward<T: gpui::EventEmitter<Command>>(
+        screen: &Entity<T>,
+        cx: &mut Context<Self>,
+    ) -> Subscription {
+        cx.subscribe(screen, |this, _, command: &Command, cx| {
+            this.dispatch(command.clone(), cx);
+        })
     }
 
     fn new_switcher(
@@ -383,6 +393,7 @@ impl Shell {
                     .update(cx, |settings, cx| settings.open(cluster, cx));
             }
             Command::SetPreferences(..) => {}
+            Command::SetRefresh(_) => {}
             Command::Connect(_) => {}
             Command::Reauthenticate(_) => {}
             Command::Disconnect(_) => {}
@@ -494,6 +505,9 @@ impl Render for Shell {
             .id("shell")
             .track_focus(&self.focus)
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
+            .on_action(cx.listener(|this, _: &OpenSettings, _, cx| {
+                this.dispatch(Command::SelectPage(Page::Settings), cx);
+            }))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
                 this.dispatch(Command::ToggleSidebar, cx);
             }))
@@ -597,13 +611,13 @@ mod tests {
         let initial = opened
             .try_recv()
             .unwrap_or_else(|error| panic!("new window request: {error}"));
-        assert_eq!(initial, vec![Command::SelectPage(fleet_core::Page::GitOps)]);
+        assert_eq!(initial, vec![Command::SelectPage(Page::GitOps)]);
         let (second, second_window) = cx.update(|cx| open_window(&store, initial, cx));
         cx.run_until_parked();
         assert_eq!(first.read_with(cx, |shell, _| shell.state.clone()), before);
         assert_eq!(
             second.read_with(cx, |shell, _| shell.state.page),
-            fleet_core::Page::GitOps
+            Page::GitOps
         );
         let mut snapshot = fleet_core::Snapshot::default();
         snapshot.home.problems.push(fleet_core::home::Problem {

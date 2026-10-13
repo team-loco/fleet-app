@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use fleet_core::Status;
+use fleet_core::app_settings::ThemeChoice;
 use gpui::{App, Global, Hsla, Pixels, Window, WindowAppearance, px, rgb, rgba};
 
 pub const FONT_SANS: &str = "IBM Plex Sans";
@@ -47,6 +48,7 @@ pub const SWITCHER_LIST: Pixels = px(420.);
 pub const PAGE_HEADER: Pixels = px(44.);
 pub const STATUS_BAR: Pixels = px(26.);
 pub const ASIDE_WIDTH: Pixels = px(300.);
+pub const SETTINGS_COLUMN: Pixels = px(720.);
 
 pub const ICON: Pixels = px(11.);
 pub const ICON_BUTTON: Pixels = px(22.);
@@ -305,6 +307,7 @@ impl Palette {
 
 pub struct Theme {
     pub forced: Option<Appearance>,
+    pub choice: ThemeChoice,
     pub appearance: Appearance,
     pub palette: Palette,
 }
@@ -321,10 +324,22 @@ impl ActiveTheme for App {
     }
 }
 
+pub fn resolve(forced: Option<Appearance>, choice: ThemeChoice, os: Appearance) -> Appearance {
+    let chosen = match choice {
+        ThemeChoice::System => os,
+        ThemeChoice::Light => Appearance::Light,
+        ThemeChoice::Dark => Appearance::Dark,
+    };
+    forced.unwrap_or(chosen)
+}
+
 pub fn init(forced: Option<Appearance>, cx: &mut App) {
-    let appearance = forced.unwrap_or_else(|| Appearance::from_window(cx.window_appearance()));
+    let choice = ThemeChoice::default();
+    let os = Appearance::from_window(cx.window_appearance());
+    let appearance = resolve(forced, choice, os);
     cx.set_global(Theme {
         forced,
+        choice,
         appearance,
         palette: Palette::for_appearance(appearance),
     });
@@ -332,17 +347,29 @@ pub fn init(forced: Option<Appearance>, cx: &mut App) {
 }
 
 pub fn follow_window(window: &Window, cx: &mut App) {
+    let os = Appearance::from_window(window.appearance());
+    show(os, cx);
+}
+
+pub fn set_choice(choice: ThemeChoice, cx: &mut App) {
+    cx.global_mut::<Theme>().choice = choice;
+    let os = Appearance::from_window(cx.window_appearance());
+    if show(os, cx) {
+        cx.refresh_windows();
+    }
+}
+
+fn show(os: Appearance, cx: &mut App) -> bool {
     let theme = cx.global::<Theme>();
-    let appearance = theme
-        .forced
-        .unwrap_or_else(|| Appearance::from_window(window.appearance()));
+    let appearance = resolve(theme.forced, theme.choice, os);
     if appearance == theme.appearance {
-        return;
+        return false;
     }
     let theme = cx.global_mut::<Theme>();
     theme.appearance = appearance;
     theme.palette = Palette::for_appearance(appearance);
     sync_component_theme(appearance, cx);
+    true
 }
 
 fn sync_component_theme(appearance: Appearance, cx: &mut App) {
@@ -386,6 +413,21 @@ mod tests {
         let palette = Palette::dark();
         assert_eq!(palette.status(Status::Err), palette.err);
         assert_eq!(palette.status(Status::Offline), palette.mute);
+    }
+
+    #[test]
+    fn the_flag_wins_then_the_choice_then_the_os() {
+        let os = Appearance::Dark;
+        assert_eq!(resolve(None, ThemeChoice::System, os), Appearance::Dark);
+        assert_eq!(
+            resolve(None, ThemeChoice::System, Appearance::Light),
+            Appearance::Light
+        );
+        assert_eq!(resolve(None, ThemeChoice::Light, os), Appearance::Light);
+        assert_eq!(
+            resolve(Some(Appearance::Dark), ThemeChoice::Light, os),
+            Appearance::Dark
+        );
     }
 
     #[test]

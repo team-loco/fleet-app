@@ -20,6 +20,11 @@ impl Throttle {
         tokio::time::sleep_until(self.next).await;
     }
 
+    pub fn set_period(&mut self, period: Duration) {
+        self.next = self.next - self.period + period;
+        self.period = period;
+    }
+
     pub fn fired(&mut self) {
         self.next = Instant::now() + self.period;
     }
@@ -54,6 +59,16 @@ mod tests {
         let start = Instant::now();
         throttle.ready().await;
         assert_eq!(start.elapsed(), PERIOD);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_new_period_applies_to_the_wait_in_progress() {
+        let mut throttle = Throttle::new(PERIOD);
+        throttle.fired();
+        throttle.set_period(QUIET);
+        let start = Instant::now();
+        throttle.ready().await;
+        assert_eq!(start.elapsed(), QUIET);
     }
 
     #[tokio::test(start_paused = true)]

@@ -23,6 +23,7 @@ fn settings(seed: Seed) -> ClusterSettings {
         default_namespace: Some(DEFAULT_NAMESPACE.into()),
         metrics: MetricsSource::Auto,
         confirm_destructive: true,
+        notify: true,
         labels: seed.labels.iter().map(|l| (*l).to_owned()).collect(),
     };
     ClusterSettings {

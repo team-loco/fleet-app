@@ -411,11 +411,14 @@ impl RenderOnce for Segmented {
         } else {
             (SEGMENT, SPACE_5, TEXT_CONTROL)
         };
+        let group = self.id.to_string();
         let segments = self.options.into_iter().enumerate().map(|(ix, label)| {
             let selected = ix == self.selected;
             let handler = self.on_select.clone();
             let hover = palette.hover;
+            let selector = format!("{group}-{ix}");
             div()
+                .debug_selector(|| selector)
                 .id(ix)
                 .flex()
                 .items_center()

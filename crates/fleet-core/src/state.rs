@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crate::app_settings::Refresh;
 use crate::resource::page_for_kind;
 use crate::{
     AddClusterStep, CheckLine, ClusterId, ContextRef, ExecRequest, FluxAction, FluxKey, FluxKind,
@@ -70,6 +71,7 @@ pub enum Command {
     },
     ShowClusterSettings(ClusterId),
     SetPreferences(ClusterId, Preferences),
+    SetRefresh(Refresh),
     Connect(ClusterId),
     Reauthenticate(ClusterId),
     Disconnect(ClusterId),
@@ -182,6 +184,7 @@ impl AppState {
             Command::CopySpec { .. } => {}
             Command::ShowClusterSettings(_) => self.select_page(Page::ClusterSettings),
             Command::SetPreferences(..) => {}
+            Command::SetRefresh(_) => {}
             Command::Connect(_) => {}
             Command::Reauthenticate(_) => {}
             Command::Disconnect(_) => {}

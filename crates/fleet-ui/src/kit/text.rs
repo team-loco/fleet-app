@@ -177,7 +177,9 @@ impl Link {
 impl RenderOnce for Link {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let acc = cx.palette().acc;
+        let selector = self.id.to_string();
         div()
+            .debug_selector(|| selector)
             .id(self.id)
             .text_color(acc)
             .cursor_pointer()

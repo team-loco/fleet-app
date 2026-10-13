@@ -1,5 +1,6 @@
 pub mod action;
 pub mod add_cluster;
+pub mod app_settings;
 pub mod changes;
 pub mod cluster;
 pub mod compare;
@@ -14,6 +15,7 @@ pub mod id;
 pub mod loco;
 pub mod nav;
 pub mod nodes;
+pub mod notify;
 pub mod overview;
 pub mod palette;
 pub mod pods;
@@ -32,6 +34,7 @@ pub use add_cluster::{
     AddClusterFlow, AddClusterStep, Candidate, CheckLine, CheckStatus, ContextChoice, ContextRef,
     KubeconfigFile, NewCluster, Verdict,
 };
+pub use app_settings::AppSettings;
 pub use async_channel::{Receiver, Sender};
 pub use changes::ChangesLog;
 pub use cluster::ClusterDetail;

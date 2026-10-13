@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use fleet_core::settings::MetricsSource;
 use fleet_core::{ClusterId, NewCluster, Preferences};
 use jiff::Timestamp;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::discovery::ContextRef;
@@ -33,6 +34,7 @@ pub struct SavedPreferences {
     pub default_namespace: Option<String>,
     pub metrics: SavedMetrics,
     pub confirm_destructive: bool,
+    pub notify: bool,
     pub labels: Vec<String>,
 }
 
@@ -62,6 +64,7 @@ impl From<&Preferences> for SavedPreferences {
             default_namespace: preferences.default_namespace.clone(),
             metrics,
             confirm_destructive: preferences.confirm_destructive,
+            notify: preferences.notify,
             labels: preferences.labels.clone(),
         }
     }
@@ -78,6 +81,7 @@ impl From<&SavedPreferences> for Preferences {
             default_namespace: saved.default_namespace.clone(),
             metrics,
             confirm_destructive: saved.confirm_destructive,
+            notify: saved.notify,
             labels: saved.labels.clone(),
         }
     }
@@ -121,29 +125,14 @@ impl ClusterStore {
     }
 
     pub fn open_at(dir: &Path, now: Timestamp) -> Result<Self> {
-        let path = dir.join(CLUSTERS_FILE);
-        let bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Self::empty(dir)),
-            Err(error) => return Err(error.into()),
-        };
-        match serde_json::from_slice::<StoreFile>(&bytes) {
-            Ok(file) => Ok(Self {
-                path,
-                clusters: file.clusters,
-                folders: file.folders,
-                set_aside: None,
-            }),
-            Err(error) => {
-                let aside = corrupt_path(&path, now);
-                fs::rename(&path, &aside)?;
-                tracing::warn!(%error, kept = %aside.display(), "saved clusters unreadable; set aside");
-                Ok(Self {
-                    set_aside: Some(aside),
-                    ..Self::empty(dir)
-                })
-            }
-        }
+        let loaded = load::<StoreFile>(&dir.join(CLUSTERS_FILE), now)?;
+        let file = loaded.value.unwrap_or_default();
+        Ok(Self {
+            clusters: file.clusters,
+            folders: file.folders,
+            set_aside: loaded.set_aside,
+            ..Self::empty(dir)
+        })
     }
 
     pub fn empty(dir: &Path) -> Self {
@@ -232,19 +221,56 @@ impl ClusterStore {
     }
 
     fn save(&self) -> Result<()> {
-        if let Some(dir) = self.path.parent() {
-            fs::create_dir_all(dir)?;
-        }
         let body = StoreFile {
             clusters: self.clusters.clone(),
             folders: self.folders.clone(),
         };
-        let json = serde_json::to_vec_pretty(&body)?;
-        let temp = self.path.with_extension(TEMP_SUFFIX);
-        fs::write(&temp, json)?;
-        fs::rename(&temp, &self.path)?;
-        Ok(())
+        write(&self.path, &body)
     }
+}
+
+pub(crate) struct Loaded<T> {
+    pub value: Option<T>,
+    pub set_aside: Option<PathBuf>,
+}
+
+pub(crate) fn load<T: DeserializeOwned>(path: &Path, now: Timestamp) -> Result<Loaded<T>> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Ok(Loaded {
+                value: None,
+                set_aside: None,
+            });
+        }
+        Err(error) => return Err(error.into()),
+    };
+    match serde_json::from_slice::<T>(&bytes) {
+        Ok(value) => Ok(Loaded {
+            value: Some(value),
+            set_aside: None,
+        }),
+        Err(error) => {
+            let aside = corrupt_path(path, now);
+            fs::rename(path, &aside)?;
+            tracing::warn!(%error, file = %path.display(), kept = %aside.display(), "unreadable; set aside");
+            Ok(Loaded {
+                value: None,
+                set_aside: Some(aside),
+            })
+        }
+    }
+}
+
+pub(crate) fn write<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let json = serde_json::to_vec_pretty(value)?;
+    let temp = path.with_extension(TEMP_SUFFIX);
+    fs::write(&temp, json)?;
+    fs::rename(&temp, path)?;
+    Ok(())
 }
 
 fn corrupt_path(path: &Path, now: Timestamp) -> PathBuf {
@@ -337,6 +363,7 @@ mod tests {
             default_namespace: Some("payments".to_owned()),
             metrics: MetricsSource::Prometheus,
             confirm_destructive: false,
+            notify: false,
             labels: vec!["env=dev".to_owned()],
         };
         let id = ClusterId::new("fleet-a");

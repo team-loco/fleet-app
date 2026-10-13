@@ -59,3 +59,12 @@ Settled; change only with a new entry that says why.
     detected. Inspectors (nodes, pods, resources, workload) slide and fade in and out
     (`theme::INSPECTOR_IN`, `INSPECTOR_OUT`, `INSPECTOR_SWAP`, ease-out) and replay the fade when
     the selection changes.
+19. **App settings** (#112): `fleet_core::AppSettings` is the one model (theme, refresh presets,
+    notifications), saved as `settings.json` in the Fleet data dir with the same set-aside handling
+    as `clusters.json`. The app owns the file; the UI holds the live value in a global and applies
+    the theme to every window at once. Refresh presets reach the live backend as
+    `Command::SetRefresh` and retime its polling and snapshot tickers without a restart; watches
+    are never polled. New problems post a macOS notification once per resource (errors by default,
+    warnings on request); a problem that returns within `notify::COOLDOWN` or appears during a
+    cluster's first `CONNECT_GRACE` stays quiet, and a cluster's "Notify about new problems"
+    preference mutes it. Notifications need the app bundle; unbundled builds say so on the page.

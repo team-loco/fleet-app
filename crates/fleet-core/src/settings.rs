@@ -40,6 +40,7 @@ pub struct Preferences {
     pub default_namespace: Option<String>,
     pub metrics: MetricsSource,
     pub confirm_destructive: bool,
+    pub notify: bool,
     pub labels: Vec<String>,
 }
 
@@ -64,6 +65,7 @@ impl Default for Preferences {
             default_namespace: None,
             metrics: MetricsSource::default(),
             confirm_destructive: true,
+            notify: true,
             labels: Vec::new(),
         }
     }

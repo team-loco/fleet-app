@@ -1,12 +1,12 @@
 use clap::ValueEnum;
 use fleet_core::{AddClusterStep, ClusterId, Command, FluxKey, FluxKind, Page, ResourceRef};
 use fleet_ui::actions::{
-    CloseWindow, CompareAcrossClusters, FollowLogs, OpenSelectedNewWindow, ShowFluxOwner,
-    ToggleClusterSwitcher, ToggleCommandPalette, ToggleSidebar,
+    CloseWindow, CompareAcrossClusters, FollowLogs, OpenSelectedNewWindow, OpenSettings,
+    ShowFluxOwner, ToggleClusterSwitcher, ToggleCommandPalette, ToggleSidebar,
 };
 use fleet_ui::theme::Appearance;
 use fleet_ui::{Gallery, GalleryPage, Shell, Store};
-use gpui::{AnyView, App, AppContext as _, Entity, KeyBinding, Window};
+use gpui::{AnyView, App, AppContext as _, Entity, KeyBinding, Menu, MenuItem, Window};
 
 pub const WINDOW_WIDTH: f32 = 1440.;
 pub const WINDOW_HEIGHT: f32 = 900.;
@@ -19,6 +19,29 @@ const DEPLOYMENT: &str = "Deployment";
 
 gpui::actions!(fleet, [Quit, NewWindow]);
 
+pub const APP_ID: &str = "dev.fleet.app";
+pub const APP_NAME: &str = "Fleet";
+const SETTINGS_ITEM: &str = "Settings…";
+const NEW_WINDOW_ITEM: &str = "New Window";
+const QUIT_ITEM: &str = "Quit Fleet";
+const BUNDLE_EXTENSION: &str = "app";
+
+pub fn menus() -> Vec<Menu> {
+    vec![Menu::new(APP_NAME).items([
+        MenuItem::action(SETTINGS_ITEM, OpenSettings),
+        MenuItem::separator(),
+        MenuItem::action(NEW_WINDOW_ITEM, NewWindow),
+        MenuItem::separator(),
+        MenuItem::action(QUIT_ITEM, Quit),
+    ])]
+}
+
+pub fn bundled(executable: &std::path::Path) -> bool {
+    executable
+        .ancestors()
+        .any(|dir| dir.extension().is_some_and(|ext| ext == BUNDLE_EXTENSION))
+}
+
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("cmd-shift-c", ToggleClusterSwitcher, None),
@@ -30,6 +53,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-n", NewWindow, None),
         KeyBinding::new("cmd-w", CloseWindow, None),
+        KeyBinding::new("cmd-,", OpenSettings, None),
         KeyBinding::new("alt-enter", OpenSelectedNewWindow, Some("CommandPalette")),
     ]);
     cx.bind_keys(fleet_ui::screens::workload::key_bindings());
@@ -108,6 +132,7 @@ pub enum Screen {
     Gitops,
     Compare,
     ClusterSettings,
+    Settings,
     Kit,
     KitOverlays,
     KitPanes,
@@ -148,6 +173,7 @@ impl Screen {
             Self::Gitops => vec![Command::SelectPage(Page::GitOps)],
             Self::Compare => vec![Command::Compare(preset.deployment())],
             Self::ClusterSettings => vec![Command::ShowClusterSettings(cluster)],
+            Self::Settings => vec![Command::SelectPage(Page::Settings)],
             Self::Kit => Vec::new(),
             Self::KitOverlays => Vec::new(),
             Self::KitPanes => Vec::new(),
@@ -250,6 +276,7 @@ pub fn root_view(
         Screen::LocoBuilds => shell_view(store, screen, preset, window, cx),
         Screen::Compare => shell_view(store, screen, preset, window, cx),
         Screen::ClusterSettings => shell_view(store, screen, preset, window, cx),
+        Screen::Settings => shell_view(store, screen, preset, window, cx),
         #[cfg(feature = "loco")]
         Screen::LocoRoutes => shell_view(store, screen, preset, window, cx),
     }
@@ -279,6 +306,15 @@ fn shell_view(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_executables_inside_an_app_bundle_count_as_bundled() {
+        use std::path::Path;
+        assert!(bundled(Path::new(
+            "/Applications/Fleet.app/Contents/MacOS/fleet"
+        )));
+        assert!(!bundled(Path::new("/Users/me/fleet/target/debug/fleet")));
+    }
 
     #[test]
     fn objects_parse_as_namespace_and_name() {
