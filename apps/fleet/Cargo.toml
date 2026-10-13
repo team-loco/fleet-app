@@ -7,6 +7,17 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[package.metadata.bundle]
+name = "Fleet"
+identifier = "dev.fleet.app"
+icon = ["apps/fleet/resources/Fleet.icns"]
+category = "Developer Tool"
+copyright = "Copyright © 2026 Fleet contributors"
+short_description = "Watch many Kubernetes clusters at once"
+
+[package.metadata.bundle.osx]
+minimum_system_version = "13.0"
+
 [[bin]]
 name = "fleet"
 path = "src/main.rs"

@@ -43,5 +43,5 @@ Spec column points at `design/`.
 | I1 | live backend wired into every screen | | | todo |
 | I2 | actions: reconcile, suspend/resume, scale, restart, delete, port-forward, exec, with confirmation | | | todo |
 | I3 | e2e run against kind scenarios | | | todo |
-| I4 | Fleet.app bundle, icon (squircle 22%), version stamping | | | todo |
+| I4 | Fleet.app bundle, icon (squircle 22%), version stamping | claude | i4-app-bundle | done |
 | I5 | animation polish + parity pass, dark and light, every screen | | | todo |

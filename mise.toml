@@ -30,6 +30,10 @@ run = "cargo run -p fleet -- --demo"
 description = "Run Fleet with Loco support on sample data"
 run = "cargo run -p fleet --features loco -- --demo"
 
+[tasks."bundle:loco"]
+description = "Build and ad-hoc sign dist/Fleet.app with Loco support"
+run = "mise-tasks/bundle --features loco"
+
 [tasks.fmt]
 description = "Check formatting"
 run = "cargo fmt --all --check"
