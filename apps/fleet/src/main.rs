@@ -5,6 +5,9 @@ use anyhow::Context as _;
 use clap::{Parser, ValueEnum};
 use fleet_core::{Backend, ClusterId, Command, Page};
 use fleet_demo::DemoBackend;
+use fleet_kube::LiveBackend;
+use fleet_kube::discovery::DiscoverySources;
+use fleet_kube::settings::KubeSettings;
 use fleet_ui::actions::{ToggleClustersPanel, ToggleResourcesPanel};
 use fleet_ui::theme::{Appearance, TRAFFIC_LIGHT_X, TRAFFIC_LIGHT_Y};
 use fleet_ui::{Gallery, Root, Shell, assets};
@@ -83,12 +86,17 @@ fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
     let args = Args::parse();
-    if !args.demo {
-        tracing::info!("live backend not available yet, serving demo data");
-    }
     let (update_tx, update_rx) = async_channel::unbounded();
     let (command_tx, command_rx) = async_channel::unbounded();
-    Box::new(DemoBackend).start(update_tx, command_rx);
+    let backend: Box<dyn Backend> = if args.demo {
+        Box::new(DemoBackend)
+    } else {
+        Box::new(LiveBackend::new(
+            KubeSettings::default(),
+            DiscoverySources::from_env(),
+        ))
+    };
+    backend.start(update_tx, command_rx);
 
     let forced = args.appearance.map(Appearance::from);
     let screen = args.screen;
