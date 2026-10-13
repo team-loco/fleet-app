@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use fleet_core::{
     AddClusterStep, CLUSTER_NAV, ClusterSummary, Command, Counts, FLEET_NAV, NavSection, Page,
     Status,
@@ -9,12 +11,13 @@ use gpui::{
 };
 
 use super::Shell;
+use super::strip::{ClusterStripRow, ResourceStripRow, cluster_strip_rows, resource_strip_rows};
 use crate::assets::{CHEVRON_LEFT, CHEVRON_RIGHT};
-use crate::kit::VerticalLabel;
+use crate::kit::Tooltip;
 use crate::theme::{
     ActiveTheme, CLUSTERS_PANEL, COLLAPSE, FONT_MONO, GLYPH_SLOT, ICON, ICON_BUTTON, PANEL_HEADER,
     Palette, RADIUS, RESOURCES_PANEL, ROW_CLUSTER, ROW_NAV, RULE, SPACE_1, SPACE_2, SPACE_3,
-    SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8, STRIP, TEXT_GLYPH, TEXT_LABEL, TEXT_SMALL,
+    SPACE_4, SPACE_6, SPACE_7, SPACE_8, STRIP, STRIP_ITEM, TEXT_GLYPH, TEXT_LABEL, TEXT_SMALL,
     TEXT_UI,
 };
 
@@ -29,14 +32,26 @@ impl Shell {
         let content = if self.state.clusters_open {
             self.clusters_list(&palette, cx).into_any_element()
         } else {
-            collapsed_strip("clusters-strip", CLUSTERS, &palette)
-                .bg(palette.chrome)
-                .border_r(RULE)
-                .border_color(palette.line)
-                .on_click(cx.listener(|this, _, _, cx| {
+            let rows = cluster_strip_rows(&self.state.snapshot, self.state.cluster.as_ref());
+            let items = rows
+                .into_iter()
+                .enumerate()
+                .map(|(ix, row)| cluster_strip_item(ix, row, &palette, cx))
+                .collect::<Vec<_>>();
+            collapsed_strip(
+                "clusters-strip",
+                "expand-clusters",
+                &palette,
+                cx,
+                |this, cx| {
                     this.dispatch(Command::ToggleClustersPanel, cx);
-                }))
-                .into_any_element()
+                },
+            )
+            .bg(palette.chrome)
+            .border_r(RULE)
+            .border_color(palette.line)
+            .children(items)
+            .into_any_element()
         };
         animated_panel(
             "clusters-panel",
@@ -53,11 +68,23 @@ impl Shell {
         let content = if self.state.resources_open {
             self.resources_list(label, &palette, cx).into_any_element()
         } else {
-            collapsed_strip("resources-strip", &label, &palette)
-                .on_click(cx.listener(|this, _, _, cx| {
+            let (sections, counts) = self.resource_scope();
+            let rows = resource_strip_rows(sections, counts, self.state.page);
+            let items = rows
+                .into_iter()
+                .map(|row| resource_strip_item(&row, &palette, cx))
+                .collect::<Vec<_>>();
+            collapsed_strip(
+                "resources-strip",
+                "expand-resources",
+                &palette,
+                cx,
+                |this, cx| {
                     this.dispatch(Command::ToggleResourcesPanel, cx);
-                }))
-                .into_any_element()
+                },
+            )
+            .children(items)
+            .into_any_element()
         };
         animated_panel(
             "resources-panel",
@@ -76,6 +103,13 @@ impl Shell {
     pub(super) fn selected_cluster(&self) -> Option<&ClusterSummary> {
         let id = self.state.cluster.as_ref()?;
         self.state.snapshot.cluster(id)
+    }
+
+    fn resource_scope(&self) -> (&'static [NavSection], &BTreeMap<Page, Counts>) {
+        match self.selected_cluster() {
+            Some(cluster) => (CLUSTER_NAV, &cluster.nav),
+            None => (FLEET_NAV, &self.state.snapshot.fleet_nav),
+        }
     }
 
     fn clusters_list(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
@@ -196,10 +230,7 @@ impl Shell {
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let (sections, counts) = match self.selected_cluster() {
-            Some(cluster) => (CLUSTER_NAV, &cluster.nav),
-            None => (FLEET_NAV, &self.state.snapshot.fleet_nav),
-        };
+        let (sections, counts) = self.resource_scope();
         let items = sections.iter().flat_map(|section| {
             let head = section
                 .label
@@ -242,7 +273,7 @@ impl Shell {
 fn section_rows(
     section: &NavSection,
     current: Page,
-    counts: &std::collections::BTreeMap<Page, Counts>,
+    counts: &BTreeMap<Page, Counts>,
     palette: &Palette,
     cx: &mut Context<Shell>,
 ) -> Vec<AnyElement> {
@@ -353,6 +384,14 @@ fn panel_header(
 }
 
 fn collapse_button(id: &'static str, palette: &Palette) -> gpui::Stateful<gpui::Div> {
+    icon_button(id, CHEVRON_LEFT, palette)
+}
+
+fn icon_button(
+    id: &'static str,
+    path: &'static str,
+    palette: &Palette,
+) -> gpui::Stateful<gpui::Div> {
     let hover = palette.hover;
     div()
         .id(id)
@@ -364,10 +403,18 @@ fn collapse_button(id: &'static str, palette: &Palette) -> gpui::Stateful<gpui::
         .rounded(RADIUS)
         .cursor_pointer()
         .hover(move |style| style.bg(hover))
-        .child(svg().path(CHEVRON_LEFT).size(ICON).text_color(palette.mute))
+        .child(svg().path(path).size(ICON).text_color(palette.mute))
 }
 
-fn collapsed_strip(id: &'static str, label: &str, palette: &Palette) -> gpui::Stateful<gpui::Div> {
+fn collapsed_strip(
+    id: &'static str,
+    expand_id: &'static str,
+    palette: &Palette,
+    cx: &mut Context<Shell>,
+    toggle: fn(&mut Shell, &mut Context<Shell>),
+) -> gpui::Stateful<gpui::Div> {
+    let expand = icon_button(expand_id, CHEVRON_RIGHT, palette)
+        .on_click(cx.listener(move |this, _, _, cx| toggle(this, cx)));
     div()
         .id(id)
         .w(STRIP)
@@ -375,17 +422,72 @@ fn collapsed_strip(id: &'static str, label: &str, palette: &Palette) -> gpui::St
         .flex()
         .flex_col()
         .items_center()
-        .gap(SPACE_5)
-        .pt(SPACE_5)
+        .gap(SPACE_2)
+        .pt(SPACE_3)
+        .child(expand)
+}
+
+fn strip_item(
+    id: ElementId,
+    selected: bool,
+    tooltip: SharedString,
+    palette: &Palette,
+) -> gpui::Stateful<gpui::Div> {
+    let hover = palette.hover;
+    div()
+        .id(id)
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .flex_none()
+        .w(STRIP_ITEM)
+        .py(SPACE_2)
+        .rounded(RADIUS)
         .cursor_pointer()
-        .text_color(palette.mute)
-        .child(
-            svg()
-                .path(CHEVRON_RIGHT)
-                .size(ICON)
-                .text_color(palette.mute),
-        )
-        .child(VerticalLabel::new(label.to_owned()))
+        .font_family(FONT_MONO)
+        .when(selected, |item| item.bg(palette.sel))
+        .when(!selected, |item| item.hover(move |style| style.bg(hover)))
+        .tooltip(Tooltip::text(tooltip))
+}
+
+fn cluster_strip_item(
+    ix: usize,
+    row: ClusterStripRow,
+    palette: &Palette,
+    cx: &mut Context<Shell>,
+) -> AnyElement {
+    let color = row
+        .status
+        .map_or(palette.fg2, |status| palette.status(status));
+    let target = row.target;
+    let key = ElementId::NamedInteger("cluster-strip".into(), ix as u64);
+    strip_item(key, row.selected, row.tooltip.into(), palette)
+        .text_size(TEXT_GLYPH)
+        .text_color(color)
+        .child(row.glyph)
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.dispatch(Command::SelectCluster(target.clone()), cx);
+        }))
+        .into_any_element()
+}
+
+fn resource_strip_item(
+    row: &ResourceStripRow,
+    palette: &Palette,
+    cx: &mut Context<Shell>,
+) -> AnyElement {
+    let page = row.page;
+    let key = ElementId::NamedInteger("resource-strip".into(), page as u64);
+    strip_item(key, row.selected, row.tooltip.into(), palette)
+        .text_size(TEXT_SMALL)
+        .text_color(palette.status(row.status))
+        .child(div().text_size(TEXT_GLYPH).child(row.status.glyph()))
+        .child(row.count.to_string())
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.dispatch(Command::SelectPage(page), cx);
+        }))
+        .into_any_element()
 }
 
 fn animated_panel(

@@ -39,6 +39,7 @@ pub const ROW_MATRIX: Pixels = px(38.);
 pub const ROW_CATALOG: Pixels = px(44.);
 
 pub const STRIP: Pixels = px(28.);
+pub const STRIP_ITEM: Pixels = px(22.);
 pub const CLUSTERS_PANEL: Pixels = px(164.);
 pub const RESOURCES_PANEL: Pixels = px(196.);
 pub const NAV_MIN_WIDTH: Pixels = px(84.);

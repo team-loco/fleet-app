@@ -22,7 +22,7 @@ Each screen is in `screens/`: the markup holds the layout and inline styles, and
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-- Two side panels, each collapsible to a 28px strip with a vertical label. ⌘⇧B toggles the clusters panel and ⌘B the resources panel.
+- Two side panels, each collapsible to a 28px strip (decision 16: status glyph rows instead of a vertical label). ⌘⇧B toggles the clusters panel and ⌘B the resources panel.
 - Left panel: plain cluster names with a status glyph. No icons or avatars.
 - The cluster name appears exactly once: as the resource panel's header.
 - No tabs, no breadcrumbs, no panel-layout buttons. ⌘K opens the command palette from the keyboard; there is no visible button for it.
