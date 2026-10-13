@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#MISE description="Populate only kind-fleet-b with Fleet's scale benchmark objects"
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+APPLY_WORKERS=8
+WAIT_TIMEOUT=120s
+work_dir="$(mktemp -d)"
+trap 'rm -rf "${work_dir}"' EXIT
+export KUBECONFIG="${work_dir}/kind.kubeconfig"
+mise exec -- kind get kubeconfig --name fleet-b >"${KUBECONFIG}"
+python3 "${ROOT}/e2e/scale.py" "${work_dir}"
+mise exec -- kubectl --context kind-fleet-b create namespace fleet-scale --dry-run=client -o yaml | mise exec -- kubectl --context kind-fleet-b apply -f -
+mise exec -- kubectl --context kind-fleet-b -n fleet-scale wait serviceaccount/default --for=create --timeout="${WAIT_TIMEOUT}"
+printf '%s\0' "${work_dir}"/batch-*.json | xargs -0 -P "${APPLY_WORKERS}" -I '{}' mise exec -- kubectl --context kind-fleet-b apply -f '{}' >"${work_dir}/apply.log"
+mise exec -- kubectl --context kind-fleet-b -n fleet-scale get configmaps,services,deployments,replicasets,events,pods -o json | python3 -c 'import collections, json, sys; print(dict(collections.Counter(item["kind"] for item in json.load(sys.stdin)["items"])))'

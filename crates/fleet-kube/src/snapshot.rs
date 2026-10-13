@@ -88,12 +88,15 @@ fn count(len: usize) -> u32 {
 }
 
 pub fn pod_counts(pods: &[Arc<Pod>]) -> Counts {
-    let healths: Vec<PodHealth> = pods.iter().map(|pod| pod_health(pod)).collect();
-    let failing = healths.iter().filter(|h| **h == PodHealth::Failing).count();
-    let warning = healths.iter().filter(|h| **h == PodHealth::Warning).count();
-    Counts::total(count(pods.len()))
-        .with_err(count(failing))
-        .with_warn(count(warning))
+    let mut counts = Counts::total(count(pods.len()));
+    for pod in pods {
+        match pod_health(pod) {
+            PodHealth::Failing => counts.err += 1,
+            PodHealth::Warning => counts.warn += 1,
+            PodHealth::Healthy => {}
+        }
+    }
+    counts
 }
 
 pub fn node_ready(node: &Node) -> bool {

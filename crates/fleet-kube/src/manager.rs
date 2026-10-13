@@ -7,7 +7,7 @@ use kube::api::DynamicObject;
 use kube::core::ApiResource;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
-use tokio::time::{Instant, MissedTickBehavior};
+use tokio::time::Instant;
 
 use crate::backoff::Backoff;
 use crate::client::connect;
@@ -23,6 +23,7 @@ use crate::resources::{
 use crate::settings::KubeSettings;
 use crate::shell_env::ShellEnv;
 use crate::task::TaskGuard;
+use crate::throttle::Throttle;
 
 pub const COALESCE_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -338,8 +339,7 @@ async fn supervise(
     let mut health = Health::default();
     let mut published = None;
     let mut dirty = BTreeSet::new();
-    let mut flush = tokio::time::interval(COALESCE_INTERVAL);
-    flush.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut flush = Throttle::new(COALESCE_INTERVAL);
     let mut next_probe = Instant::now();
     loop {
         tokio::select! {
@@ -373,13 +373,12 @@ async fn supervise(
                     }
                 }
             }
-            _ = flush.tick() => {
-                if !dirty.is_empty() {
-                    let kinds = std::mem::take(&mut dirty);
-                    let event = ClusterEvent::Changed { id: id.clone(), kinds };
-                    if events.send(event).await.is_err() {
-                        return;
-                    }
+            () = flush.ready(), if !dirty.is_empty() => {
+                flush.fired();
+                let kinds = std::mem::take(&mut dirty);
+                let event = ClusterEvent::Changed { id: id.clone(), kinds };
+                if events.send(event).await.is_err() {
+                    return;
                 }
             }
         }

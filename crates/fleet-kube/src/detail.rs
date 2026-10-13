@@ -63,6 +63,17 @@ struct NamespaceFacts {
     problems: Counts,
 }
 
+impl NamespaceFacts {
+    fn record(&mut self, health: PodHealth) {
+        self.pods += 1;
+        match health {
+            PodHealth::Failing => self.problems.err += 1,
+            PodHealth::Warning => self.problems.warn += 1,
+            PodHealth::Healthy => {}
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct PodIndex {
     pub issues: HashMap<OwnerKey, Status>,
@@ -108,16 +119,20 @@ impl PodIndex {
             if !is_active(pod) {
                 continue;
             }
-            let namespace = pod.metadata.namespace.clone().unwrap_or_default();
-            let facts = index.namespaces.entry(namespace).or_default();
-            facts.pods += 1;
-            match health {
-                PodHealth::Failing => facts.problems.err += 1,
-                PodHealth::Warning => facts.problems.warn += 1,
-                PodHealth::Healthy => {}
+            let namespace = pod.metadata.namespace.as_deref().unwrap_or_default();
+            if let Some(facts) = index.namespaces.get_mut(namespace) {
+                facts.record(health);
+            } else {
+                let mut facts = NamespaceFacts::default();
+                facts.record(health);
+                index.namespaces.insert(namespace.to_owned(), facts);
             }
-            if let Some(node) = pod.spec.as_ref().and_then(|s| s.node_name.clone()) {
-                *index.per_node.entry(node).or_default() += 1;
+            if let Some(node) = pod.spec.as_ref().and_then(|s| s.node_name.as_deref()) {
+                if let Some(count) = index.per_node.get_mut(node) {
+                    *count += 1;
+                } else {
+                    index.per_node.insert(node.to_owned(), 1);
+                }
             }
             let (requests, limits) = pod_resources(pod);
             index.requests.add(requests);

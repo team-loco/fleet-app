@@ -21,6 +21,8 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::error::Error;
 use crate::task::TaskGuard;
 
+const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CustomKind {
     pub group: String,
@@ -154,7 +156,9 @@ where
     let api: Api<K> = Api::all(client);
     let stream = reflector::reflector(
         writer,
-        watcher(api, watcher::Config::default()).default_backoff(),
+        watcher(api, watcher::Config::default())
+            .default_backoff()
+            .modify(trim_metadata),
     );
     let _guard = runtime.enter();
     RunningWatch {
@@ -175,7 +179,9 @@ pub fn spawn_custom(
     let api: Api<DynamicObject> = Api::all_with(client, resource);
     let stream = reflector::reflector(
         writer,
-        watcher(api, watcher::Config::default()).default_backoff(),
+        watcher(api, watcher::Config::default())
+            .default_backoff()
+            .modify(trim_metadata),
     );
     let _guard = runtime.enter();
     RunningWatch {
@@ -238,4 +244,56 @@ pub fn custom_snapshot(running: &RunningWatch) -> Vec<Arc<DynamicObject>> {
         .downcast_ref::<Store<DynamicObject>>()
         .map(Store::state)
         .unwrap_or_default()
+}
+
+fn trim_metadata<K: Resource>(object: &mut K) {
+    let metadata = object.meta_mut();
+    metadata.managed_fields = None;
+    if let Some(annotations) = &mut metadata.annotations {
+        annotations.remove(LAST_APPLIED);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn cached_metadata_drops_apply_payload_but_keeps_identity_and_flux_annotations() {
+        let parsed = serde_json::from_value::<PartialObjectMeta<ConfigMap>>(json!({
+            "metadata": {
+                "name": "config", "namespace": "scale", "uid": "uid", "resourceVersion": "42",
+                "labels": {"app": "scale"},
+                "annotations": {
+                    "kubectl.kubernetes.io/last-applied-configuration": "large payload",
+                    "reconcile.fluxcd.io/requestedAt": "now"
+                },
+                "managedFields": [{"manager": "kubectl", "operation": "Update", "apiVersion": "v1"}]
+            }
+        }));
+        let Ok(mut object) = parsed else {
+            panic!("fixture failed")
+        };
+        trim_metadata(&mut object);
+        assert!(object.metadata.managed_fields.is_none());
+        let Some(annotations) = object.metadata.annotations else {
+            panic!("annotations lost")
+        };
+        assert!(!annotations.contains_key("kubectl.kubernetes.io/last-applied-configuration"));
+        assert_eq!(
+            annotations
+                .get("reconcile.fluxcd.io/requestedAt")
+                .map(String::as_str),
+            Some("now")
+        );
+        assert_eq!(object.metadata.name.as_deref(), Some("config"));
+        assert_eq!(object.metadata.namespace.as_deref(), Some("scale"));
+        assert_eq!(object.metadata.uid.as_deref(), Some("uid"));
+        assert_eq!(object.metadata.resource_version.as_deref(), Some("42"));
+        let Some(labels) = object.metadata.labels else {
+            panic!("labels lost")
+        };
+        assert_eq!(labels.get("app").map(String::as_str), Some("scale"));
+    }
 }

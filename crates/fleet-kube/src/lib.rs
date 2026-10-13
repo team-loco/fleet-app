@@ -30,6 +30,7 @@ pub mod shell_env;
 pub mod snapshot;
 pub mod store;
 pub mod task;
+pub mod throttle;
 pub mod usage;
 pub mod watch;
 pub mod workload;

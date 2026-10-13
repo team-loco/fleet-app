@@ -79,3 +79,36 @@ mise run e2e:down
 ```
 
 This deletes only `fleet-a` and `fleet-b` and their kind kubeconfig entries.
+
+## Scale and snapshot performance
+
+`mise run e2e:scale` adds a disposable `fleet-scale` namespace to **kind-fleet-b only**.
+The task obtains a temporary kubeconfig directly from kind, uses an explicit context on every
+kubectl call, and never loads the user's kubeconfig. It creates 3,000 ConfigMaps with 1 KiB payloads,
+1,500 headless Services, 400 zero-replica Deployments (and their controller-created ReplicaSets),
+2,000 Events and 200 pause Pods. Pods above the node's pod capacity can remain Pending; they still
+exercise the real pod watcher. Eight bounded apply workers keep setup practical. Re-running is
+idempotent. The image is pinned in `mise.toml`.
+
+Run `mise run e2e:scale:bench` after setup. The ignored release tests measure selected-cluster page
+rebuilds, live heap freed when watcher stores and tasks are released, and pod label patches through
+the real LiveBackend channel into the UI's `AppState`. Twelve isolated probes, one second apart, must
+reach `AppState` with a median under 300 ms including the API request; their maximum after the API
+acknowledged the patch must stay under 1 s, so a stalled API server on a loaded host does not fail
+the run. A ten-second storm of eight concurrent pod patchers then checks that snapshots stay at most
+one per snapshot interval while probes still get through. Each line prints the load average. This
+measures state availability, not a rendered gpui frame. The API server drops Events after its one-hour
+event TTL, so re-run `mise run e2e:scale` before benchmarking an older scenario. The heap test uses [dhat](https://docs.rs/dhat/latest/dhat/) in its own profiling scope;
+timing measurements run without profiling. RSS is also reported, but includes clients and runtime
+memory and is not used as a store heap measurement. Run these tests alone to avoid CPU contention.
+
+`mise run bench:snapshot` needs no cluster. It builds 10,000 realistic pod view models and their
+overview index, plus 5,000 metadata-only ConfigMap rows. It reports medians and maxima over 40 samples
+and enforces a 20 ms median rebuild budget. Allocation budgets catch temporary string cloning even
+when wall-clock measurements are noisy. Normal `mise run check` leaves these timing tests ignored.
+The generator's boundary tests run with
+`mise exec -- python3 -m unittest discover -s e2e -p test_scale.py`.
+
+Always finish with `mise run e2e:scale:down`, then `e2e/verify` using a temporary kubeconfig containing
+only the two kind contexts. Teardown deletes only `fleet-scale` on kind-fleet-b and preserves the
+normal Flux scenarios. Benchmark setup fails if kind-fleet-b or the scale objects are missing.
