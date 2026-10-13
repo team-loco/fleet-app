@@ -1,6 +1,6 @@
 use crate::{ClusterId, Status};
 
-pub const DEFAULT_NAMESPACE: &str = "default";
+const DEFAULT_NAMESPACE: &str = "default";
 const EXEC: &str = "exec";
 const SEPARATOR: &str = " · ";
 const AUTO: &str = "auto";
@@ -38,6 +38,7 @@ pub enum Auth {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Preferences {
+    pub namespace_selection: Option<NamespaceSelection>,
     pub default_namespace: Option<String>,
     pub metrics: MetricsSource,
     pub confirm_destructive: bool,
@@ -63,12 +64,37 @@ pub enum ClusterAction {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            namespace_selection: None,
             default_namespace: None,
             metrics: MetricsSource::default(),
             confirm_destructive: true,
             notify: true,
             labels: Vec::new(),
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NamespaceSelection {
+    All,
+    Named(String),
+}
+
+impl NamespaceSelection {
+    pub fn namespace(&self) -> Option<&str> {
+        match self {
+            Self::All => None,
+            Self::Named(namespace) => Some(namespace),
+        }
+    }
+}
+
+impl Preferences {
+    pub fn namespace_selection(&self) -> NamespaceSelection {
+        self.namespace_selection.clone().unwrap_or_else(|| {
+            let namespace = self.default_namespace.as_deref().and_then(parse_namespace);
+            NamespaceSelection::Named(namespace.unwrap_or_else(|| DEFAULT_NAMESPACE.into()))
+        })
     }
 }
 
@@ -158,12 +184,6 @@ impl ClusterSettings {
 }
 
 impl ClusterCatalog {
-    pub fn default_namespace(&self, cluster: &ClusterId) -> &str {
-        self.get(cluster)
-            .and_then(|settings| settings.preferences.default_namespace.as_deref())
-            .unwrap_or(DEFAULT_NAMESPACE)
-    }
-
     pub fn get(&self, cluster: &ClusterId) -> Option<&ClusterSettings> {
         self.clusters.iter().find(|c| &c.cluster == cluster)
     }
@@ -225,21 +245,21 @@ mod tests {
     }
 
     #[test]
-    fn the_default_namespace_is_the_preference_else_default() {
-        let mut configured = settings(Auth::Other("token".into()), false);
-        configured.preferences.default_namespace = Some("loco-system".into());
-        let catalog = ClusterCatalog {
-            sources: 1,
-            clusters: vec![configured],
-        };
+    fn namespace_memory_overrides_preferred_default_and_keeps_all_explicit() {
+        let mut preferences = Preferences::default();
         assert_eq!(
-            catalog.default_namespace(&ClusterId::new("qa-gke")),
-            "loco-system"
+            preferences.namespace_selection().namespace(),
+            Some("default")
         );
+        preferences.default_namespace = Some("payments".into());
         assert_eq!(
-            catalog.default_namespace(&ClusterId::new("elsewhere")),
-            DEFAULT_NAMESPACE
+            preferences.namespace_selection().namespace(),
+            Some("payments")
         );
+        preferences.namespace_selection = Some(NamespaceSelection::All);
+        assert_eq!(preferences.namespace_selection().namespace(), None);
+        preferences.namespace_selection = Some(NamespaceSelection::Named("web".into()));
+        assert_eq!(preferences.namespace_selection().namespace(), Some("web"));
     }
 
     #[test]

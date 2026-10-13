@@ -372,11 +372,42 @@ pub fn event(event: &core::Event, now: Timestamp) -> Event {
         .or(event.count)
         .and_then(|c| u32::try_from(c).ok())
         .unwrap_or(1);
+    let first_seen = event
+        .first_timestamp
+        .as_ref()
+        .map(|t| t.0)
+        .or_else(|| event.event_time.as_ref().map(|t| t.0))
+        .or_else(|| event.metadata.creation_timestamp.as_ref().map(|t| t.0));
+    let source = event.source.as_ref();
+    let details = fleet_core::events::EventDetails {
+        uid: event.metadata.uid.clone().unwrap_or_default(),
+        kind: involved.kind.clone().unwrap_or_default(),
+        object_uid: involved.uid.clone(),
+        object_namespace: involved.namespace.clone(),
+        event_type: event.type_.clone().unwrap_or_else(|| "Unknown".into()),
+        first_seen: first_seen.map(|t| t.to_string()),
+        last_seen: last_seen(event).map(|t| t.to_string()),
+        first_age: first_seen.map(|t| between(t, now)),
+        source_component: source
+            .and_then(|s| s.component.clone())
+            .or_else(|| event.reporting_component.clone())
+            .unwrap_or_default(),
+        source_host: source
+            .and_then(|s| s.host.clone())
+            .or_else(|| event.reporting_instance.clone())
+            .unwrap_or_default(),
+    };
     Event {
+        details,
         status,
         reason,
         object,
-        namespace: involved.namespace.clone().filter(|ns| !ns.is_empty()),
+        namespace: event
+            .metadata
+            .namespace
+            .clone()
+            .or_else(|| involved.namespace.clone())
+            .filter(|ns| !ns.is_empty()),
         message: event
             .message
             .as_deref()
@@ -534,6 +565,44 @@ mod tests {
         assert_eq!(row.status, Status::Err);
         assert_eq!((row.cpu, row.memory), (0.25, 0.5));
         assert_eq!(row.phase, "Active");
+    }
+
+    #[test]
+    fn event_inspector_preserves_identity_timestamps_and_reporting_source() {
+        let source: core::Event = parse::<core::Event>(json!({
+            "metadata": { "name": "backoff", "namespace": "payments", "uid": "event-uid", "creationTimestamp": at(60) },
+            "involvedObject": { "kind": "Pod", "name": "checkout", "namespace": "payments", "uid": "pod-uid" },
+            "reason": "BackOff", "type": "Warning", "message": "Full message without truncation",
+            "firstTimestamp": at(30), "lastTimestamp": at(5),
+            "series": { "count": 9, "lastObservedTime": at(1) },
+            "reportingComponent": "kubelet", "reportingInstance": "worker-a"
+        })).as_ref().clone();
+        let row = event(&source, now());
+        assert_eq!(row.details.uid, "event-uid");
+        assert_eq!(row.details.object_uid.as_deref(), Some("pod-uid"));
+        assert_eq!(row.details.kind, "Pod");
+        assert_eq!(row.details.event_type, "Warning");
+        assert_eq!(row.details.source_component, "kubelet");
+        assert_eq!(row.details.source_host, "worker-a");
+        assert_eq!(row.details.first_age, Some(Duration::from_mins(30)));
+        assert_eq!(row.details.first_seen.as_deref(), Some(at(30).as_str()));
+        assert_eq!(row.details.last_seen.as_deref(), Some(at(1).as_str()));
+        assert_eq!(row.age, Duration::from_secs(60));
+        assert_eq!(row.count, 9);
+        assert_eq!(row.message, "Full message without truncation");
+    }
+
+    #[test]
+    fn event_unknown_fields_remain_unknown_and_node_events_keep_event_namespace() {
+        let source = parse::<core::Event>(json!({
+            "metadata": { "name": "node-event", "namespace": "default" },
+            "involvedObject": { "kind": "Node", "name": "worker" }
+        }));
+        let row = event(&source, now());
+        assert_eq!(row.namespace.as_deref(), Some("default"));
+        assert_eq!(row.details.first_seen, None);
+        assert_eq!(row.details.last_seen, None);
+        assert_eq!(row.details.event_type, "Unknown");
     }
 
     #[test]

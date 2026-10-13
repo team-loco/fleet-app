@@ -79,7 +79,7 @@ impl ClusterPages {
         cluster: Option<&ClusterSummary>,
         detail: Option<&ClusterDetail>,
         confirm_destructive: bool,
-        namespace: Option<&str>,
+        preferences: &fleet_core::Preferences,
         cx: &mut App,
     ) {
         let (Some(cluster), Some(detail)) = (cluster, detail) else {
@@ -95,13 +95,13 @@ impl ClusterPages {
             Page::Namespaces => self
                 .namespaces
                 .update(cx, |screen, cx| screen.set(&cluster.id, detail, cx)),
-            Page::Events => self
-                .events
-                .update(cx, |screen, cx| screen.set(&cluster.id, detail, cx)),
+            Page::Events => self.events.update(cx, |screen, cx| {
+                screen.set(cluster, detail, preferences, cx);
+            }),
             other => {
                 if let Some(kind) = ResourceKind::for_page(other) {
                     self.resources.update(cx, |screen, cx| {
-                        screen.set(cluster, kind, detail, confirm_destructive, namespace, cx);
+                        screen.set(cluster, kind, detail, confirm_destructive, cx);
                     });
                 }
             }
@@ -121,10 +121,8 @@ impl ClusterPages {
             .find(|kind| kind.name() == target.kind);
         if let (Some(kind), Some(namespace)) = (kind, target.namespace.clone()) {
             let name = target.name.clone();
-            let cluster = target.cluster.clone();
-            self.resources.update(cx, |screen, cx| {
-                screen.reveal(&cluster, kind, namespace, name, cx);
-            });
+            self.resources
+                .update(cx, |screen, cx| screen.reveal(kind, namespace, name, cx));
         }
     }
 
@@ -161,6 +159,7 @@ impl ClusterPages {
     pub fn close_inspector(&self, page: Page, cx: &mut App) -> bool {
         match page {
             Page::Nodes => self.nodes.update(cx, NodesScreen::close_inspector),
+            Page::Events => self.events.update(cx, EventsScreen::close_inspector),
             other if ResourceKind::for_page(other).is_some() => {
                 self.resources.update(cx, ResourcesScreen::close_inspector)
             }

@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use fleet_core::home::ClusterMetrics;
-use fleet_core::{ClusterId, ClusterSummary, Counts, Page, ResourceKind, Status};
+use fleet_core::{ClusterId, ClusterSummary, Counts, Page, Status};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Event, Namespace, Node, PersistentVolumeClaim, Pod, Secret, Service,
+    ConfigMap, Namespace, Node, PersistentVolumeClaim, Pod, Secret, Service,
 };
 use k8s_openapi::api::networking::v1::Ingress;
 use kube::api::PartialObjectMeta;
@@ -169,27 +169,16 @@ pub fn page_kinds(page: Page) -> Vec<WatchKind> {
     match page {
         Page::ClusterOverview => OVERVIEW_KINDS.to_vec(),
         Page::Pods => vec![WatchKind::Pods, WatchKind::Events],
+        Page::Events => vec![WatchKind::FilteredEvents, WatchKind::Namespaces],
         other => page_kind(other).into_iter().collect(),
     }
-}
-
-pub fn page_watches(page: Page, namespace: Option<&str>) -> Vec<(WatchKind, Option<String>)> {
-    if ResourceKind::for_page(page).is_none() {
-        return page_kinds(page)
-            .into_iter()
-            .map(|kind| (kind, None))
-            .collect();
-    }
-    let scoped = page_kinds(page)
-        .into_iter()
-        .map(|kind| (kind, namespace.map(str::to_owned)));
-    scoped.chain([(WatchKind::Namespaces, None)]).collect()
 }
 
 fn kind_total(handle: &ClusterHandle, kind: &WatchKind) -> Option<u32> {
     let len = match kind {
         WatchKind::Namespaces => handle.objects::<Namespace>().len(),
-        WatchKind::Events => handle.objects::<Event>().len(),
+        WatchKind::Events => handle.event_objects().len(),
+        WatchKind::FilteredEvents => return None,
         WatchKind::Deployments => handle.objects::<Deployment>().len(),
         WatchKind::StatefulSets => handle.objects::<StatefulSet>().len(),
         WatchKind::DaemonSets => handle.objects::<DaemonSet>().len(),
@@ -223,7 +212,7 @@ pub fn summarize(
     let nodes = handle.objects::<Node>();
     let (status, state) = cluster_state(&connection, problems);
     let mut nav = BTreeMap::from([(Page::Nodes, node_counts(&nodes))]);
-    for kind in handle.cluster_wide_kinds() {
+    for kind in handle.watched_kinds() {
         let page = kind_page(&kind);
         let total = kind_total(handle, &kind);
         if let (Some(page), Some(total)) = (page, total) {
@@ -277,29 +266,6 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-
-    #[test]
-    fn list_pages_watch_one_namespace_and_the_namespace_list() {
-        assert_eq!(
-            page_watches(Page::Deployments, Some("payments")),
-            [
-                (WatchKind::Deployments, Some("payments".to_owned())),
-                (WatchKind::Namespaces, None)
-            ]
-        );
-        assert_eq!(
-            page_watches(Page::Secrets, None),
-            [(WatchKind::Secrets, None), (WatchKind::Namespaces, None)]
-        );
-        assert_eq!(
-            page_watches(Page::Pods, Some("payments")),
-            [(WatchKind::Pods, None), (WatchKind::Events, None)]
-        );
-        assert_eq!(
-            page_watches(Page::Nodes, Some("payments")),
-            [(WatchKind::Nodes, None)]
-        );
-    }
     use crate::failure::{Failure, FailureKind};
 
     fn pod(status: &serde_json::Value) -> Arc<Pod> {
@@ -385,5 +351,9 @@ mod tests {
         );
         assert_eq!(page_kinds(Page::Secrets), [WatchKind::Secrets]);
         assert_eq!(page_kinds(Page::Changes), []);
+        assert_eq!(
+            page_kinds(Page::Events),
+            [WatchKind::FilteredEvents, WatchKind::Namespaces]
+        );
     }
 }

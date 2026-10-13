@@ -2,7 +2,7 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use fleet_core::settings::MetricsSource;
+use fleet_core::settings::{MetricsSource, NamespaceSelection};
 use fleet_core::{ClusterId, NewCluster, Preferences};
 use jiff::Timestamp;
 use serde::de::DeserializeOwned;
@@ -31,6 +31,7 @@ pub struct SavedCluster {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SavedPreferences {
+    pub namespace_selection: Option<SavedNamespace>,
     pub default_namespace: Option<String>,
     pub metrics: SavedMetrics,
     pub confirm_destructive: bool,
@@ -47,6 +48,13 @@ pub enum SavedMetrics {
     Prometheus,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SavedNamespace {
+    All,
+    Named(String),
+}
+
 impl Default for SavedPreferences {
     fn default() -> Self {
         Self::from(&Preferences::default())
@@ -61,6 +69,14 @@ impl From<&Preferences> for SavedPreferences {
             MetricsSource::Prometheus => SavedMetrics::Prometheus,
         };
         Self {
+            namespace_selection: preferences.namespace_selection.as_ref().map(
+                |scope| match scope {
+                    NamespaceSelection::All => SavedNamespace::All,
+                    NamespaceSelection::Named(namespace) => {
+                        SavedNamespace::Named(namespace.clone())
+                    }
+                },
+            ),
             default_namespace: preferences.default_namespace.clone(),
             metrics,
             confirm_destructive: preferences.confirm_destructive,
@@ -78,6 +94,10 @@ impl From<&SavedPreferences> for Preferences {
             SavedMetrics::Prometheus => MetricsSource::Prometheus,
         };
         Self {
+            namespace_selection: saved.namespace_selection.as_ref().map(|scope| match scope {
+                SavedNamespace::All => NamespaceSelection::All,
+                SavedNamespace::Named(namespace) => NamespaceSelection::Named(namespace.clone()),
+            }),
             default_namespace: saved.default_namespace.clone(),
             metrics,
             confirm_destructive: saved.confirm_destructive,
@@ -360,6 +380,7 @@ mod tests {
         let mut store = ClusterStore::empty(dir.path());
         assert!(store.add(&[new_cluster("kind-fleet-a", "fleet-a")]).is_ok());
         let preferences = Preferences {
+            namespace_selection: Some(NamespaceSelection::All),
             default_namespace: Some("payments".to_owned()),
             metrics: MetricsSource::Prometheus,
             confirm_destructive: false,
@@ -376,7 +397,21 @@ mod tests {
             panic!("reopen");
         };
         let saved = reopened.get(&id).map(|c| Preferences::from(&c.preferences));
-        assert_eq!(saved, Some(preferences));
+        assert_eq!(saved, Some(preferences.clone()));
+        let mut reopened = reopened;
+        let named = Preferences {
+            namespace_selection: Some(NamespaceSelection::Named("web".into())),
+            ..preferences
+        };
+        assert!(reopened.set_preferences(&id, &named).is_ok());
+        let reopened = ClusterStore::open_at(dir.path(), now())
+            .unwrap_or_else(|error| panic!("reopen: {error}"));
+        assert_eq!(
+            reopened
+                .get(&id)
+                .map(|cluster| Preferences::from(&cluster.preferences)),
+            Some(named)
+        );
     }
 
     #[test]

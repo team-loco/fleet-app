@@ -410,6 +410,15 @@ fn sync_component_theme(appearance: Appearance, cx: &mut App) {
     });
 }
 
+pub const EVENT_REASON_WIDTH: Pixels = px(190.);
+pub const EVENT_OBJECT_WEIGHT: f32 = 1.2;
+pub const EVENT_OBJECT_MIN: Pixels = px(290.);
+pub const EVENT_NAMESPACE_WIDTH: Pixels = px(110.);
+pub const EVENT_MESSAGE_WEIGHT: f32 = 2.;
+pub const EVENT_MESSAGE_MIN: Pixels = px(260.);
+pub const EVENT_COUNT_WIDTH: Pixels = px(40.);
+pub const EVENT_AGE_WIDTH: Pixels = px(44.);
+
 #[cfg(test)]
 mod tests {
     use super::*;

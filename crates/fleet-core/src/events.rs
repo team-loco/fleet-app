@@ -3,10 +3,11 @@ use std::time::Duration;
 use crate::filter::TextFilter;
 use crate::overview::{join_clauses, plural};
 use crate::time::age;
-use crate::{Counts, Status};
+use crate::{ClusterId, Counts, ResourceRef, Status};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
+    pub details: EventDetails,
     pub status: Status,
     pub reason: String,
     pub object: String,
@@ -16,7 +17,68 @@ pub struct Event {
     pub count: u32,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EventDetails {
+    pub uid: String,
+    pub kind: String,
+    pub object_uid: Option<String>,
+    pub object_namespace: Option<String>,
+    pub event_type: String,
+    pub first_seen: Option<String>,
+    pub last_seen: Option<String>,
+    pub first_age: Option<Duration>,
+    pub source_component: String,
+    pub source_host: String,
+}
+
 impl Event {
+    pub fn target(&self, cluster: &ClusterId) -> Option<ResourceRef> {
+        let (kind, name) = self.object.split_once('/')?;
+        if name.is_empty() || kind.is_empty() {
+            return None;
+        }
+        let kind = if self.details.kind.is_empty() {
+            crate::resource::KINDS
+                .iter()
+                .find(|info| info.kind.eq_ignore_ascii_case(kind))
+                .map_or(kind, |info| info.kind)
+        } else {
+            &self.details.kind
+        };
+        let namespace = match kind {
+            "Node" => None,
+            "Namespace" => None,
+            _ => self
+                .details
+                .object_namespace
+                .clone()
+                .or_else(|| self.namespace.clone()),
+        };
+        Some(ResourceRef {
+            cluster: cluster.clone(),
+            kind: kind.into(),
+            namespace,
+            name: name.into(),
+        })
+    }
+
+    pub fn same_object(&self, other: &Self) -> bool {
+        match (&self.details.object_uid, &other.details.object_uid) {
+            (Some(left), Some(right)) => left == right,
+            _ => self.object == other.object && self.namespace == other.namespace,
+        }
+    }
+
+    pub fn key(&self) -> String {
+        if !self.details.uid.is_empty() {
+            return self.details.uid.clone();
+        }
+        format!(
+            "{:?}/{}/{}/{}",
+            self.namespace, self.object, self.reason, self.message
+        )
+    }
+
     pub fn is_warning(&self) -> bool {
         self.status != Status::Ok
     }
@@ -129,6 +191,16 @@ pub fn sentence(events: &[Event]) -> String {
     )
 }
 
+pub fn in_namespace(events: &[Event], namespace: Option<&str>) -> Vec<Event> {
+    events
+        .iter()
+        .filter(|event| {
+            namespace.is_none_or(|namespace| event.namespace.as_deref() == Some(namespace))
+        })
+        .cloned()
+        .collect()
+}
+
 pub fn filter_events(events: &[Event], filter: EventFilter, query: &TextFilter) -> Vec<Event> {
     let kept: Vec<Event> = events
         .iter()
@@ -146,6 +218,7 @@ mod tests {
 
     fn event(status: Status, reason: &str, minutes: u64) -> Event {
         Event {
+            details: EventDetails::default(),
             status,
             reason: reason.into(),
             object: format!("pod/{}", reason.to_lowercase()),
@@ -158,6 +231,59 @@ mod tests {
 
     fn reasons(events: &[Event]) -> Vec<&str> {
         events.iter().map(|e| e.reason.as_str()).collect()
+    }
+
+    #[test]
+    fn namespace_filter_keeps_all_explicit_and_empty_namespaces_empty() {
+        let mut rows = vec![event(Status::Warn, "BackOff", 1)];
+        let mut other = rows[0].clone();
+        other.namespace = Some("default".into());
+        rows.push(other);
+        assert_eq!(in_namespace(&rows, None).len(), 2);
+        assert_eq!(in_namespace(&rows, Some("payments")).len(), 1);
+        assert_eq!(in_namespace(&rows, Some("missing")).len(), 0);
+    }
+
+    #[test]
+    fn object_links_use_canonical_kinds_and_preserve_namespace() {
+        let mut row = event(Status::Warn, "BackOff", 1);
+        let cluster = ClusterId::new("dev");
+        let target = row.target(&cluster).unwrap_or_else(|| panic!("target"));
+        assert_eq!(target.kind, "Pod");
+        assert_eq!(target.namespace.as_deref(), Some("payments"));
+        assert_eq!(target.name, "backoff");
+        row.object = "node/worker".into();
+        assert_eq!(
+            row.target(&cluster).and_then(|target| target.namespace),
+            None
+        );
+        row.object = "pod/".into();
+        assert!(row.target(&cluster).is_none());
+    }
+
+    #[test]
+    fn object_identity_distinguishes_namespaces_and_recreated_objects() {
+        let row = event(Status::Warn, "BackOff", 1);
+        let mut other = row.clone();
+        other.reason = "Pulled".into();
+        assert!(row.same_object(&other));
+        other.namespace = Some("default".into());
+        assert!(!row.same_object(&other));
+        let mut row = row;
+        row.details.object_uid = Some("old".into());
+        other = row.clone();
+        other.details.object_uid = Some("new".into());
+        assert!(!row.same_object(&other));
+    }
+
+    #[test]
+    fn stable_uid_keeps_selection_when_message_and_count_change() {
+        let mut row = event(Status::Warn, "BackOff", 1);
+        row.details.uid = "event-uid".into();
+        let mut updated = row.clone();
+        updated.count += 1;
+        updated.message = "retrying".into();
+        assert_eq!(row.key(), updated.key());
     }
 
     #[test]

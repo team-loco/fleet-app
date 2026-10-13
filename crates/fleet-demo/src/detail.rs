@@ -18,6 +18,9 @@ const GPU_MEMORY: f32 = 40.;
 const POD_CAPACITY: u32 = 110;
 const KUBELET: &str = "v1.31.2-eks-7f9249a";
 const OS_IMAGE: &str = "Amazon Linux 2023.5.20240916";
+const EVENT_FIRST_AGE: Duration = Duration::from_secs(3600);
+const EVENT_NOW: jiff::Timestamp = jiff::Timestamp::constant(1_791_873_360, 0);
+
 const RUNTIME: &str = "containerd://1.7.20";
 const GENERAL: &str = "m6i.4xlarge";
 const GPU: &str = "g5.2xlarge";
@@ -688,6 +691,7 @@ fn events() -> Vec<Event> {
     seeds
         .into_iter()
         .map(|seed| Event {
+            details: event_details(seed.object, seed.status, seed.age),
             status: seed.status,
             reason: seed.reason.into(),
             object: seed.object.into(),
@@ -699,10 +703,58 @@ fn events() -> Vec<Event> {
         .collect()
 }
 
+pub(crate) fn event_details(
+    object: &str,
+    status: Status,
+    age: Duration,
+) -> fleet_core::events::EventDetails {
+    let short_kind = object
+        .split_once('/')
+        .map(|(kind, _)| kind)
+        .unwrap_or_default();
+    let kind = fleet_core::resource::KINDS
+        .iter()
+        .find(|info| info.kind.eq_ignore_ascii_case(short_kind))
+        .map(|info| info.kind.to_owned())
+        .unwrap_or_default();
+    let first_age = EVENT_FIRST_AGE.max(age);
+    let first_seen = EVENT_NOW
+        .checked_sub(first_age)
+        .ok()
+        .map(|time| time.to_string());
+    let last_seen = EVENT_NOW.checked_sub(age).ok().map(|time| time.to_string());
+    fleet_core::events::EventDetails {
+        kind,
+        event_type: if status == Status::Ok {
+            "Normal".into()
+        } else {
+            "Warning".into()
+        },
+        first_seen,
+        last_seen,
+        first_age: Some(first_age),
+        source_component: "kubelet".into(),
+        source_host: "ip-10-0-11-82.ec2.internal".into(),
+        ..Default::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use fleet_core::overview::percent;
+
+    #[test]
+    fn event_detail_times_agree_with_relative_ages() {
+        let details = event_details("pod/checkout", Status::Err, minutes(2));
+        assert_eq!(details.kind, "Pod");
+        assert_eq!(details.event_type, "Warning");
+        assert_eq!(details.first_seen.as_deref(), Some("2026-10-13T05:36:00Z"));
+        assert_eq!(details.last_seen.as_deref(), Some("2026-10-13T06:34:00Z"));
+        let older = event_details("deployment/checkout", Status::Ok, hours(2));
+        assert_eq!(older.first_age, Some(hours(2)));
+        assert_eq!(older.first_seen, older.last_seen);
+    }
 
     #[test]
     fn prod_us_east_matches_design_overview() {

@@ -20,31 +20,10 @@ pub enum PrefsError {
 
 pub type ColumnWidths = BTreeMap<String, f32>;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum NamespacePick {
-    All,
-    Only(String),
-}
-
-impl NamespacePick {
-    pub fn of(choice: Option<&str>) -> Self {
-        choice.map_or(Self::All, |namespace| Self::Only(namespace.to_owned()))
-    }
-
-    pub fn choice(&self) -> Option<String> {
-        match self {
-            Self::All => None,
-            Self::Only(namespace) => Some(namespace.clone()),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ScopePrefs {
     pub columns: BTreeMap<String, ColumnWidths>,
-    pub namespaces: BTreeMap<String, NamespacePick>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -109,34 +88,6 @@ impl ViewPrefs {
         self.save()
     }
 
-    pub fn namespace_pick(&self, scope: &str, list: &str) -> Option<NamespacePick> {
-        self.file
-            .scopes
-            .get(scope)
-            .and_then(|prefs| prefs.namespaces.get(list))
-            .cloned()
-    }
-
-    pub fn namespace(&self, scope: &str, list: &str, default: &str) -> Option<String> {
-        self.namespace_pick(scope, list)
-            .map_or_else(|| Some(default.to_owned()), |pick| pick.choice())
-    }
-
-    pub fn set_namespace(
-        &mut self,
-        scope: &str,
-        list: &str,
-        choice: Option<&str>,
-    ) -> Result<(), PrefsError> {
-        let pick = NamespacePick::of(choice);
-        let prefs = self.file.scopes.entry(scope.to_owned()).or_default();
-        if prefs.namespaces.get(list) == Some(&pick) {
-            return Ok(());
-        }
-        prefs.namespaces.insert(list.to_owned(), pick);
-        self.save()
-    }
-
     fn save(&self) -> Result<(), PrefsError> {
         let Some(path) = &self.path else {
             return Ok(());
@@ -178,27 +129,6 @@ pub fn set_column_widths(scope: &str, table: &str, widths: ColumnWidths, cx: &mu
     }
 }
 
-pub fn namespace(scope: &str, list: &str, default: &str, cx: &App) -> Option<String> {
-    cx.try_global::<ViewPrefs>().map_or_else(
-        || Some(default.to_owned()),
-        |prefs| prefs.namespace(scope, list, default),
-    )
-}
-
-pub fn namespace_pick(scope: &str, list: &str, cx: &App) -> Option<NamespacePick> {
-    cx.try_global::<ViewPrefs>()
-        .and_then(|prefs| prefs.namespace_pick(scope, list))
-}
-
-pub fn set_namespace(scope: &str, list: &str, choice: Option<&str>, cx: &mut App) {
-    let result = cx
-        .default_global::<ViewPrefs>()
-        .set_namespace(scope, list, choice);
-    if let Err(error) = result {
-        tracing::warn!(%error, "could not save the namespace choice");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,29 +143,6 @@ mod tests {
         assert_eq!(reopened.column_widths("prod", "pods"), widths);
         assert!(reopened.column_widths("staging", "pods").is_empty());
         assert!(reopened.column_widths("prod", "nodes").is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn namespace_picks_default_until_chosen_and_survive_a_reopen() -> Result<(), PrefsError> {
-        let dir = tempfile::tempdir()?;
-        let mut prefs = ViewPrefs::open(dir.path())?;
-        assert_eq!(
-            prefs.namespace("prod", "Pod", "default").as_deref(),
-            Some("default")
-        );
-        prefs.set_namespace("prod", "Pod", Some("loco-system"))?;
-        prefs.set_namespace("prod", "Deployment", None)?;
-        let reopened = ViewPrefs::open(dir.path())?;
-        assert_eq!(
-            reopened.namespace("prod", "Pod", "default").as_deref(),
-            Some("loco-system")
-        );
-        assert_eq!(reopened.namespace("prod", "Deployment", "default"), None);
-        assert_eq!(
-            reopened.namespace("staging", "Pod", "apps").as_deref(),
-            Some("apps")
-        );
         Ok(())
     }
 
