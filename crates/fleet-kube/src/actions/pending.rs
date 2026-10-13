@@ -255,7 +255,7 @@ mod tests {
             mutation.map(|m| (m.target(), m.verb())),
             Some((node, "Drain"))
         );
-        assert_eq!(Mutation::from_command(&Command::ToggleClustersPanel), None);
+        assert_eq!(Mutation::from_command(&Command::ToggleSidebar), None);
     }
 
     #[test]

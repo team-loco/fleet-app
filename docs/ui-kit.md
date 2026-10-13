@@ -377,6 +377,22 @@ Inspector::new("node-inspector", "ip-10-4-31-12")
     .width(px(480.))                       // default `theme::INSPECTOR` (360)
 ```
 
+Inspectors that come and go animate with `Presence` (keep it in the screen) and the slide helpers:
+
+```rust
+let current = self.selected_node().cloned();
+self.presence.track(current.as_ref(), presence, cx);  // fn presence(s: &mut NodesScreen) -> &mut Presence<Node>
+let inspector = match current {
+    Some(node) => Some(slide_in(self.inspector(&node, cx), "node-inspector", &node.name, INSPECTOR)),
+    None => self.presence.leaving().cloned().map(|node| slide_out(self.inspector(&node, cx), "node-inspector", INSPECTOR)),
+};
+swap_in(content, "pod-inspector", &selection)   // always-present panes: fade and slide on selection change
+```
+
+`slide_in` grows the width and fades in once, then replays a short fade and slide whenever the
+selection key changes; `slide_out` keeps the last selection on screen for `INSPECTOR_OUT`. Reduced
+motion drops the exit at once.
+
 ## Relative time
 
 `fleet_core::time::age(duration) -> "4s" | "2m" | "3h" | "9d" | "1y"` and

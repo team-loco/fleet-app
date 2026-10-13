@@ -15,7 +15,7 @@ use streams::{LogSession, SEARCH_PLACEHOLDER, ShellSession, TERMINAL_ID, crash_l
 use crate::kit::{
     ActionMenu, Button, Column, ConfirmDialog, DockState, InputEvent, KeyValue, Link, LogView,
     MenuItem, SectionLabel, Segmented, Select, SelectEvent, Split, StatusGlyph, StatusText, Table,
-    TableEvent, Terminal, TextField, TextFieldState, confirm,
+    TableEvent, Terminal, TextField, TextFieldState, confirm, swap_in,
 };
 use crate::theme::{
     ActiveTheme, CONTAINER_SQUARE, CONTAINER_SQUARE_GAP, FONT_MONO, LINE_PROSE, Palette,
@@ -23,6 +23,7 @@ use crate::theme::{
     TEXT_BODY, TEXT_MONO, TEXT_SMALL, TEXT_UI,
 };
 
+const INSPECTOR_ID: &str = "pod-inspector";
 const NAME_MIN: Pixels = px(220.);
 const NAME_WEIGHT: f32 = 2.;
 const NAMESPACE: Pixels = px(100.);
@@ -328,6 +329,10 @@ impl PodsScreen {
 
     fn inspector(&self, cx: &mut Context<Self>) -> AnyElement {
         let palette = *cx.palette();
+        let selection = self
+            .selected_pod()
+            .map(|pod| format!("{}/{}", pod.namespace, pod.name))
+            .unwrap_or_default();
         let (header, body) = match self.selected_pod() {
             Some(pod) => (
                 Some(self.pod_header(pod, &palette, cx)),
@@ -342,7 +347,7 @@ impl PodsScreen {
                     .into_any_element(),
             ),
         };
-        div()
+        let panel = div()
             .flex()
             .flex_col()
             .size_full()
@@ -351,12 +356,16 @@ impl PodsScreen {
             .children(header)
             .child(
                 div()
-                    .id("pod-inspector")
+                    .id(INSPECTOR_ID)
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
                     .child(body),
-            )
+            );
+        div()
+            .size_full()
+            .bg(palette.panel)
+            .child(swap_in(panel, INSPECTOR_ID, &selection))
             .into_any_element()
     }
 

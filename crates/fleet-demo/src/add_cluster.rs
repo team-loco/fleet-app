@@ -327,6 +327,6 @@ mod tests {
         assert_eq!(fleet.clusters.len(), 0);
         let remaining: usize = adding.files().iter().map(|f| f.contexts.len()).sum();
         assert_eq!(remaining, 3);
-        assert!(!adding.handle(&Command::ToggleClustersPanel, &mut fleet, &tx));
+        assert!(!adding.handle(&Command::ToggleSidebar, &mut fleet, &tx));
     }
 }

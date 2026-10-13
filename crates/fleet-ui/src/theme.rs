@@ -40,11 +40,10 @@ pub const ROW_MATRIX: Pixels = px(38.);
 pub const ROW_CATALOG: Pixels = px(44.);
 
 pub const STRIP: Pixels = px(28.);
-pub const STRIP_ITEM: Pixels = px(22.);
-pub const CLUSTERS_PANEL: Pixels = px(164.);
-pub const RESOURCES_PANEL: Pixels = px(196.);
-pub const NAV_MIN_WIDTH: Pixels = px(84.);
-pub const PANEL_HEADER: Pixels = px(32.);
+pub const SIDEBAR: Pixels = px(196.);
+pub const SIDEBAR_COLLAPSED: Pixels = px(76.);
+pub const SWITCHER_WIDTH: Pixels = px(340.);
+pub const SWITCHER_LIST: Pixels = px(420.);
 pub const PAGE_HEADER: Pixels = px(44.);
 pub const STATUS_BAR: Pixels = px(26.);
 pub const ASIDE_WIDTH: Pixels = px(300.);
@@ -136,6 +135,10 @@ pub const CODE_PAD_Y: Pixels = px(3.);
 pub const EMPTY_WIDTH: Pixels = px(520.);
 
 pub const COLLAPSE: Duration = Duration::from_millis(150);
+pub const INSPECTOR_IN: Duration = Duration::from_millis(180);
+pub const INSPECTOR_OUT: Duration = Duration::from_millis(140);
+pub const INSPECTOR_SWAP: Duration = Duration::from_millis(140);
+pub const INSPECTOR_SLIDE: Pixels = px(12.);
 pub const POPOVER_IN: Duration = Duration::from_millis(120);
 pub const PALETTE_IN: Duration = Duration::from_millis(140);
 pub const PALETTE_OUT: Duration = Duration::from_millis(90);

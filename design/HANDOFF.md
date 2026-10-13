@@ -5,28 +5,31 @@ Each screen is in `screens/`: the markup holds the layout and inline styles, and
 
 ## Layout (every window)
 
+Superseded in Fleet by decision 18 (`docs/decisions.md`): one sidebar, clusters switch from the status bar.
+
 ```
-┌──────────────┬───────────────────┬────────────────────────────────────┐
-│ ● ● ●        (28px strip, window controls only — no title bar)        │
-├──────────────┼───────────────────┼────────────────────────────────────┤
-│ CLUSTERS   « │ prod-us-east    « │ page header (44px): name · status  │
-│ All clusters │ Overview          │   one primary action + ⋯ menu       │
-│ ✕ prod-us-…  │ Nodes      ▲1 14  │                                    │
-│ ● prod-eu-…  │ Namespaces    23  │ content (scrolls)                  │
-│ ▲ staging    │ Events        ▲7  │                                    │
-│ …            │ LOCO (flag)       │                                    │
-│ + Add cluster│ WORKLOADS / FLUX  │                                    │
-│ 164px        │ 196px             │                                    │
-├──────────────┴───────────────────┴────────────────────────────────────┤
-│ status bar 26px: ✕3 ▲6 · EKS · us-east-1 · v1.31.2 · ● loco agent synced 4s ago │
-└──────────────────────────────────────────────────────────────────────┘
+┌───────────────────┬────────────────────────────────────┐
+│ ● ● ●           « │ page header (44px): name · status  │
+├───────────────────┤   one primary action + ⋯ menu       │
+│ Overview          │                                    │
+│ Nodes      ▲1 14  │ content (scrolls)                  │
+│ Namespaces    23  │                                    │
+│ Events        ▲7  │                                    │
+│ LOCO (installed)  │                                    │
+│ WORKLOADS / FLUX  │                                    │
+│ 196px             │                                    │
+├───────────────────┴────────────────────────────────────┤
+│ status bar 26px: ✕ prod-us-east ^ · ✕3 ▲6 · EKS · us-east-1 · v1.31.2 · ● loco agent synced 4s ago │
+└────────────────────────────────────────────────────────┘
 ```
 
-- Two side panels, each collapsible to a 28px strip (decision 16: status glyph rows instead of a vertical label). ⌘⇧B toggles the clusters panel and ⌘B the resources panel.
-- Left panel: plain cluster names with a status glyph. No icons or avatars.
-- The cluster name appears exactly once: as the resource panel's header.
+- One sidebar under the 28px strip (window controls and the collapse chevron, no title bar). ⌘B collapses it to 76px: the strip and an expand chevron, no cluster name or state.
+- On Fleet home the sidebar holds Overview, Problems, GitOps and Changes; in a cluster it holds that cluster's pages. The LOCO section appears only on clusters running Loco.
+- The status bar starts with the cluster switcher: the current cluster's status glyph and name (◎ All clusters on Fleet home). A click or ⌘⇧C opens a filterable, keyboard-driven list of every cluster with its state and problem counts, plus All clusters and Add cluster; each cluster's ⋯ holds Settings, Connect or Disconnect and Remove from Fleet. Switching never disconnects a cluster.
+- Plain cluster names with a status glyph. No icons or avatars.
 - No tabs, no breadcrumbs, no panel-layout buttons. ⌘K opens the command palette from the keyboard; there is no visible button for it.
 - One visible primary action per page (for example Reconcile). Everything else goes in a ⋯ / Actions menu, each item with a one-line description.
+- Inspectors slide and fade in from the right and out again when closed.
 
 ## Visual rules
 
@@ -40,7 +43,7 @@ Each screen is in `screens/`: the markup holds the layout and inline styles, and
 |---|---|---|---|
 | editor | #111317 | #FFFFFF | content background |
 | panel | #15181D | #F6F7F8 | side panels, inspectors |
-| chrome | #1A1D22 | #EEEFF1 | cluster panel, status bar, strip |
+| chrome | #1A1D22 | #EEEFF1 | status bar, strip, popover footers |
 | hover | #1D2127 | #F1F2F4 | row hover |
 | line / line2 | #262A30 / #323740 | #E1E3E7 / #CFD3D9 | rules / control borders |
 | fg / fg2 / mute | #DCDFE4 / #B3B9C3 / #8E96A3 | #1D2027 / #3B414B / #5F6774 | text levels |
@@ -68,6 +71,6 @@ Row heights: 24–28px for tables, 26px for nav rows. Use virtualized lists (`un
 
 **Other**: `Flux` (sync grid across clusters), `AddCluster` and `AddClusterCheck` (pick kubeconfig contexts, then connection checks), `AppIcon`.
 Light variants: `*Light.dc.html`.
-Shared parts: `Nav` (the two side panels), `StatusBar`.
+Shared parts: `Nav` (the sidebar; its clusters panel is superseded by the status bar switcher), `StatusBar`.
 
 `assets/shoal-logo.png` is the app icon; on macOS use a squircle with a ~22% corner radius.

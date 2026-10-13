@@ -1,25 +1,22 @@
-mod cluster_menu;
 mod page;
-mod panels;
+mod sidebar;
 mod status_bar;
-mod strip;
-
-use std::collections::BTreeMap;
+mod switcher;
 
 use fleet_core::palette::{COMPARE_KEY, LOGS_KEY, OWNER_KEY, resource_commands};
 use fleet_core::resource::short_kind;
-use fleet_core::{AddClusterStep, AppState, ClusterId, Command, Sender, Status, Update};
+use fleet_core::{AddClusterStep, AppState, Command, Sender, Status, Update};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement,
-    IntoElement, MouseButton, ParentElement, Render, Styled, Subscription, Task, Window, div,
+    App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
+    ParentElement, Render, Styled, Subscription, Task, Window, div,
 };
 
 use crate::Store;
 use crate::actions::{
-    CloseWindow, CompareAcrossClusters, FollowLogs, ShowFluxOwner, ToggleClustersPanel,
-    ToggleCommandPalette, ToggleResourcesPanel,
+    CloseWindow, CompareAcrossClusters, FollowLogs, ShowFluxOwner, ToggleClusterSwitcher,
+    ToggleCommandPalette, ToggleSidebar,
 };
-use crate::kit::{ActionMenu, Toast, toast};
+use crate::kit::{Toast, toast};
 use crate::screens::add_cluster::{AddClusterDialog, AddClusterEvent};
 use crate::screens::changes::ChangesScreen;
 use crate::screens::command::{CommandPalette, PaletteEvent};
@@ -31,7 +28,8 @@ use crate::screens::pods::PodsScreen;
 use crate::screens::settings::SettingsScreen;
 use crate::screens::workload::WorkloadScreen;
 use crate::screens::{ClusterPages, ScreenEvent};
-use crate::theme::{self, ActiveTheme, NAV_MIN_WIDTH, RULE, STRIP, TEXT_UI};
+use crate::theme::{self, ActiveTheme, TEXT_UI};
+use switcher::{ClusterSwitcher, SwitcherEvent};
 
 pub struct NewWindowRequest(pub Vec<Command>);
 
@@ -42,8 +40,7 @@ pub struct Shell {
     window_id: u64,
     commands: Sender<Command>,
     pending: Vec<Command>,
-    clusters_generation: usize,
-    resources_generation: usize,
+    sidebar_generation: usize,
     focus: FocusHandle,
     fleet: Entity<FleetScreen>,
     palette: Entity<CommandPalette>,
@@ -51,7 +48,8 @@ pub struct Shell {
     pages: ClusterPages,
     loaded: bool,
     add_cluster: Option<(Entity<AddClusterDialog>, Subscription)>,
-    cluster_menus: BTreeMap<ClusterId, Entity<ActionMenu>>,
+    switcher: Entity<ClusterSwitcher>,
+    _switcher_events: Subscription,
     workload: Option<(Entity<WorkloadScreen>, Subscription)>,
     flux_object: Entity<FluxObjectPage>,
     #[cfg(feature = "loco")]
@@ -137,6 +135,7 @@ impl Shell {
             cx.subscribe_in(&palette, window, |this, palette, event, window, cx| {
                 this.palette_event(palette, event, window, cx);
             });
+        let (switcher, switcher_events) = Self::new_switcher(window, cx);
         let pages = ClusterPages::new(window, cx, Self::screen_event);
         let flux_object = cx.new(FluxObjectPage::new);
         let flux_commands = cx.subscribe(&flux_object, |shell, _, command: &Command, cx| {
@@ -147,8 +146,7 @@ impl Shell {
             window_id,
             commands,
             pending: initial,
-            clusters_generation: 0,
-            resources_generation: 0,
+            sidebar_generation: 0,
             focus,
             fleet,
             palette,
@@ -156,7 +154,8 @@ impl Shell {
             pages,
             loaded: false,
             add_cluster: None,
-            cluster_menus: BTreeMap::new(),
+            switcher,
+            _switcher_events: switcher_events,
             workload: None,
             flux_object,
             #[cfg(feature = "loco")]
@@ -178,6 +177,19 @@ impl Shell {
             _flux_object: flux_commands,
             _screen_commands: screen_commands,
         }
+    }
+
+    fn new_switcher(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (Entity<ClusterSwitcher>, Subscription) {
+        let switcher = cx.new(|cx| ClusterSwitcher::new(window, cx));
+        let events = cx.subscribe_in(
+            &switcher,
+            window,
+            |this, _, event: &SwitcherEvent, window, cx| this.switcher_event(event, window, cx),
+        );
+        (switcher, events)
     }
 
     fn watch_close(
@@ -223,7 +235,6 @@ impl Shell {
             self.loaded = true;
         }
         self.state.update(update);
-        self.sync_cluster_menus(cx);
         self.run_pending(window, cx);
         let snapshot = &self.state.snapshot;
         self.fleet
@@ -286,6 +297,18 @@ impl Shell {
         self.palette.update(cx, |palette, cx| {
             palette.set_context(snapshot, current, cx);
         });
+        self.switcher.update(cx, |switcher, cx| {
+            switcher.set_context(&snapshot.clusters, current, cx);
+        });
+    }
+
+    pub fn switcher_open(&self, cx: &App) -> bool {
+        self.switcher.read(cx).is_open()
+    }
+
+    pub fn open_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.switcher
+            .update(cx, |switcher, cx| switcher.show(window, cx));
     }
 
     fn sync_pages(&self, cx: &mut Context<Self>) {
@@ -344,8 +367,7 @@ impl Shell {
         match command {
             Command::ForWindow(_, _) => {}
             Command::WindowClosed(_) => {}
-            Command::ToggleClustersPanel => self.clusters_generation += 1,
-            Command::ToggleResourcesPanel => self.resources_generation += 1,
+            Command::ToggleSidebar => self.sidebar_generation += 1,
             Command::SelectCluster(_) => {}
             Command::SelectPage(_) => {}
             Command::OpenResource(_) => {}
@@ -462,40 +484,6 @@ impl Shell {
         self.pods
             .update(cx, |pods, cx| pods.show_terminal(window, cx));
     }
-
-    fn strip(cx: &App) -> impl IntoElement {
-        let palette = cx.palette();
-        div()
-            .h(STRIP)
-            .flex_none()
-            .bg(palette.chrome)
-            .border_b(RULE)
-            .border_color(palette.line)
-            .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
-    }
-
-    fn nav(&self, cx: &mut Context<Self>) -> AnyElement {
-        let palette = *cx.palette();
-        div()
-            .flex()
-            .flex_col()
-            .flex_none()
-            .min_w(NAV_MIN_WIDTH)
-            .h_full()
-            .bg(palette.panel)
-            .border_r(RULE)
-            .border_color(palette.line)
-            .child(Self::strip(cx))
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .child(self.clusters_panel(cx))
-                    .child(self.resources_panel(cx)),
-            )
-            .into_any_element()
-    }
 }
 
 impl Render for Shell {
@@ -506,11 +494,12 @@ impl Render for Shell {
             .id("shell")
             .track_focus(&self.focus)
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
-            .on_action(cx.listener(|this, _: &ToggleClustersPanel, _, cx| {
-                this.dispatch(Command::ToggleClustersPanel, cx);
+            .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
+                this.dispatch(Command::ToggleSidebar, cx);
             }))
-            .on_action(cx.listener(|this, _: &ToggleResourcesPanel, _, cx| {
-                this.dispatch(Command::ToggleResourcesPanel, cx);
+            .on_action(cx.listener(|this, _: &ToggleClusterSwitcher, window, cx| {
+                this.switcher
+                    .update(cx, |switcher, cx| switcher.toggle(window, cx));
             }))
             .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| {
                 this.toggle_palette(window, cx);
@@ -536,7 +525,7 @@ impl Render for Shell {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .child(self.nav(cx))
+                    .child(self.sidebar(cx))
                     .child(page),
             )
             .child(self.status_bar(cx))
@@ -550,6 +539,7 @@ impl Render for Shell {
 mod tests {
     use super::*;
     use crate::{Root, Store};
+    use fleet_core::ClusterId;
     use gpui::{AnyWindowHandle, KeyBinding, TestAppContext, WindowOptions};
 
     fn open_window(
@@ -671,7 +661,7 @@ mod tests {
             window
                 .update(cx, |_, window, cx| {
                     shell.update(cx, |shell, cx| {
-                        shell.open_palette(">toggle clusters", window, cx);
+                        shell.open_palette(">toggle sidebar", window, cx);
                     });
                 })
                 .is_ok()
@@ -679,6 +669,6 @@ mod tests {
         cx.simulate_keystrokes(window, "alt-enter");
         assert!(received.is_empty());
         assert!(shell.read_with(cx, |shell, cx| shell.palette.read(cx).is_open()));
-        assert!(shell.read_with(cx, |shell, _| shell.state.clusters_open));
+        assert!(shell.read_with(cx, |shell, _| shell.state.sidebar_open));
     }
 }

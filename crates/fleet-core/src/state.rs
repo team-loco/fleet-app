@@ -14,8 +14,7 @@ pub enum Command {
     SelectCluster(Option<ClusterId>),
     SelectPage(Page),
     OpenCommit(String),
-    ToggleClustersPanel,
-    ToggleResourcesPanel,
+    ToggleSidebar,
     OpenResource(ResourceRef),
     InspectResource(ResourceRef),
     FollowLogs(ResourceRef),
@@ -92,8 +91,7 @@ pub struct AppState {
     pub cluster: Option<ClusterId>,
     pub page: Page,
     pub resource: Option<ResourceRef>,
-    pub clusters_open: bool,
-    pub resources_open: bool,
+    pub sidebar_open: bool,
     pub flux_object: Option<FluxKey>,
 }
 
@@ -104,8 +102,7 @@ impl Default for AppState {
             cluster: None,
             page: Page::Overview,
             resource: None,
-            clusters_open: true,
-            resources_open: true,
+            sidebar_open: true,
             flux_object: None,
         }
     }
@@ -154,8 +151,7 @@ impl AppState {
             }
             Command::SelectPage(page) => self.select_page(*page),
             Command::OpenCommit(_) => self.select_page(Page::Changes),
-            Command::ToggleClustersPanel => self.clusters_open = !self.clusters_open,
-            Command::ToggleResourcesPanel => self.resources_open = !self.resources_open,
+            Command::ToggleSidebar => self.sidebar_open = !self.sidebar_open,
             Command::OpenResource(resource) => self.open_resource(resource),
             Command::InspectResource(_) => {}
             Command::FollowLogs(resource) => self.open_resource(resource),
@@ -357,7 +353,7 @@ mod tests {
             source.window_commands(&Command::RestartRollout(deployment("a"))),
             None
         );
-        assert_eq!(source.window_commands(&Command::ToggleClustersPanel), None);
+        assert_eq!(source.window_commands(&Command::ToggleSidebar), None);
     }
 
     #[test]
@@ -506,13 +502,28 @@ mod tests {
     }
 
     #[test]
-    fn toggles_flip_panels() {
+    fn toggle_flips_the_sidebar_and_keeps_the_selection() {
         let mut state = loaded();
-        state.apply(&Command::ToggleClustersPanel);
-        state.apply(&Command::ToggleResourcesPanel);
-        state.apply(&Command::ToggleResourcesPanel);
-        assert!(!state.clusters_open);
-        assert!(state.resources_open);
+        state.apply(&Command::SelectCluster(Some(ClusterId::new("a"))));
+        state.apply(&Command::ToggleSidebar);
+        assert!(!state.sidebar_open);
+        assert_eq!(state.cluster, Some(ClusterId::new("a")));
+        state.apply(&Command::ToggleSidebar);
+        assert!(state.sidebar_open);
+    }
+
+    #[test]
+    fn switching_clusters_keeps_the_sidebar_and_leaves_the_fleet_home() {
+        let mut state = loaded();
+        state.apply(&Command::ToggleSidebar);
+        state.apply(&Command::SelectCluster(Some(ClusterId::new("b"))));
+        state.apply(&Command::SelectCluster(Some(ClusterId::new("c"))));
+        assert_eq!(state.cluster, Some(ClusterId::new("c")));
+        assert_eq!(state.page, Page::ClusterOverview);
+        assert!(!state.sidebar_open);
+        state.apply(&Command::SelectCluster(None));
+        assert_eq!(state.cluster, None);
+        assert_eq!(state.page, Page::Overview);
     }
 
     fn with_flux() -> (AppState, FluxKey) {

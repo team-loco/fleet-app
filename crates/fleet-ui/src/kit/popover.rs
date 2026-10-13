@@ -122,6 +122,18 @@ pub fn below_left(trigger_height: Pixels, popover: AnyElement) -> impl IntoEleme
         )
 }
 
+pub fn above_left(popover: AnyElement) -> impl IntoElement {
+    div().absolute().left_0().top(-SPACE_3).child(
+        deferred(
+            anchored()
+                .anchor(Anchor::BottomLeft)
+                .snap_to_window_with_margin(SPACE_4)
+                .child(popover),
+        )
+        .priority(1),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

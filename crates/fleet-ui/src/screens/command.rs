@@ -509,7 +509,7 @@ mod tests {
             status: None,
             detail: String::new(),
             shortcut: None,
-            command: Command::ToggleClustersPanel,
+            command: Command::ToggleSidebar,
         }
     }
 

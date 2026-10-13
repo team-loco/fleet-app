@@ -62,6 +62,7 @@ impl Shell {
             .text_color(palette.mute)
             .whitespace_nowrap()
             .overflow_hidden()
+            .child(self.switcher.clone())
             .child(
                 div()
                     .id("status-problems")
