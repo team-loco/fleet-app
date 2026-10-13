@@ -306,18 +306,18 @@ mod tests {
         let log = saved.clone();
         cx.update(|cx| {
             crate::init(None, cx).unwrap_or_else(|error| panic!("UI init: {error}"));
-            let saver: crate::settings::Saver = Rc::new(move |settings| {
+            let persist: crate::settings::Saver = Rc::new(move |settings| {
                 log.borrow_mut().push(settings.clone());
                 Ok(())
             });
-            crate::settings::install(AppSettings::default(), saver.clone(), false, cx);
+            crate::settings::install(AppSettings::default(), persist.clone(), false, cx);
             save_width("node", px(600.), false, cx);
             assert!(saved.borrow().is_empty());
             save_width("node", px(600.), true, cx);
             assert_eq!(saved.borrow().len(), 1);
             let settings = saved.borrow()[0].clone();
             cx.set_global(InspectorWidths::default());
-            crate::settings::install(settings, saver, false, cx);
+            crate::settings::install(settings, persist, false, cx);
             assert_eq!(stored_width("node", INSPECTOR, cx), px(600.));
             assert_eq!(stored_width("pod", INSPECTOR, cx), INSPECTOR);
         });

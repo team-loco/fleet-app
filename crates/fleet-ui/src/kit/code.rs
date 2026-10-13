@@ -238,6 +238,12 @@ fn code_body(
                     .flex_1()
                     .min_w_0()
                     .overflow_x_scroll()
+                    .on_scroll_wheel(|event, _, cx| {
+                        let delta = event.delta.pixel_delta(CODE_LINE);
+                        if delta.x.abs() > delta.y.abs() {
+                            cx.stop_propagation();
+                        }
+                    })
                     .child(
                         div()
                             .id("code-lines")

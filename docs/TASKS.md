@@ -69,4 +69,4 @@ Spec column points at `design/`.
 | TBL1 | resizable table columns remembered per cluster, one FilterBar on every list, popovers occlude hover (#115, #116, #118) | claude | tables-and-filters | done |
 | KEYS1 | VS Code-familiar bindings, one binding table, history, full keyboard navigation (#114) | claude | keyboard | done |
 | SAFE1 | confirmed mutations carry the UID of the object the user saw; drain evicts by UID (#103, #104) | claude | mutation-safety | done |
-| CXE | resizable inspectors and scrollable YAML (#133) | Codex | inspector-resize | doing |
+| CXE | resizable inspectors and scrollable YAML (#133) | claude | inspector-resize | done |
