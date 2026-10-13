@@ -352,6 +352,7 @@ impl Shell {
             Command::InspectResource(_) => {}
             Command::FollowLogs(_) => {}
             Command::Compare(_) => {}
+            Command::CompareWith { .. } => {}
             #[cfg(feature = "loco")]
             Command::Loco(_) => {}
             Command::CopySpec { .. } => {}

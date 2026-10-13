@@ -1,6 +1,6 @@
 use fleet_core::changes::LineChange;
-use fleet_core::compare::{Cell, ComparedCluster, Comparison, Field, SpecDiff};
-use fleet_core::{Command, Page, ResourceRef, Snapshot, Status};
+use fleet_core::compare::{Cell, Comparison, Field, SpecDiff};
+use fleet_core::{ClusterId, Command, Page, ResourceRef, Snapshot, Status};
 use gpui::{
     AnyElement, Context, EventEmitter, FontWeight, InteractiveElement as _, IntoElement,
     MouseButton, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement as _,
@@ -171,6 +171,7 @@ impl CompareScreen {
             comparison.clusters.len()
         );
         let fields = comparison.visible(self.differences_only);
+        let heads = cluster_row(comparison, self.resource.as_ref(), palette, cx);
         let spec = comparison
             .spec
             .as_ref()
@@ -184,7 +185,7 @@ impl CompareScreen {
                     .sentence(comparison.sentence())
                     .meta(meta),
             )
-            .child(cluster_row(&comparison.clusters, palette))
+            .child(heads)
             .children(fields.into_iter().map(|f| field_row(f, palette)))
             .child(
                 div()
@@ -312,29 +313,63 @@ fn value_cell(palette: &Palette) -> gpui::Div {
         .border_color(palette.line)
 }
 
-fn cluster_row(clusters: &[ComparedCluster], palette: &Palette) -> impl IntoElement {
-    let heads = clusters.iter().map(|c| {
-        value_cell(palette)
-            .flex()
-            .flex_col()
-            .gap(SPACE_1)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(SPACE_4)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(StatusGlyph::new(c.status))
-                    .child(div().truncate().child(c.cluster.to_string())),
-            )
-            .child(
-                div()
-                    .text_size(TEXT_SMALL)
-                    .text_color(palette.status(c.status))
-                    .truncate()
-                    .child(c.health.clone()),
-            )
-    });
+pub fn pick(comparison: &Comparison, base: &ResourceRef, cluster: &ClusterId) -> Option<Command> {
+    let current = comparison.spec.as_ref().map(|spec| &spec.other);
+    if cluster == &base.cluster || current == Some(cluster) {
+        return None;
+    }
+    Some(Command::CompareWith {
+        base: base.clone(),
+        other: cluster.clone(),
+    })
+}
+
+fn cluster_row(
+    comparison: &Comparison,
+    base: Option<&ResourceRef>,
+    palette: &Palette,
+    cx: &mut Context<CompareScreen>,
+) -> AnyElement {
+    let other = comparison.spec.as_ref().map(|spec| spec.other.clone());
+    let heads: Vec<AnyElement> = comparison
+        .clusters
+        .iter()
+        .map(|c| {
+            let command = base.and_then(|base| pick(comparison, base, &c.cluster));
+            let chosen = other.as_ref() == Some(&c.cluster);
+            let hover = palette.hover;
+            let head = value_cell(palette)
+                .id(SharedString::from(format!("compare-head-{}", c.cluster)))
+                .flex()
+                .flex_col()
+                .gap(SPACE_1)
+                .when(chosen, |head| head.bg(palette.panel))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(SPACE_4)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(StatusGlyph::new(c.status))
+                        .child(div().truncate().child(c.cluster.to_string())),
+                )
+                .child(
+                    div()
+                        .text_size(TEXT_SMALL)
+                        .text_color(palette.status(c.status))
+                        .truncate()
+                        .child(c.health.clone()),
+                );
+            match command {
+                Some(command) => head
+                    .cursor_pointer()
+                    .hover(move |style| style.bg(hover))
+                    .on_click(cx.listener(move |_, _, _, cx| cx.emit(command.clone())))
+                    .into_any_element(),
+                None => head.into_any_element(),
+            }
+        })
+        .collect();
     row(palette)
         .child(
             label_cell(palette)
@@ -345,6 +380,7 @@ fn cluster_row(clusters: &[ComparedCluster], palette: &Palette) -> impl IntoElem
                 .child(FIELD.to_uppercase()),
         )
         .children(heads)
+        .into_any_element()
 }
 
 fn field_row(field: &Field, palette: &Palette) -> impl IntoElement {
@@ -390,8 +426,8 @@ fn diff_line(line: &fleet_core::changes::PatchLine) -> DiffLine {
 
 #[cfg(test)]
 mod tests {
-    use fleet_core::ClusterId;
     use fleet_core::changes::PatchLine;
+    use fleet_core::compare::ComparedCluster;
 
     use super::*;
 
@@ -406,6 +442,43 @@ mod tests {
         let converted = diff_line(&removed);
         assert_eq!(converted.kind, LineKind::Removed);
         assert_eq!(converted.old, Some(39));
+    }
+
+    #[test]
+    fn clicking_a_cluster_head_makes_it_the_other_side() {
+        let base = ResourceRef {
+            cluster: ClusterId::new("a"),
+            kind: "Deployment".into(),
+            namespace: Some("shop".into()),
+            name: "cart".into(),
+        };
+        let head = |name: &str| ComparedCluster {
+            cluster: ClusterId::new(name),
+            status: Status::Ok,
+            health: "Healthy".into(),
+        };
+        let comparison = Comparison {
+            kind: base.kind.clone(),
+            namespace: base.namespace.clone(),
+            name: base.name.clone(),
+            clusters: vec![head("a"), head("b"), head("c")],
+            fields: Vec::new(),
+            spec: Some(SpecDiff {
+                path: "spec.template".into(),
+                base: ClusterId::new("a"),
+                other: ClusterId::new("b"),
+                lines: Vec::new(),
+            }),
+        };
+        assert_eq!(pick(&comparison, &base, &ClusterId::new("a")), None);
+        assert_eq!(pick(&comparison, &base, &ClusterId::new("b")), None);
+        assert_eq!(
+            pick(&comparison, &base, &ClusterId::new("c")),
+            Some(Command::CompareWith {
+                base,
+                other: ClusterId::new("c"),
+            })
+        );
     }
 
     #[test]

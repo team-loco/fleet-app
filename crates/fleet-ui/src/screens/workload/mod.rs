@@ -2,6 +2,7 @@ mod dock;
 
 pub(crate) use dock::kit_line;
 
+use fleet_core::palette::COMPARE_KEY;
 use fleet_core::workload::{ContainerSpec, EnvVar, Pod, Revision, short_image, short_pod_name};
 use fleet_core::{Command, ResourceRef, Sink, Status, Workload};
 use gpui::{
@@ -86,6 +87,7 @@ const SHELL_ITEM: &str = "Shell into pod";
 const LOGS_KEYS: &str = "⌘L";
 const SHELL_KEYS: &str = "⌘T";
 const YAML_ITEM: &str = "View YAML";
+const COMPARE_ITEM: &str = "Compare across clusters";
 const YAML_KEYS: &str = "⌘Y";
 const YAML_LABEL: &str = "YAML";
 const YAML_NOTE: &str = "read-only";
@@ -287,6 +289,15 @@ impl WorkloadScreen {
                 }
             })
             .shortcut(YAML_KEYS),
+            MenuItem::new(COMPARE_ITEM, {
+                let this = this.clone();
+                let target = workload.target.clone();
+                move |_, cx| {
+                    let command = Command::Compare(target.clone());
+                    this.update(cx, |_, cx| cx.emit(command)).ok();
+                }
+            })
+            .shortcut(COMPARE_KEY),
             MenuItem::new(RESTART, restart_handler(this.clone(), workload)),
         ];
         if workload.kind.scalable() {

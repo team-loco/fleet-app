@@ -1,4 +1,4 @@
-use fleet_core::{ClusterSummary, Command, Counts, Page, WorkloadKind};
+use fleet_core::{ClusterSummary, Command, Counts, Page};
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
     MouseButton, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div,
@@ -85,12 +85,7 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Entity<WorkloadScreen>> {
-        let Some(target) = self
-            .state
-            .resource
-            .clone()
-            .filter(|target| WorkloadKind::from_kind(&target.kind).is_some())
-        else {
+        let Some(target) = self.state.workload().cloned() else {
             self.workload = None;
             return None;
         };

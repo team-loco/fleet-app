@@ -10,14 +10,16 @@ use fleet_core::resource::page_for_kind;
 use fleet_core::settings::{Auth, ClusterSettings, Connection};
 use fleet_core::stream::Sink;
 use fleet_core::{
-    Backend, ChangesLog, CheckLine, ClusterCatalog, ClusterId, ClusterSummary, Command,
+    Backend, ChangesLog, CheckLine, ClusterCatalog, ClusterId, ClusterSummary, Command, Comparison,
     ContextChoice, Counts, FleetHome, GitOps, KubeconfigFile, NewCluster, Notice, Page,
     Preferences, Receiver, ResourceRef, Sender, Snapshot, Status, Update, Verdict, Workload,
+    WorkloadKind,
 };
 use jiff::Timestamp;
 use k8s_openapi::api::core::v1::Node;
 use tokio::time::MissedTickBehavior;
 
+use crate::actions::pending::Mutation;
 use crate::actions::{Actions, cluster_of};
 use crate::assemble::{self, Extras, Prometheus, Selection};
 use crate::checks::{self, CheckResult, run_checks_streaming};
@@ -93,6 +95,7 @@ enum Fetched {
     PodUsage(ContextRef, Vec<PodUsage>),
     Prometheus(ContextRef, Option<Prometheus>),
     Yaml(u64, ResourceRef, inspect::Inspected),
+    Comparison(u64, Box<Comparison>),
 }
 
 struct Connected {
@@ -118,8 +121,15 @@ struct Navigation {
     inspecting: Option<Inspecting>,
     yaml_task: Option<TaskGuard>,
     workload_task: Option<TaskGuard>,
+    comparing: Option<Comparing>,
+    comparison: Option<Comparison>,
     #[cfg(feature = "loco")]
     loco: crate::loco::LocoBackend,
+}
+
+struct Comparing {
+    target: ResourceRef,
+    _task: TaskGuard,
 }
 
 impl Navigation {
@@ -134,6 +144,8 @@ impl Navigation {
             inspecting: None,
             yaml_task: None,
             workload_task: None,
+            comparing: None,
+            comparison: None,
             #[cfg(feature = "loco")]
             loco: crate::loco::LocoBackend::new(
                 crate::loco::LocoSettings::default(),
@@ -387,6 +399,21 @@ impl Live {
                     cluster.extras.prometheus = found;
                 }
             }
+            Fetched::Comparison(window, comparison) => {
+                let navigation = if window == self.window_id {
+                    Some(&mut self.navigation)
+                } else {
+                    self.windows.get_mut(&window)
+                };
+                if let Some(navigation) = navigation
+                    && navigation
+                        .comparing
+                        .as_ref()
+                        .is_some_and(|comparing| comparison.matches(&comparing.target))
+                {
+                    navigation.comparison = Some(*comparison);
+                }
+            }
             Fetched::Yaml(window, target, inspected) => {
                 let navigation = if window == self.window_id {
                     Some(&mut self.navigation)
@@ -402,6 +429,102 @@ impl Live {
                 }
             }
         }
+    }
+
+    fn compare(&mut self, target: &ResourceRef, other: Option<&ClusterId>) {
+        let Some(kind) = WorkloadKind::from_kind(&target.kind) else {
+            return;
+        };
+        self.navigation.selected = Some(target.cluster.clone());
+        self.navigation.page = Page::Compare;
+        self.resubscribe_page();
+        let same = self
+            .navigation
+            .comparing
+            .as_ref()
+            .is_some_and(|comparing| &comparing.target == target);
+        if !same {
+            self.navigation.comparison = None;
+        }
+        let clusters: Vec<(ClusterId, ClusterHandle)> = self
+            .clusters
+            .values()
+            .map(|cluster| (cluster.id.clone(), cluster.handle.clone()))
+            .collect();
+        let fetched = self.fetched.clone();
+        let window = self.window_id;
+        let refresh = self.settings.workload_refresh;
+        let task_target = target.clone();
+        let other = other.cloned();
+        let task = TaskGuard::spawn(async move {
+            let _subscriptions: Vec<Subscription> = clusters
+                .iter()
+                .flat_map(|(_, handle)| {
+                    crate::workload::watch_kinds(kind)
+                        .into_iter()
+                        .map(|kind| handle.subscribe(kind))
+                })
+                .collect();
+            loop {
+                let built = crate::compare::compare(
+                    &clusters,
+                    &task_target,
+                    other.as_ref(),
+                    Timestamp::now(),
+                )
+                .await;
+                if let Some(comparison) = built {
+                    let sent = fetched
+                        .send(Fetched::Comparison(window, Box::new(comparison)))
+                        .await;
+                    if sent.is_err() {
+                        return;
+                    }
+                }
+                tokio::time::sleep(refresh).await;
+            }
+        });
+        self.navigation.comparing = Some(Comparing {
+            target: target.clone(),
+            _task: task,
+        });
+    }
+
+    fn comparisons(&self) -> Vec<Comparison> {
+        self.navigations()
+            .filter_map(|navigation| navigation.comparison.clone())
+            .collect()
+    }
+
+    fn stop_comparing(&mut self) {
+        self.navigation.comparing = None;
+        self.navigation.comparison = None;
+    }
+
+    fn copy_spec(&mut self, from: &ClusterId, to: &ResourceRef, path: &str) {
+        let source = ResourceRef {
+            cluster: from.clone(),
+            ..to.clone()
+        };
+        let template = self
+            .handle(from)
+            .and_then(|handle| crate::compare::spec_of(handle, &source))
+            .map(|(template, _)| template);
+        let Some(template) = template else {
+            self.publish(Update::Notice(Notice::failed(
+                format!("Apply {from} {path} failed"),
+                format!("{from} · {source} is not loaded"),
+            )));
+            return;
+        };
+        let mutation = Mutation::CopySpec {
+            target: to.clone(),
+            from: from.clone(),
+            path: path.to_owned(),
+            template,
+        };
+        let handle = self.handle(&to.cluster).cloned();
+        self.actions.copy_spec(mutation, handle);
     }
 
     fn watch_workload(&mut self, target: &ResourceRef, sink: &Sink<Workload>) {
@@ -503,6 +626,9 @@ impl Live {
 
     fn apply_current(&mut self, command: &Command) -> bool {
         self.gitops.command(self.window_id, command);
+        if leaves_compare(command) {
+            self.stop_comparing();
+        }
         match command {
             Command::ForWindow(..) => unreachable!(),
             Command::WindowClosed(_) => unreachable!(),
@@ -538,7 +664,8 @@ impl Live {
             Command::OpenResource(resource) => self.open(resource),
             Command::InspectResource(resource) => self.open(resource),
             Command::FollowLogs(resource) => self.open(resource),
-            Command::Compare(_) => {}
+            Command::Compare(target) => self.compare(target, None),
+            Command::CompareWith { base, other } => self.compare(base, Some(other)),
             Command::PortForward { .. } => self.act(command),
             Command::StopPortForward { .. } => self.act(command),
             Command::Cordon(_) => self.act(command),
@@ -571,7 +698,7 @@ impl Live {
                     .loco
                     .command(command, handle.map(|c| &c.handle));
             }
-            Command::CopySpec { .. } => {}
+            Command::CopySpec { from, to, path } => self.copy_spec(from, to, path),
             Command::ShowClusterSettings(_) => {}
             Command::SetPreferences(id, preferences) => {
                 return self.set_preferences(id, preferences);
@@ -845,7 +972,7 @@ impl Live {
             flux: Vec::new(),
             #[cfg(feature = "loco")]
             loco,
-            comparisons: Vec::new(),
+            comparisons: self.comparisons(),
             catalog: ClusterCatalog {
                 sources: sources.len(),
                 clusters: settings,
@@ -1017,6 +1144,18 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
             }
         }
     }
+}
+
+fn leaves_compare(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::SelectCluster(_)
+            | Command::SelectPage(_)
+            | Command::OpenCommit(_)
+            | Command::OpenFluxObject(_)
+            | Command::OpenResource(_)
+            | Command::ShowClusterSettings(_)
+    )
 }
 
 fn wanted(
