@@ -228,14 +228,18 @@ impl ResourcesScreen {
                 .empty("Nothing matches the filter.")
         });
         let subscription = cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
-            let TableEvent::Selected(ix) = event else {
-                return;
+            let ix = match *event {
+                TableEvent::Selected(ix) => ix,
+                TableEvent::Opened(ix) => ix,
             };
             let key = table
                 .read(cx)
-                .row(*ix)
+                .row(ix)
                 .map(|r| (r.namespace.clone(), r.name.clone()));
             this.select(key, cx);
+            if let TableEvent::Opened(_) = event {
+                this.open(cx);
+            }
         });
         self.subscriptions.push(subscription);
         self.tables.insert(kind, table.clone());
@@ -271,9 +275,16 @@ impl ResourcesScreen {
         let target = self.selected_row().and_then(|row| self.target(row));
         self.refresh_menu(cx);
         if let Some(target) = target {
-            cx.emit(ScreenEvent::Command(Command::OpenResource(target)));
+            cx.emit(ScreenEvent::Command(Command::InspectResource(target)));
         }
         cx.notify();
+    }
+
+    fn open(&mut self, cx: &mut Context<Self>) {
+        let target = self.selected_row().and_then(|row| self.target(row));
+        if let Some(target) = target {
+            cx.emit(ScreenEvent::Command(Command::OpenResource(target)));
+        }
     }
 
     fn close(&mut self, cx: &mut Context<Self>) {

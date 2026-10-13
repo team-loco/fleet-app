@@ -20,6 +20,7 @@ use std::collections::BTreeMap;
 use std::sync::mpsc;
 use std::thread;
 
+use fleet_core::home::problems_badge;
 use fleet_core::{
     Backend, ClusterId, ClusterSummary, Command, Counts, Page, Receiver, Sender, Snapshot, Status,
     Update,
@@ -137,8 +138,9 @@ fn schedule(input: &mpsc::Sender<Input>, next: Input) {
 }
 
 pub fn snapshot() -> Snapshot {
+    let home = home::fleet_home();
     let fleet_nav = BTreeMap::from([
-        (Page::Problems, Counts::default().with_err(3).with_warn(6)),
+        (Page::Problems, problems_badge(&home.problems)),
         (Page::GitOps, Counts::default().with_err(1).with_sus(1)),
     ]);
     Snapshot {
@@ -196,7 +198,7 @@ pub fn snapshot() -> Snapshot {
             }),
         ],
         fleet_nav,
-        home: home::fleet_home(),
+        home,
         resources: resources::resources(),
         changes: changes::log(),
         details: BTreeMap::from([(ClusterId::new(PROD_US_EAST), detail::prod_us_east())]),
@@ -318,6 +320,30 @@ mod tests {
                 cluster.name
             );
         }
+    }
+
+    #[test]
+    fn problems_badge_matches_design() {
+        let badge = snapshot().fleet_nav.get(&Page::Problems).copied();
+        assert_eq!(badge, Some(Counts::default().with_err(3).with_warn(6)));
+    }
+
+    #[test]
+    fn removing_a_cluster_drops_its_problems_from_the_fleet() {
+        let (tx, _rx) = async_channel::unbounded();
+        let mut fleet = snapshot();
+        let mut adding = add_cluster::AddClusters::default();
+        let removed = ClusterId::new(PROD_US_EAST);
+        assert!(adding.handle(&Command::RemoveCluster(removed.clone()), &mut fleet, &tx));
+        assert!(
+            fleet
+                .home
+                .problems
+                .iter()
+                .all(|p| p.target.cluster != removed)
+        );
+        let badge = fleet.fleet_nav.get(&Page::Problems).copied();
+        assert_eq!(badge, Some(Counts::default().with_err(1).with_warn(3)));
     }
 
     #[test]

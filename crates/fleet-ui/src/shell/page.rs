@@ -110,7 +110,9 @@ impl Shell {
     }
 
     fn page_header(&self, palette: &Palette, cx: &App) -> impl IntoElement {
-        let note = self.pages.header_note(self.state.page, cx);
+        let note = self
+            .pages
+            .header_note(self.state.page, self.has_detail(), cx);
         let status = match (self.selected_cluster(), note) {
             (Some(_), Some((Status::Ok, text))) => Some((text, palette.mute)),
             (Some(_), Some((status, text))) => {
@@ -169,15 +171,16 @@ impl Shell {
             Page::Overview => self.fleet.clone().into_any_element(),
             Page::Problems => self.fleet.clone().into_any_element(),
             Page::GitOps => self.gitops.clone().into_any_element(),
-            page => {
-                let has_detail = self
-                    .selected_cluster()
-                    .is_some_and(|c| self.state.snapshot.detail(&c.id).is_some());
-                self.pages
-                    .render(page, has_detail)
-                    .unwrap_or_else(|| self.placeholder(palette).into_any_element())
-            }
+            page => self
+                .pages
+                .render(page, self.has_detail())
+                .unwrap_or_else(|| self.placeholder(palette).into_any_element()),
         }
+    }
+
+    fn has_detail(&self) -> bool {
+        self.selected_cluster()
+            .is_some_and(|c| self.state.snapshot.detail(&c.id).is_some())
     }
 
     fn placeholder(&self, palette: &Palette) -> impl IntoElement {

@@ -77,7 +77,7 @@ impl AddClusters {
             }
             Command::RemoveCluster(id) => {
                 self.added.remove(id);
-                fleet.clusters.retain(|cluster| &cluster.id != id);
+                fleet.remove_cluster(id);
                 send(updates, Update::Snapshot(Box::new(fleet.clone())));
             }
             _ => return false,

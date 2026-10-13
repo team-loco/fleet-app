@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use fleet_core::add_cluster::home_relative;
-use fleet_core::home::problem_counts;
+use fleet_core::home::problems_badge;
 use fleet_core::resource::page_for_kind;
 use fleet_core::settings::{Auth, ClusterSettings, Connection};
 use fleet_core::stream::Sink;
@@ -440,6 +440,7 @@ impl Live {
             Command::ToggleClustersPanel => {}
             Command::ToggleResourcesPanel => {}
             Command::OpenResource(resource) => self.open(resource),
+            Command::InspectResource(resource) => self.open(resource),
             Command::FollowLogs(resource) => self.open(resource),
             Command::Compare(_) => {}
             Command::PortForward { .. } => self.act(command),
@@ -612,10 +613,7 @@ impl Live {
             }
         }
         order(&mut problems);
-        let flagged = Counts {
-            total: None,
-            ..problem_counts(&problems)
-        };
+        let flagged = problems_badge(&problems);
         let missing = self
             .store
             .clusters()
