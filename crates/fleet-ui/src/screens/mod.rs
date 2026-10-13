@@ -3,6 +3,7 @@ pub mod changes;
 pub mod command;
 mod events;
 pub mod fleet;
+pub mod gitops;
 mod namespaces;
 mod nodes;
 mod overview;

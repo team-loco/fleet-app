@@ -7,6 +7,7 @@ mod header;
 mod input;
 mod inspector;
 mod log;
+mod matrix;
 mod menu;
 mod modal;
 mod overlay;
@@ -29,6 +30,7 @@ pub use input::{
 };
 pub use inspector::Inspector;
 pub use log::{LOG_CAPACITY, Level, LogLine, LogView, strip_ansi};
+pub use matrix::{Matrix, MatrixCell};
 pub use menu::{ActionMenu, MenuItem};
 pub use modal::Modal;
 pub use overlay::{ConfirmDialog, Overlays, Toast, confirm, layer as overlay_layer, toast};

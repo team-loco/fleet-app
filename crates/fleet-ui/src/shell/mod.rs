@@ -17,6 +17,7 @@ use crate::screens::add_cluster::{AddClusterDialog, AddClusterEvent};
 use crate::screens::changes::ChangesScreen;
 use crate::screens::command::{CommandPalette, PaletteEvent};
 use crate::screens::fleet::FleetScreen;
+use crate::screens::gitops::GitOpsScreen;
 use crate::screens::{ClusterPages, ScreenEvent};
 use crate::theme::{self, ActiveTheme, NAV_MIN_WIDTH, RULE, STRIP, TEXT_UI};
 
@@ -38,6 +39,8 @@ pub struct Shell {
     _appearance: Subscription,
     _fleet_commands: Subscription,
     _palette_events: Subscription,
+    gitops: Entity<GitOpsScreen>,
+    _gitops_commands: Subscription,
 }
 
 impl Shell {
@@ -67,6 +70,10 @@ impl Shell {
             this.dispatch(command.clone(), cx);
         });
         let changes = cx.new(|cx| ChangesScreen::new(window, cx));
+        let gitops = cx.new(GitOpsScreen::new);
+        let gitops_commands = cx.subscribe(&gitops, |this, _, command: &Command, cx| {
+            this.dispatch(command.clone(), cx);
+        });
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         theme::follow_window(window, cx);
@@ -98,6 +105,8 @@ impl Shell {
             _appearance: appearance,
             _fleet_commands: fleet_commands,
             _palette_events: palette_events,
+            gitops,
+            _gitops_commands: gitops_commands,
         }
     }
 
@@ -122,6 +131,8 @@ impl Shell {
             .update(cx, |fleet, cx| fleet.set_snapshot(snapshot, cx));
         self.changes
             .update(cx, |changes, cx| changes.set_snapshot(snapshot, cx));
+        self.gitops
+            .update(cx, |gitops, cx| gitops.set_snapshot(snapshot, cx));
         self.sync_page(cx);
         self.sync_palette(cx);
         cx.notify();

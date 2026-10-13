@@ -8,6 +8,7 @@ use fleet_core::AddClusterStep;
 
 use super::Shell;
 use crate::screens::add_cluster::empty_fleet;
+use crate::screens::gitops::GitOpsScreen;
 use crate::theme::{
     ActiveTheme, FONT_MONO, ICON_BUTTON, PAGE_HEADER, Palette, RADIUS, RULE, SPACE_2, SPACE_5,
     SPACE_7, SPACE_8, TEXT_LABEL, TEXT_SMALL, TEXT_TITLE,
@@ -49,18 +50,28 @@ impl Shell {
 
     fn page_header(&self, palette: &Palette, cx: &App) -> impl IntoElement {
         let note = self.pages.header_note(self.state.page, cx);
-        let (status, status_color) = match (self.selected_cluster(), note) {
-            (Some(_), Some((Status::Ok, text))) => (text, palette.mute),
+        let status = match (self.selected_cluster(), note) {
+            (Some(_), Some((Status::Ok, text))) => Some((text, palette.mute)),
             (Some(_), Some((status, text))) => {
-                (format!("{} {text}", status.glyph()), palette.status(status))
+                Some((format!("{} {text}", status.glyph()), palette.status(status)))
             }
             (Some(cluster), None) => {
                 let text = format!("{} {}", cluster.status.glyph(), cluster.state);
-                (text, palette.status(cluster.status))
+                Some((text, palette.status(cluster.status)))
             }
-            (None, _) => (LIVE.to_owned(), palette.mute),
+            (None, _) if self.state.page == Page::GitOps => None,
+            (None, _) => Some((LIVE.to_owned(), palette.mute)),
         };
+        let status = status.map(|(text, color)| {
+            div()
+                .font_family(FONT_MONO)
+                .text_size(TEXT_SMALL)
+                .text_color(color)
+                .child(text)
+        });
         let more = self.selected_cluster().map(|_| more_button(palette));
+        let filter = (self.state.page == Page::GitOps)
+            .then(|| GitOpsScreen::filter_control(&self.gitops, cx));
         div()
             .flex()
             .items_center()
@@ -77,14 +88,9 @@ impl Shell {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(self.state.page.label()),
             )
-            .child(
-                div()
-                    .font_family(FONT_MONO)
-                    .text_size(TEXT_SMALL)
-                    .text_color(status_color)
-                    .child(status),
-            )
+            .children(status)
             .child(div().flex_1())
+            .children(filter)
             .children(more)
     }
 
@@ -101,6 +107,7 @@ impl Shell {
         match self.state.page {
             Page::Overview => self.fleet.clone().into_any_element(),
             Page::Problems => self.fleet.clone().into_any_element(),
+            Page::GitOps => self.gitops.clone().into_any_element(),
             page => {
                 let has_detail = self
                     .selected_cluster()

@@ -217,6 +217,23 @@ element across the full width instead of cells (group headers). `set_columns(col
 columns at runtime (e.g. one per cluster).
 Column widths are design values; define them as `const`s at the top of your screen file.
 
+## Matrix
+
+Objects × clusters grid (GitOps sync state, compare views): a header row of column titles, uppercase
+group rows on `panel`, and 38px (`ROW_MATRIX`) rows of a label plus one cell per column. Columns
+share the width evenly above their minimum; each cell has a left rule, an optional tint and, when
+clickable, a pointer plus a `selline` outline on hover.
+
+```rust
+Matrix::new("sync", "Object", vec!["dev-kind".into(), "staging".into()])
+    .min_widths(px(220.), px(150.))
+    .group("Kustomizations", "6 of 12")
+    .row(label, vec![
+        MatrixCell::new(content).tint(Some(palette.errbg)).on_click(cx.listener(|_, _, _, cx| ..)),
+        MatrixCell::new(not_deployed),
+    ])
+```
+
 ## Split panes
 
 ```rust
