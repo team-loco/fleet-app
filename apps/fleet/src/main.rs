@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use anyhow::Context as _;
@@ -8,6 +9,7 @@ use fleet_demo::DemoBackend;
 use fleet_kube::LiveBackend;
 use fleet_kube::discovery::DiscoverySources;
 use fleet_kube::settings::KubeSettings;
+use fleet_kube::store::ClusterStore;
 use fleet_ui::actions::{ToggleClustersPanel, ToggleCommandPalette, ToggleResourcesPanel};
 use fleet_ui::theme::{Appearance, TRAFFIC_LIGHT_X, TRAFFIC_LIGHT_Y};
 use fleet_ui::{Gallery, GalleryPage, Root, Shell, assets};
@@ -39,6 +41,8 @@ struct Args {
     screen: Screen,
     #[arg(long, value_enum)]
     appearance: Option<AppearanceArg>,
+    #[arg(long, value_name = "DIR")]
+    data_dir: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -116,10 +120,9 @@ fn main() -> anyhow::Result<()> {
     let backend: Box<dyn Backend> = if args.demo {
         Box::new(DemoBackend)
     } else {
-        Box::new(LiveBackend::new(
-            KubeSettings::default(),
-            DiscoverySources::from_env(),
-        ))
+        let sources = DiscoverySources::from_env();
+        let store = cluster_store(args.data_dir.clone(), &sources)?;
+        Box::new(LiveBackend::new(KubeSettings::default(), sources, store))
     };
     backend.start(update_tx, command_rx);
 
@@ -136,6 +139,24 @@ fn main() -> anyhow::Result<()> {
             }
         });
     failure.take().map_or(Ok(()), Err)
+}
+
+fn cluster_store(
+    data_dir: Option<PathBuf>,
+    sources: &DiscoverySources,
+) -> anyhow::Result<ClusterStore> {
+    let dir = match (data_dir, &sources.home) {
+        (Some(dir), _) => dir,
+        (None, Some(home)) => ClusterStore::default_dir(home),
+        (None, None) => anyhow::bail!("no home directory; pass --data-dir"),
+    };
+    match ClusterStore::open(&dir) {
+        Ok(store) => Ok(store),
+        Err(error) => {
+            tracing::error!(%error, dir = %dir.display(), "saved clusters unreadable; starting empty");
+            Ok(ClusterStore::empty(&dir))
+        }
+    }
 }
 
 fn launch(

@@ -30,7 +30,7 @@ Spec column points at `design/`.
 | S4 | Flux object page (Kustomization + HelmRelease + sources) | Kustomization | | | todo |
 | S5 | Changes: commits, per-cluster outcome, full diff, rendered views | Changes | claude | s5-changes | done |
 | S6 | GitOps sync grid across clusters | Flux | claude | s6-gitops-grid | done |
-| S7 | Add cluster flow (contexts, checks) | AddCluster, AddClusterCheck | claude | s7-add-cluster | doing |
+| S7 | Add cluster flow (contexts, checks) | AddCluster, AddClusterCheck | claude | s7-add-cluster, s7-add-cluster-live | done (#18) |
 | S8 | Cluster overview, Nodes, Namespaces, Events, generic resource lists | v1/Main, Nav | claude | s8-cluster-pages | done (#17, overview) |
 | S9 | Pods: list, details, logs, shell | v1/Pods | | | todo |
 | S10 | Compare across clusters, cluster settings (Catalog) | v1/Compare, v1/Catalog | | | todo |

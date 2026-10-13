@@ -310,6 +310,7 @@ impl Render for ActionMenu {
             let surface = popover::surface(&palette)
                 .id("menu")
                 .w(MENU_WIDTH)
+                .occlude()
                 .track_focus(&self.focus)
                 .on_key_down(cx.listener(Self::key_down))
                 .on_mouse_down_out(cx.listener(|this, _, window, cx| {

@@ -290,11 +290,21 @@ pub fn metrics_detail(
 struct Session<'a> {
     context: &'a KubeContext,
     settings: &'a KubeSettings,
+    progress: Option<&'a async_channel::Sender<CheckResult>>,
     checks: Vec<CheckResult>,
     facts: ClusterFacts,
 }
 
 impl Session<'_> {
+    fn record(&mut self, check: CheckResult) {
+        if let Some(progress) = self.progress
+            && progress.try_send(check.clone()).is_err()
+        {
+            tracing::debug!("check progress listener went away");
+        }
+        self.checks.push(check);
+    }
+
     fn finish(self, verdict: Verdict, failure: Option<Failure>) -> CheckReport {
         CheckReport {
             context: self.context.id.clone(),
@@ -311,8 +321,7 @@ impl Session<'_> {
                 &Error::MissingField("server URL in kubeconfig"),
                 self.context,
             );
-            self.checks
-                .push(failed(CheckKind::Reach, &failure, Duration::ZERO));
+            self.record(failed(CheckKind::Reach, &failure, Duration::ZERO));
             return Some(failure);
         };
         let (outcome, took) = timed(
@@ -323,8 +332,7 @@ impl Session<'_> {
         match outcome {
             Ok(latency) => {
                 let detail = format!("Reachable in {} ms", latency.as_millis());
-                self.checks
-                    .push(result(CheckKind::Reach, CheckStatus::Ok, detail, took));
+                self.record(result(CheckKind::Reach, CheckStatus::Ok, detail, took));
                 None
             }
             Err(err) => {
@@ -333,7 +341,7 @@ impl Session<'_> {
                     failure.kind = FailureKind::Unreachable;
                 }
                 failure.detail = format!("Can’t reach {server}: {}", failure.detail);
-                self.checks.push(failed(CheckKind::Reach, &failure, took));
+                self.record(failed(CheckKind::Reach, &failure, took));
                 Some(failure)
             }
         }
@@ -346,8 +354,7 @@ impl Session<'_> {
             Ok(client) => client,
             Err(err) => {
                 let failure = classify(&err, self.context);
-                self.checks
-                    .push(failed(CheckKind::Authenticate, &failure, started.elapsed()));
+                self.record(failed(CheckKind::Authenticate, &failure, started.elapsed()));
                 return Err(failure);
             }
         };
@@ -360,7 +367,7 @@ impl Session<'_> {
                     |user| format!("Signed in as {user}"),
                 );
                 self.facts.user = user;
-                self.checks.push(result(
+                self.record(result(
                     CheckKind::Authenticate,
                     CheckStatus::Ok,
                     detail,
@@ -372,7 +379,7 @@ impl Session<'_> {
                 let failure = classify(&err, self.context);
                 if matches!(failure.kind, FailureKind::Forbidden | FailureKind::NotFound) {
                     let detail = format!("Authenticated with {}", self.context.auth);
-                    self.checks.push(result(
+                    self.record(result(
                         CheckKind::Authenticate,
                         CheckStatus::Ok,
                         detail,
@@ -380,8 +387,7 @@ impl Session<'_> {
                     ));
                     return Ok(client);
                 }
-                self.checks
-                    .push(failed(CheckKind::Authenticate, &failure, took));
+                self.record(failed(CheckKind::Authenticate, &failure, took));
                 Err(failure)
             }
         }
@@ -396,7 +402,7 @@ impl Session<'_> {
             Ok(info) => info,
             Err(err) => {
                 let failure = classify(&err, self.context);
-                self.checks.push(failed(CheckKind::Version, &failure, took));
+                self.record(failed(CheckKind::Version, &failure, took));
                 return;
             }
         };
@@ -411,8 +417,7 @@ impl Session<'_> {
         self.facts.pods = pods.ok();
         let detail = version_detail(&info.git_version, self.facts.nodes, self.facts.pods);
         self.facts.version = Some(info.git_version);
-        self.checks
-            .push(result(CheckKind::Version, CheckStatus::Ok, detail, took));
+        self.record(result(CheckKind::Version, CheckStatus::Ok, detail, took));
     }
 
     async fn permissions(&mut self, client: &Client, groups: &ApiGroups) {
@@ -436,14 +441,13 @@ impl Session<'_> {
                 Ok(false) => denied.push(request.label),
                 Err(err) => {
                     let failure = classify(&err, self.context);
-                    self.checks
-                        .push(failed(CheckKind::Permissions, &failure, started.elapsed()));
+                    self.record(failed(CheckKind::Permissions, &failure, started.elapsed()));
                     return;
                 }
             }
         }
         let (status, detail) = permissions_detail(&denied, requests.len());
-        self.checks.push(result(
+        self.record(result(
             CheckKind::Permissions,
             status,
             detail,
@@ -454,7 +458,7 @@ impl Session<'_> {
     async fn flux(&mut self, client: &Client, groups: &ApiGroups) {
         let started = Instant::now();
         let Some(kustomize_version) = groups.preferred_version(FLUX_KUSTOMIZE_GROUP) else {
-            self.checks.push(result(
+            self.record(result(
                 CheckKind::Flux,
                 CheckStatus::Info,
                 "Flux not installed".to_owned(),
@@ -492,7 +496,7 @@ impl Session<'_> {
         };
         let detail = flux_detail(&info);
         self.facts.flux = Some(info);
-        self.checks.push(result(
+        self.record(result(
             CheckKind::Flux,
             CheckStatus::Ok,
             detail,
@@ -510,7 +514,7 @@ impl Session<'_> {
         self.facts.prometheus = prometheus.ok().flatten();
         let (status, detail) =
             metrics_detail(self.facts.metrics_server, self.facts.prometheus.as_ref());
-        self.checks.push(result(
+        self.record(result(
             CheckKind::Metrics,
             status,
             detail,
@@ -526,8 +530,7 @@ impl Session<'_> {
         } else {
             (CheckStatus::Info, "Loco not installed".to_owned())
         };
-        self.checks
-            .push(result(CheckKind::Loco, status, detail, Duration::ZERO));
+        self.record(result(CheckKind::Loco, status, detail, Duration::ZERO));
     }
 }
 
@@ -536,9 +539,28 @@ pub async fn run_checks(
     env: &ShellEnv,
     settings: &KubeSettings,
 ) -> CheckReport {
+    run_session(context, env, settings, None).await
+}
+
+pub async fn run_checks_streaming(
+    context: &KubeContext,
+    env: &ShellEnv,
+    settings: &KubeSettings,
+    progress: &async_channel::Sender<CheckResult>,
+) -> CheckReport {
+    run_session(context, env, settings, Some(progress)).await
+}
+
+async fn run_session(
+    context: &KubeContext,
+    env: &ShellEnv,
+    settings: &KubeSettings,
+    progress: Option<&async_channel::Sender<CheckResult>>,
+) -> CheckReport {
     let mut session = Session {
         context,
         settings,
+        progress,
         checks: Vec::new(),
         facts: ClusterFacts {
             provider: context.provider,
@@ -656,6 +678,39 @@ mod tests {
             Some(("x.eks.amazonaws.com".to_owned(), 443))
         );
         assert_eq!(host_port("http://[::1]"), Some(("::1".to_owned(), 80)));
+    }
+
+    #[tokio::test]
+    async fn streaming_reports_each_check_as_it_finishes() {
+        let Ok(listener) = std::net::TcpListener::bind("127.0.0.1:0") else {
+            panic!("bind");
+        };
+        let Ok(addr) = listener.local_addr() else {
+            panic!("addr");
+        };
+        drop(listener);
+        let context = KubeContext {
+            id: ContextRef {
+                file: "/k".into(),
+                context: "gone".to_owned(),
+            },
+            cluster: "gone".to_owned(),
+            user: None,
+            namespace: None,
+            server: Some(format!("https://{addr}")),
+            provider: Provider::Generic,
+            auth: crate::provider::AuthKind::Token,
+            is_current: false,
+        };
+        let env = ShellEnv::from_process(String::new());
+        let (tx, rx) = async_channel::unbounded();
+        let report = run_checks_streaming(&context, &env, &KubeSettings::default(), &tx).await;
+        drop(tx);
+        let mut streamed = Vec::new();
+        while let Ok(check) = rx.recv().await {
+            streamed.push(check);
+        }
+        assert_eq!(streamed, report.checks);
     }
 
     #[tokio::test]
