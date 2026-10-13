@@ -1,0 +1,6 @@
+[files]
+extend-exclude = ["*.ttf", "OFL.txt"]
+
+[default.extend-words]
+aks = "aks"
+AKS = "AKS"

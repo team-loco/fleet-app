@@ -1,0 +1,406 @@
+use fleet_core::{
+    CLUSTER_NAV, ClusterSummary, Command, Counts, FLEET_NAV, NavSection, Page, Status,
+};
+use gpui::{
+    Animation, AnimationExt, AnyElement, Context, ElementId, FontWeight, Hsla, InteractiveElement,
+    IntoElement, ParentElement, Pixels, SharedString, StatefulInteractiveElement, Styled, div,
+    ease_out_quint, prelude::FluentBuilder, svg,
+};
+
+use super::Shell;
+use crate::assets::{CHEVRON_LEFT, CHEVRON_RIGHT};
+use crate::theme::{
+    ActiveTheme, CLUSTERS_PANEL, COLLAPSE, FONT_MONO, GLYPH_SLOT, ICON, ICON_BUTTON, PANEL_HEADER,
+    Palette, RADIUS, RESOURCES_PANEL, ROW_CLUSTER, ROW_NAV, RULE, SPACE_1, SPACE_2, SPACE_3,
+    SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8, STRIP, TEXT_BADGE, TEXT_GLYPH, TEXT_LABEL,
+    TEXT_UI,
+};
+
+const ALL_CLUSTERS: &str = "All clusters";
+const ADD_CLUSTER: &str = "Add cluster";
+const CLUSTERS: &str = "Clusters";
+const FLEET: &str = "Fleet";
+
+impl Shell {
+    pub(super) fn clusters_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let palette = *cx.palette();
+        let content = if self.state.clusters_open {
+            self.clusters_list(&palette, cx).into_any_element()
+        } else {
+            collapsed_strip("clusters-strip", CLUSTERS, &palette)
+                .bg(palette.chrome)
+                .border_r(RULE)
+                .border_color(palette.line)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.dispatch(Command::ToggleClustersPanel, cx);
+                }))
+                .into_any_element()
+        };
+        animated_panel(
+            "clusters-panel",
+            self.clusters_generation,
+            self.state.clusters_open,
+            CLUSTERS_PANEL,
+            content,
+        )
+    }
+
+    pub(super) fn resources_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let palette = *cx.palette();
+        let label = self.scope_label();
+        let content = if self.state.resources_open {
+            self.resources_list(label, &palette, cx).into_any_element()
+        } else {
+            collapsed_strip("resources-strip", &label, &palette)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.dispatch(Command::ToggleResourcesPanel, cx);
+                }))
+                .into_any_element()
+        };
+        animated_panel(
+            "resources-panel",
+            self.resources_generation,
+            self.state.resources_open,
+            RESOURCES_PANEL,
+            content,
+        )
+    }
+
+    pub(super) fn scope_label(&self) -> SharedString {
+        let selected = self.selected_cluster();
+        selected.map_or_else(|| FLEET.into(), |c| c.name.clone().into())
+    }
+
+    pub(super) fn selected_cluster(&self) -> Option<&ClusterSummary> {
+        let id = self.state.cluster.as_ref()?;
+        self.state.snapshot.cluster(id)
+    }
+
+    fn clusters_list(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+        let fleet_mode = self.state.cluster.is_none();
+        let all = nav_row("all-clusters", ROW_CLUSTER, fleet_mode, palette)
+            .gap(SPACE_4)
+            .font_weight(FontWeight::MEDIUM)
+            .child(div().w(GLYPH_SLOT).flex_none())
+            .child(ALL_CLUSTERS)
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.dispatch(Command::SelectCluster(None), cx);
+            }));
+        let rows = self
+            .state
+            .snapshot
+            .clusters
+            .iter()
+            .enumerate()
+            .map(|(ix, cluster)| self.cluster_row(ix, cluster, palette, cx))
+            .collect::<Vec<_>>();
+        let add = div()
+            .flex()
+            .items_center()
+            .gap(SPACE_4)
+            .h(ROW_CLUSTER)
+            .px(SPACE_4)
+            .mt(SPACE_2)
+            .text_color(palette.mute)
+            .child(div().w(GLYPH_SLOT).flex_none().child("+"))
+            .child(ADD_CLUSTER);
+        div()
+            .w(CLUSTERS_PANEL)
+            .h_full()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .bg(palette.chrome)
+            .border_r(RULE)
+            .border_color(palette.line)
+            .child(panel_header(
+                section_label(CLUSTERS, palette),
+                SPACE_7,
+                collapse_button("collapse-clusters", palette).on_click(
+                    cx.listener(|this, _, _, cx| this.dispatch(Command::ToggleClustersPanel, cx)),
+                ),
+            ))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .px(SPACE_3)
+                    .pb(SPACE_3)
+                    .child(all)
+                    .child(div().h(RULE).mx(SPACE_1).my(SPACE_3).bg(palette.line))
+                    .children(rows)
+                    .child(add),
+            )
+    }
+
+    fn cluster_row(
+        &self,
+        ix: usize,
+        cluster: &ClusterSummary,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selected = self.state.cluster.as_ref() == Some(&cluster.id);
+        let id = cluster.id.clone();
+        let name_color = if cluster.status == Status::Offline {
+            palette.mute
+        } else {
+            palette.fg2
+        };
+        nav_row(
+            ElementId::NamedInteger("cluster".into(), ix as u64),
+            ROW_CLUSTER,
+            selected,
+            palette,
+        )
+        .gap(SPACE_4)
+        .when(!selected, |row| row.text_color(name_color))
+        .child(glyph(cluster.status, palette))
+        .child(div().truncate().child(cluster.name.clone()))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.dispatch(Command::SelectCluster(Some(id.clone())), cx);
+        }))
+        .into_any_element()
+    }
+
+    fn resources_list(
+        &self,
+        label: SharedString,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let (sections, counts) = match self.selected_cluster() {
+            Some(cluster) => (CLUSTER_NAV, &cluster.nav),
+            None => (FLEET_NAV, &self.state.snapshot.fleet_nav),
+        };
+        let items = sections.iter().flat_map(|section| {
+            let head = section
+                .label
+                .map(|l| section_head(l, palette).into_any_element());
+            let rows = section_rows(section, self.state.page, counts, palette, cx);
+            head.into_iter().chain(rows)
+        });
+        let items: Vec<AnyElement> = items.collect();
+        div()
+            .w(RESOURCES_PANEL)
+            .h_full()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .child(panel_header(
+                div()
+                    .flex_1()
+                    .truncate()
+                    .text_size(TEXT_UI)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(label),
+                SPACE_8,
+                collapse_button("collapse-resources", palette).on_click(
+                    cx.listener(|this, _, _, cx| this.dispatch(Command::ToggleResourcesPanel, cx)),
+                ),
+            ))
+            .child(
+                div()
+                    .id("resources-scroll")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .px(SPACE_4)
+                    .pb(SPACE_3)
+                    .children(items),
+            )
+    }
+}
+
+fn section_rows(
+    section: &NavSection,
+    current: Page,
+    counts: &std::collections::BTreeMap<Page, Counts>,
+    palette: &Palette,
+    cx: &mut Context<Shell>,
+) -> Vec<AnyElement> {
+    section
+        .pages
+        .iter()
+        .map(|&page| {
+            let selected = page == current;
+            let badges = counts
+                .get(&page)
+                .map(|c| badges(c, palette))
+                .unwrap_or_default();
+            let key = ElementId::NamedInteger("page".into(), page as u64);
+            nav_row(key, ROW_NAV, selected, palette)
+                .when(!selected, |row| row.text_color(palette.fg2))
+                .child(div().flex_1().truncate().child(page.label()))
+                .children(badges)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.dispatch(Command::SelectPage(page), cx);
+                }))
+                .into_any_element()
+        })
+        .collect()
+}
+
+fn badges(counts: &Counts, palette: &Palette) -> Vec<AnyElement> {
+    let flagged = counts
+        .badges()
+        .into_iter()
+        .map(|(status, n)| badge(format!("{} {n}", status.glyph()), palette.status(status)));
+    let total = counts.total.map(|n| badge(n.to_string(), palette.mute));
+    flagged.chain(total).collect()
+}
+
+fn badge(text: String, color: Hsla) -> AnyElement {
+    div()
+        .ml(SPACE_4)
+        .font_family(FONT_MONO)
+        .text_size(TEXT_BADGE)
+        .text_color(color)
+        .child(text)
+        .into_any_element()
+}
+
+fn glyph(status: Status, palette: &Palette) -> impl IntoElement {
+    div()
+        .w(GLYPH_SLOT)
+        .flex_none()
+        .font_family(FONT_MONO)
+        .text_size(TEXT_GLYPH)
+        .text_color(palette.status(status))
+        .child(status.glyph())
+}
+
+fn nav_row(
+    id: impl Into<ElementId>,
+    height: Pixels,
+    selected: bool,
+    palette: &Palette,
+) -> gpui::Stateful<gpui::Div> {
+    let hover = palette.hover;
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .h(height)
+        .px(SPACE_4)
+        .rounded(RADIUS)
+        .cursor_pointer()
+        .when(selected, |row| {
+            row.bg(palette.sel)
+                .text_color(palette.selfg)
+                .font_weight(FontWeight::MEDIUM)
+        })
+        .when(!selected, |row| row.hover(move |style| style.bg(hover)))
+}
+
+fn section_label(text: &str, palette: &Palette) -> gpui::Div {
+    div()
+        .flex_1()
+        .text_size(TEXT_LABEL)
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(palette.mute)
+        .child(text.to_uppercase())
+}
+
+fn section_head(text: &str, palette: &Palette) -> impl IntoElement {
+    section_label(text, palette)
+        .pt(SPACE_6)
+        .pb(SPACE_2)
+        .px(SPACE_4)
+}
+
+fn panel_header(
+    label: impl IntoElement,
+    left_pad: Pixels,
+    button: impl IntoElement,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .flex_none()
+        .h(PANEL_HEADER)
+        .pl(left_pad)
+        .pr(SPACE_3)
+        .child(label)
+        .child(button)
+}
+
+fn collapse_button(id: &'static str, palette: &Palette) -> gpui::Stateful<gpui::Div> {
+    let hover = palette.hover;
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .justify_center()
+        .flex_none()
+        .size(ICON_BUTTON)
+        .rounded(RADIUS)
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover))
+        .child(svg().path(CHEVRON_LEFT).size(ICON).text_color(palette.mute))
+}
+
+fn collapsed_strip(id: &'static str, label: &str, palette: &Palette) -> gpui::Stateful<gpui::Div> {
+    let letters = label
+        .to_uppercase()
+        .chars()
+        .map(|c| div().child(SharedString::from(c.to_string())))
+        .collect::<Vec<_>>();
+    div()
+        .id(id)
+        .w(STRIP)
+        .h_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap(SPACE_5)
+        .pt(SPACE_5)
+        .cursor_pointer()
+        .text_color(palette.mute)
+        .child(
+            svg()
+                .path(CHEVRON_RIGHT)
+                .size(ICON)
+                .text_color(palette.mute),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .text_size(TEXT_LABEL)
+                .font_weight(FontWeight::SEMIBOLD)
+                .line_height(TEXT_LABEL)
+                .children(letters),
+        )
+}
+
+fn animated_panel(
+    id: &'static str,
+    generation: usize,
+    open: bool,
+    open_width: Pixels,
+    content: AnyElement,
+) -> AnyElement {
+    let (from, to) = if open {
+        (STRIP, open_width)
+    } else {
+        (open_width, STRIP)
+    };
+    let panel = div()
+        .h_full()
+        .flex_none()
+        .overflow_hidden()
+        .w(to)
+        .child(content);
+    if generation == 0 {
+        return panel.into_any_element();
+    }
+    let animation = Animation::new(COLLAPSE).with_easing(ease_out_quint());
+    let key = ElementId::NamedInteger(id.into(), generation as u64);
+    panel
+        .with_animation(key, animation, move |panel, delta| {
+            panel.w(from + (to - from) * delta)
+        })
+        .into_any_element()
+}

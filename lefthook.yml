@@ -1,0 +1,13 @@
+pre-commit:
+  parallel: true
+  commands:
+    fmt:
+      glob: "*.rs"
+      run: mise exec -- cargo fmt --all --check
+    typos:
+      run: mise exec -- typos {staged_files}
+
+pre-push:
+  commands:
+    lint:
+      run: mise run lint
