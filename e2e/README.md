@@ -91,10 +91,14 @@ exercise the real pod watcher. Eight bounded apply workers keep setup practical.
 idempotent. The image is pinned in `mise.toml`.
 
 Run `mise run e2e:scale:bench` after setup. The ignored release tests measure selected-cluster page
-rebuilds, live heap freed when watcher stores and tasks are released, and twelve pod label patches
-through the real LiveBackend channel into the UI's `AppState`. The 500 ms limit includes API request
-time; acknowledgement time is printed separately. This measures state availability, not a rendered
-gpui frame. The heap test uses [dhat](https://docs.rs/dhat/latest/dhat/) in its own profiling scope;
+rebuilds, live heap freed when watcher stores and tasks are released, and pod label patches through
+the real LiveBackend channel into the UI's `AppState`. Twelve isolated probes, one second apart, must
+reach `AppState` with a median under 300 ms including the API request; their maximum after the API
+acknowledged the patch must stay under 1 s, so a stalled API server on a loaded host does not fail
+the run. A ten-second storm of eight concurrent pod patchers then checks that snapshots stay at most
+one per snapshot interval while probes still get through. Each line prints the load average. This
+measures state availability, not a rendered gpui frame. The API server drops Events after its one-hour
+event TTL, so re-run `mise run e2e:scale` before benchmarking an older scenario. The heap test uses [dhat](https://docs.rs/dhat/latest/dhat/) in its own profiling scope;
 timing measurements run without profiling. RSS is also reported, but includes clients and runtime
 memory and is not used as a store heap measurement. Run these tests alone to avoid CPU contention.
 

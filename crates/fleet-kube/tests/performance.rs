@@ -1,59 +1,28 @@
-#[global_allocator]
-static ALLOCATOR: dhat::Alloc = dhat::Alloc;
+use std::hint::black_box;
+use std::time::{Duration, Instant};
 
-use fleet_core::{Backend, Command, NewCluster, Page, ResourceKind};
+use fleet_core::{Backend, ClusterId, Command, NewCluster, Page, ResourceKind};
 use fleet_kube::assemble::{self, Extras, Selection};
-use fleet_kube::discovery::{DiscoverySources, KubeContext, discover};
-use fleet_kube::manager::{ClusterHandle, ClusterManager};
-use fleet_kube::resources::WatchKind;
+use fleet_kube::discovery::{DiscoverySources, KubeContext};
+use fleet_kube::live::SNAPSHOT_INTERVAL;
 use fleet_kube::settings::KubeSettings;
 use fleet_kube::shell_env::ShellEnv;
 use fleet_kube::store::ClusterStore;
-use k8s_openapi::api::core::v1::Service;
-use kube::api::{Patch, PatchParams};
-
-use std::hint::black_box;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
-use fleet_core::ClusterId;
 use fleet_kube::{detail::PodIndex, lists, pods, snapshot};
 use jiff::Timestamp;
-use k8s_openapi::api::apps::v1::Deployment;
-use k8s_openapi::api::core::v1::{ConfigMap, Event, Pod};
-use kube::api::PartialObjectMeta;
+use k8s_openapi::api::core::v1::Pod;
+use kube::api::{Patch, PatchParams};
 use serde_json::json;
 
-const POD_COUNT: usize = 10_000;
-const CONFIGMAP_COUNT: usize = 5_000;
+#[path = "performance_support/scale.rs"]
+mod scale;
+#[path = "performance_support/synthetic.rs"]
+mod synthetic;
+
+use scale::{LIVE_CONFIGMAPS, LIVE_PODS, SCALE_NAMESPACE, WAIT};
+
 const SAMPLES: usize = 40;
 const REBUILD_BUDGET: Duration = Duration::from_millis(20);
-const MAX_INDEX_ALLOCATIONS: u64 = 16;
-const MAX_POD_ALLOCATIONS: u64 = 150_016;
-
-fn fixture<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> T {
-    let Ok(object) = serde_json::from_value(value) else {
-        panic!("invalid synthetic fixture");
-    };
-    object
-}
-
-fn synthetic_pods() -> Vec<Arc<Pod>> {
-    (0..POD_COUNT)
-        .map(|index| {
-            let object = fixture(json!({
-                "metadata": {"name": format!("pod-{index:05}"), "namespace": "scale",
-                    "labels": {"app": "scale"}},
-                "spec": {"nodeName": "node", "containers": [{"name": "pause", "image": "pause",
-                    "resources": {"requests": {"cpu": "1m", "memory": "1Mi"}}}]},
-                "status": {"phase": "Running", "conditions": [{"type": "Ready", "status": "True"}],
-                    "containerStatuses": [{"name": "pause", "image": "pause", "imageID": "pause",
-                        "ready": true, "restartCount": 0, "state": {"running": {}}}]}
-            }));
-            Arc::new(object)
-        })
-        .collect()
-}
 
 fn measure<T>(name: &str, mut build: impl FnMut() -> T) -> Duration {
     drop(black_box(build()));
@@ -76,7 +45,7 @@ fn measure<T>(name: &str, mut build: impl FnMut() -> T) -> Duration {
 #[test]
 #[ignore = "run in release mode with --ignored --nocapture --test-threads=1"]
 fn synthetic_snapshot_builders() {
-    let raw = synthetic_pods();
+    let raw = synthetic::pods();
     let cluster = ClusterId::new("scale");
     let now = Timestamp::now();
     let pods = measure("10k pod rows", || pods::pods(&cluster, &raw, &[], &[], now));
@@ -89,12 +58,8 @@ fn synthetic_snapshot_builders() {
         let counts = snapshot::pod_counts(&raw);
         (rows, index, counts)
     });
-    let maps: Vec<PartialObjectMeta<ConfigMap>> = (0..CONFIGMAP_COUNT)
-        .map(|index| {
-            fixture(json!({"metadata": {"name": format!("map-{index:05}"), "namespace": "scale"}}))
-        })
-        .collect();
-    measure("5k configmap rows", || {
+    let maps = synthetic::configmaps();
+    let configmaps = measure("5k configmap rows", || {
         let mut rows: Vec<_> = maps.iter().map(|map| lists::config_map(map, now)).collect();
         rows.sort_by(|a, b| (&a.namespace, &a.name).cmp(&(&b.namespace, &b.name)));
         rows
@@ -102,19 +67,25 @@ fn synthetic_snapshot_builders() {
     assert!(pods < REBUILD_BUDGET, "pod rows: {pods:?}");
     assert!(overview < REBUILD_BUDGET, "overview: {overview:?}");
     assert!(combined < REBUILD_BUDGET, "selected rebuild: {combined:?}");
+    assert!(
+        configmaps < REBUILD_BUDGET,
+        "configmap rows: {configmaps:?}"
+    );
 }
 
-const CONTEXT: &str = "kind-fleet-b";
-const SCALE_NAMESPACE: &str = "fleet-scale";
-const LIVE_CONFIGMAPS: usize = 3000;
-const LIVE_SERVICES: usize = 1500;
-const LIVE_PODS: usize = 200;
-const LIVE_DEPLOYMENTS: usize = 400;
-const LIVE_EVENTS: usize = 2000;
-const WAIT: Duration = Duration::from_secs(120);
-const POLL: Duration = Duration::from_millis(100);
-const UPDATE_BUDGET: Duration = Duration::from_millis(500);
+const UPDATE_MEDIAN_BUDGET: Duration = Duration::from_millis(300);
+const UPDATE_MAX_BUDGET: Duration = Duration::from_secs(1);
 const LIVE_SAMPLES: usize = 12;
+const PROBE_SPACING: Duration = Duration::from_secs(1);
+const PROBE_POD: &str = "scale-pod-0000";
+const PROBE_LABEL: &str = "fleet-scale-probe";
+const STORM_LABEL: &str = "fleet-scale-storm";
+const STORM_DURATION: Duration = Duration::from_secs(10);
+const STORM_WORKERS: usize = 8;
+const STORM_FIRST_POD: usize = 1;
+const STORM_PODS: usize = LIVE_PODS - STORM_FIRST_POD;
+const SECONDS_PER_MINUTE: u64 = 60;
+const PERCENT: f64 = 100.;
 const EVENT_LIMIT: usize = 200;
 const USAGE_SAMPLES: usize = 60;
 
@@ -152,104 +123,221 @@ async fn visible(
     }
 }
 
+fn cpu_time() -> Duration {
+    let pid = std::process::id().to_string();
+    let output = std::process::Command::new("ps")
+        .args(["-o", "time=", "-p", &pid])
+        .output();
+    let Ok(output) = output else {
+        panic!("ps failed")
+    };
+    assert!(output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    let Some((minutes, seconds)) = text.trim().split_once(':') else {
+        panic!("invalid ps CPU time: {text}")
+    };
+    let (Ok(minutes), Ok(seconds)) = (minutes.parse::<u64>(), seconds.parse::<f64>()) else {
+        panic!("invalid ps CPU time: {text}")
+    };
+    Duration::from_secs(minutes * SECONDS_PER_MINUTE) + Duration::from_secs_f64(seconds)
+}
+
+fn load_average() -> String {
+    let output = std::process::Command::new("sysctl")
+        .args(["-n", "vm.loadavg"])
+        .output();
+    let Ok(output) = output else {
+        panic!("sysctl failed")
+    };
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+struct Feed {
+    updates: async_channel::Receiver<fleet_core::Update>,
+    cluster: ClusterId,
+    state: fleet_core::AppState,
+    snapshots: usize,
+}
+
+impl Feed {
+    fn new(updates: async_channel::Receiver<fleet_core::Update>, cluster: ClusterId) -> Self {
+        Self {
+            updates,
+            cluster,
+            state: fleet_core::AppState::default(),
+            snapshots: 0,
+        }
+    }
+
+    async fn until_labelled(&mut self, marker: &str) {
+        let deadline = tokio::time::Instant::now() + WAIT;
+        loop {
+            let received = tokio::time::timeout_at(deadline, self.updates.recv()).await;
+            let Ok(Ok(update)) = received else {
+                panic!("backend did not publish the probe label")
+            };
+            let fleet_core::Update::Snapshot(snapshot) = update else {
+                continue;
+            };
+            self.snapshots += 1;
+            let shown = snapshot.pods.iter().any(|row| {
+                row.name == PROBE_POD
+                    && row.namespace == SCALE_NAMESPACE
+                    && row.labels.get(PROBE_LABEL).map(String::as_str) == Some(marker)
+            });
+            self.state.update(fleet_core::Update::Snapshot(snapshot));
+            if shown {
+                self.state
+                    .apply(&Command::SelectCluster(Some(self.cluster.clone())));
+                self.state.apply(&Command::SelectPage(Page::Pods));
+                black_box(&self.state);
+                return;
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct Probes {
+    total: Vec<Duration>,
+    after_ack: Vec<Duration>,
+}
+
+impl Probes {
+    async fn probe(&mut self, api: &kube::Api<Pod>, feed: &mut Feed, marker: &str) {
+        let patch = json!({"metadata": {"labels": {PROBE_LABEL: marker}}});
+        let start = Instant::now();
+        let patched = api
+            .patch(PROBE_POD, &PatchParams::default(), &Patch::Merge(&patch))
+            .await;
+        assert!(patched.is_ok(), "probe patch failed: {patched:?}");
+        let acknowledged = Instant::now();
+        feed.until_labelled(marker).await;
+        self.total.push(start.elapsed());
+        self.after_ack.push(acknowledged.elapsed());
+    }
+
+    fn report(self, label: &str) -> (Spread, Spread) {
+        let samples = self.total.len();
+        let total = spread(self.total);
+        let after_ack = spread(self.after_ack);
+        println!(
+            "API patch to UI AppState ({label}): median={:?}, max={:?}; after API acknowledgement: median={:?}, max={:?}; samples={samples}, load={}",
+            total.median,
+            total.max,
+            after_ack.median,
+            after_ack.max,
+            load_average()
+        );
+        (total, after_ack)
+    }
+}
+
+struct Spread {
+    median: Duration,
+    max: Duration,
+}
+
+fn spread(mut timings: Vec<Duration>) -> Spread {
+    timings.sort_unstable();
+    let median = timings.get(timings.len() / 2).copied().unwrap_or_default();
+    let max = timings.last().copied().unwrap_or_default();
+    Spread { median, max }
+}
+
+async fn isolated_latency(api: &kube::Api<Pod>, feed: &mut Feed) {
+    let mut probes = Probes::default();
+    for sample in 0..LIVE_SAMPLES {
+        tokio::time::sleep(PROBE_SPACING).await;
+        let marker = format!("isolated-{sample}");
+        probes.probe(api, feed, &marker).await;
+    }
+    let (total, after_ack) = probes.report("isolated");
+    assert!(
+        total.median < UPDATE_MEDIAN_BUDGET,
+        "median UI update latency {:?}",
+        total.median
+    );
+    assert!(
+        after_ack.max < UPDATE_MAX_BUDGET,
+        "max UI update latency after API acknowledgement {:?}",
+        after_ack.max
+    );
+}
+
+async fn churn(api: kube::Api<Pod>, worker: usize, until: Instant) -> usize {
+    let mut patches = 0;
+    while Instant::now() < until {
+        let index = STORM_FIRST_POD + (worker + patches * STORM_WORKERS) % STORM_PODS;
+        let name = format!("scale-pod-{index:04}");
+        let patch = json!({"metadata": {"labels": {STORM_LABEL: patches.to_string()}}});
+        let result = api
+            .patch(&name, &PatchParams::default(), &Patch::Merge(&patch))
+            .await;
+        assert!(result.is_ok(), "storm patch failed: {result:?}");
+        patches += 1;
+    }
+    patches
+}
+
+async fn storm(api: &kube::Api<Pod>, feed: &mut Feed) {
+    let start = Instant::now();
+    let until = start + STORM_DURATION;
+    let cpu_before = cpu_time();
+    let snapshots_before = feed.snapshots;
+    let workers: Vec<_> = (0..STORM_WORKERS)
+        .map(|worker| tokio::spawn(churn(api.clone(), worker, until)))
+        .collect();
+    let mut probes = Probes::default();
+    while Instant::now() < until {
+        let marker = format!("storm-{}", probes.total.len());
+        probes.probe(api, feed, &marker).await;
+    }
+    let mut patches = 0;
+    for worker in workers {
+        let Ok(done) = worker.await else {
+            panic!("storm worker failed")
+        };
+        patches += done;
+    }
+    let elapsed = start.elapsed();
+    let cpu = cpu_time().saturating_sub(cpu_before);
+    let snapshots = feed.snapshots - snapshots_before;
+    let seconds = elapsed.as_secs_f64();
+    let rate = f64::from(u32::try_from(snapshots).unwrap_or(u32::MAX)) / seconds;
+    let patch_rate = f64::from(u32::try_from(patches).unwrap_or(u32::MAX)) / seconds;
+    println!(
+        "storm: {patch_rate:.0} pod patches/s, {rate:.1} snapshots/s, process CPU {:.0}%, load={}",
+        cpu.as_secs_f64() / seconds * PERCENT,
+        load_average()
+    );
+    let (_, after_ack) = probes.report("storm");
+    let periods = elapsed.as_millis() / SNAPSHOT_INTERVAL.as_millis();
+    let allowed = usize::try_from(periods).unwrap_or(usize::MAX) + 1;
+    assert!(
+        snapshots <= allowed,
+        "{snapshots} snapshots in {elapsed:?} exceed one per {SNAPSHOT_INTERVAL:?}"
+    );
+    assert!(
+        after_ack.max < UPDATE_MAX_BUDGET,
+        "max UI update latency under storm after API acknowledgement {:?}",
+        after_ack.max
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires FLEET_E2E=1 and mise run e2e:scale; run alone in release mode"]
 async fn kind_scale_snapshot_and_update_latency() {
-    let (directory, sources, context) = scale_context();
+    let (directory, sources, context) = scale::context();
     let settings = KubeSettings::default();
     let cluster = ClusterId::new("scale-b");
     benchmark_stores(&context, &settings, &cluster).await;
     benchmark_updates(&directory, sources, context, settings, cluster).await;
 }
 
-fn scale_context() -> (tempfile::TempDir, DiscoverySources, KubeContext) {
-    assert_eq!(std::env::var("FLEET_E2E").as_deref(), Ok("1"));
-    let Ok(directory) = tempfile::tempdir() else {
-        panic!("tempdir failed")
-    };
-    let output = std::process::Command::new("kind")
-        .args(["get", "kubeconfig", "--name", "fleet-b"])
-        .output();
-    let Ok(output) = output else {
-        panic!("kind failed")
-    };
-    assert!(output.status.success(), "kind kubeconfig failed");
-    let kubeconfig = directory.path().join("kind.kubeconfig");
-    assert!(std::fs::write(&kubeconfig, output.stdout).is_ok());
-    let sources = DiscoverySources {
-        kubeconfig_env: Some(kubeconfig.into_os_string()),
-        home: None,
-        folders: Vec::new(),
-    };
-    let discovery = discover(&sources);
-    assert_eq!(discovery.contexts.len(), 1);
-    let Some(context) = discovery
-        .contexts
-        .into_iter()
-        .find(|c| c.id.context == CONTEXT)
-    else {
-        panic!("kind-fleet-b context missing");
-    };
-    (directory, sources, context)
-}
-
-async fn wait_for_stores(handle: &ClusterHandle) {
-    let deadline = Instant::now() + WAIT;
-    loop {
-        let maps = handle.objects::<PartialObjectMeta<ConfigMap>>();
-        let services = handle.objects::<Service>();
-        let pods = handle.objects::<Pod>();
-        let deployments = handle.objects::<Deployment>();
-        let events = handle.objects::<Event>();
-        let count = |namespace: Option<&str>| namespace == Some(SCALE_NAMESPACE);
-        if maps
-            .iter()
-            .filter(|m| {
-                count(m.metadata.namespace.as_deref())
-                    && m.metadata
-                        .name
-                        .as_deref()
-                        .is_some_and(|name| name.starts_with("scale-configmap-"))
-            })
-            .count()
-            == LIVE_CONFIGMAPS
-            && services
-                .iter()
-                .filter(|s| count(s.metadata.namespace.as_deref()))
-                .count()
-                == LIVE_SERVICES
-            && pods
-                .iter()
-                .filter(|p| count(p.metadata.namespace.as_deref()))
-                .count()
-                == LIVE_PODS
-            && deployments
-                .iter()
-                .filter(|d| count(d.metadata.namespace.as_deref()))
-                .count()
-                == LIVE_DEPLOYMENTS
-            && events
-                .iter()
-                .filter(|e| {
-                    count(e.metadata.namespace.as_deref())
-                        && e.metadata
-                            .name
-                            .as_deref()
-                            .is_some_and(|name| name.starts_with("scale-event-"))
-                })
-                .count()
-                == LIVE_EVENTS
-        {
-            break;
-        }
-        assert!(Instant::now() < deadline, "scale stores did not initialize");
-        tokio::time::sleep(POLL).await;
-    }
-}
-
 async fn benchmark_stores(context: &KubeContext, settings: &KubeSettings, cluster: &ClusterId) {
     let rss_before = resident_kib();
-    let (manager, handle, subscriptions) = populated_stores(context, settings).await;
+    let (manager, handle, subscriptions) = scale::populated_stores(context, settings).await;
     let rss_stores = resident_kib();
     println!(
         "watcher population RSS delta={} KiB (includes client/runtime, not exact heap size)",
@@ -263,9 +351,9 @@ async fn benchmark_stores(context: &KubeContext, settings: &KubeSettings, cluste
         Page::Services,
     ] {
         let selection = Selection {
-            page,
+            pod_rows: page == Page::Pods,
             event_limit: EVENT_LIMIT,
-            yaml: None,
+            yaml: &[],
         };
         let name = format!("kind scale {page:?} selected rebuild");
         measure(&name, || {
@@ -349,154 +437,18 @@ async fn benchmark_updates(
     })
     .await;
     let api: kube::Api<Pod> = kube::Api::namespaced(client, SCALE_NAMESPACE);
-    let name = "scale-pod-0000";
-    measure_updates(&api, name, &updates).await;
-    drop(commands);
-}
-
-async fn measure_updates(
-    api: &kube::Api<Pod>,
-    name: &str,
-    updates: &async_channel::Receiver<fleet_core::Update>,
-) {
-    let mut timings = Vec::new();
-    let mut requests = Vec::new();
-    for sample in 0..LIVE_SAMPLES {
-        let marker = format!("probe-{sample}");
-        let patch = json!({"metadata": {"labels": {"fleet-scale-probe": marker}}});
-        let start = Instant::now();
-        let patched = api
-            .patch(name, &PatchParams::default(), &Patch::Merge(&patch))
-            .await;
-        requests.push(start.elapsed());
-        assert!(patched.is_ok(), "patch failed: {patched:?}");
-        let snapshot = visible(updates, |s| {
-            s.pods.iter().any(|row| {
-                row.name == name
-                    && row.namespace == SCALE_NAMESPACE
-                    && row.labels.get("fleet-scale-probe") == Some(&marker)
-            })
-        })
+    let mut feed = Feed::new(updates, cluster);
+    let warmed = api.get(PROBE_POD).await;
+    assert!(
+        warmed.is_ok(),
+        "could not warm the API connection: {warmed:?}"
+    );
+    isolated_latency(&api, &mut feed).await;
+    storm(&api, &mut feed).await;
+    let cleared = json!({"metadata": {"labels": {PROBE_LABEL: null}}});
+    let cleanup = api
+        .patch(PROBE_POD, &PatchParams::default(), &Patch::Merge(&cleared))
         .await;
-        let mut state = fleet_core::AppState::default();
-        state.update(fleet_core::Update::Snapshot(Box::new(snapshot)));
-        black_box(state);
-        timings.push(start.elapsed());
-    }
-    let patch = json!({"metadata": {"labels": {"fleet-scale-probe": null}}});
-    assert!(
-        api.patch(name, &PatchParams::default(), &Patch::Merge(&patch))
-            .await
-            .is_ok()
-    );
-    requests.sort_unstable();
-    println!(
-        "API patch acknowledgement: median={:?}, max={:?}",
-        requests[LIVE_SAMPLES / 2],
-        requests.last()
-    );
-    timings.sort_unstable();
-    let max = timings.last().copied().unwrap_or_default();
-    println!(
-        "API patch to UI AppState: median={:?}, max={max:?}, samples={LIVE_SAMPLES}",
-        timings[LIVE_SAMPLES / 2]
-    );
-    assert!(
-        max < UPDATE_BUDGET,
-        "UI update latency exceeded budget: {max:?}"
-    );
-}
-
-async fn populated_stores(
-    context: &KubeContext,
-    settings: &KubeSettings,
-) -> (
-    ClusterManager,
-    ClusterHandle,
-    Vec<fleet_kube::manager::Subscription>,
-) {
-    let env = Arc::new(ShellEnv::from_process(String::new()));
-    let (manager, _events) =
-        ClusterManager::new(tokio::runtime::Handle::current(), settings.clone(), env);
-    let handle = manager.connect(context.clone());
-    let kinds = [
-        WatchKind::Pods,
-        WatchKind::Nodes,
-        WatchKind::ConfigMaps,
-        WatchKind::Services,
-    ];
-    let mut subscriptions: Vec<_> = kinds
-        .into_iter()
-        .map(|kind| handle.subscribe(kind))
-        .collect();
-    subscriptions.extend(
-        snapshot::OVERVIEW_KINDS
-            .into_iter()
-            .map(|kind| handle.subscribe(kind)),
-    );
-    wait_for_stores(&handle).await;
-    (manager, handle, subscriptions)
-}
-
-const WATCHER_HEAP_BUDGET: usize = 32 * 1024 * 1024;
-const CANCEL_WAIT: Duration = Duration::from_millis(100);
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "requires FLEET_E2E=1 and e2e:scale; run alone with --test-threads=1"]
-async fn kind_scale_watcher_heap() {
-    let (_directory, _sources, context) = scale_context();
-    let profiler = dhat::Profiler::builder().testing().build();
-    let settings = KubeSettings::default();
-    let (manager, handle, subscriptions) = populated_stores(&context, &settings).await;
-    let populated = dhat::HeapStats::get().curr_bytes;
-    drop(subscriptions);
-    tokio::time::sleep(CANCEL_WAIT).await;
-    let emptied = dhat::HeapStats::get().curr_bytes;
-    let retained = populated.saturating_sub(emptied);
-    println!(
-        "watcher stores + watch tasks released heap={retained} bytes, populated process heap={populated} bytes"
-    );
-    assert!(retained > 0, "watcher memory was not released");
-    assert!(
-        retained < WATCHER_HEAP_BUDGET,
-        "watcher heap exceeds budget: {retained}"
-    );
-    manager.disconnect(&context.id);
-    drop(handle);
-    drop(manager);
-    drop(profiler);
-}
-
-#[test]
-#[ignore = "run alone in release mode with --test-threads=1"]
-fn synthetic_snapshot_allocations() {
-    let raw = synthetic_pods();
-    let cluster = ClusterId::new("scale");
-    let now = Timestamp::now();
-    let profiler = dhat::Profiler::builder().testing().build();
-    let rows = pods::pods(&cluster, &raw, &[], &[], now);
-    let pod_stats = dhat::HeapStats::get();
-    let index = PodIndex::build(&raw, now);
-    let overview_stats = dhat::HeapStats::get();
-    println!(
-        "10k pod rows allocated {} blocks, {} bytes; overview added {} blocks, {} bytes",
-        pod_stats.total_blocks,
-        pod_stats.total_bytes,
-        overview_stats.total_blocks - pod_stats.total_blocks,
-        overview_stats.total_bytes - pod_stats.total_bytes
-    );
-    assert!(
-        pod_stats.total_blocks <= MAX_POD_ALLOCATIONS,
-        "pod rows allocated {} blocks",
-        pod_stats.total_blocks
-    );
-    let index_allocations = overview_stats.total_blocks - pod_stats.total_blocks;
-    assert!(
-        index_allocations <= MAX_INDEX_ALLOCATIONS,
-        "overview allocated {index_allocations} blocks"
-    );
-    black_box((&rows, &index));
-    drop(index);
-    drop(rows);
-    drop(profiler);
+    assert!(cleanup.is_ok(), "probe label cleanup failed: {cleanup:?}");
+    drop(commands);
 }

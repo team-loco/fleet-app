@@ -1,11 +1,14 @@
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ClusterId(String);
+pub struct ClusterId(Arc<str>);
 
 impl ClusterId {
     pub fn new(context: impl Into<String>) -> Self {
-        Self(context.into())
+        let context = context.into();
+        let shared = Arc::from(context);
+        Self(shared)
     }
 
     pub fn as_str(&self) -> &str {

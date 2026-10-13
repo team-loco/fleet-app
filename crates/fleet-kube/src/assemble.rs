@@ -51,7 +51,7 @@ impl Extras {
 }
 
 pub struct Selection<'a> {
-    pub page: Page,
+    pub pod_rows: bool,
     pub event_limit: usize,
     pub yaml: &'a [&'a (ResourceRef, String)],
 }
@@ -99,7 +99,7 @@ pub fn cluster(
     });
     let counts = problem_counts(&problems);
     let mut summary = summarize(id.clone(), id.to_string(), handle, counts, metrics);
-    let pod_rows = if selection.is_some_and(|selection| selection.page == Page::Pods) {
+    let pod_rows = if selection.is_some_and(|selection| selection.pod_rows) {
         crate::pods::pods(
             id,
             &pods,

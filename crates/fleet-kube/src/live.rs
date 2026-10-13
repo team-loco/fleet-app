@@ -40,11 +40,13 @@ use crate::shell_env::{ShellEnv, capture, user_shell};
 use crate::snapshot::page_kinds;
 use crate::store::{ClusterStore, SavedCluster, SavedPreferences};
 use crate::task::TaskGuard;
+use crate::throttle::Throttle;
 use crate::usage::prometheus_utilization;
 use crate::watch::KubeconfigWatcher;
 
 const THREAD_NAME: &str = "fleet-kube";
-const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(100);
+pub const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(100);
+const EXTENSION_POLL_INTERVAL: Duration = SNAPSHOT_INTERVAL;
 const BASELINE_KINDS: [WatchKind; 2] = [WatchKind::Nodes, WatchKind::Pods];
 const DEFAULT_WINDOW: u64 = 0;
 const MISSING_STATE: &str = "Not in kubeconfig";
@@ -880,6 +882,15 @@ impl Live {
         loco
     }
 
+    fn viewing(&self, id: &ClusterId) -> Option<bool> {
+        let mut selecting = self
+            .navigations()
+            .filter(|navigation| navigation.selected.as_ref() == Some(id))
+            .peekable();
+        selecting.peek()?;
+        Some(selecting.any(|navigation| navigation.page == Page::Pods))
+    }
+
     fn snapshot(&self) -> Snapshot {
         let now = Timestamp::now();
         let mut connected = Vec::new();
@@ -888,16 +899,14 @@ impl Live {
         let mut flux = Counts::default();
         let mut pods = Vec::new();
         for cluster in self.clusters.values() {
-            let selected = self
-                .navigations()
-                .any(|navigation| navigation.selected.as_ref() == Some(&cluster.id));
+            let viewing = self.viewing(&cluster.id);
             let yaml: Vec<_> = self
                 .navigations()
                 .filter_map(|navigation| navigation.yaml.as_ref())
                 .filter(|(target, _)| target.cluster == cluster.id)
                 .collect();
-            let selection = selected.then_some(Selection {
-                page: self.page,
+            let selection = viewing.map(|pod_rows| Selection {
+                pod_rows,
                 event_limit: self.settings.event_limit,
                 yaml: &yaml,
             });
@@ -1046,6 +1055,20 @@ async fn scan(sources: &DiscoverySources) -> Discovery {
         .unwrap_or_default()
 }
 
+#[cfg(feature = "loco")]
+fn refresh_extensions(live: &mut Live) -> bool {
+    let mut changed = false;
+    live.for_each_window(|live| {
+        changed |= live.navigation.loco.refresh();
+    });
+    changed
+}
+
+#[cfg(not(feature = "loco"))]
+fn refresh_extensions(_: &mut Live) -> bool {
+    false
+}
+
 fn ticker(period: Duration) -> tokio::time::Interval {
     let mut interval = tokio::time::interval(period);
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -1091,7 +1114,8 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
     let gitops_changed = live.gitops.changed();
     live.start();
     let mut dirty = true;
-    let mut publish = ticker(SNAPSHOT_INTERVAL);
+    let mut publish = Throttle::new(SNAPSHOT_INTERVAL);
+    let mut poll = ticker(EXTENSION_POLL_INTERVAL);
     loop {
         tokio::select! {
             event = discovery_events.recv(), if !discovery_events.is_closed() => {
@@ -1129,16 +1153,12 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
                 }
                 dirty = true;
             }
-            _ = publish.tick() => {
-                #[cfg(feature = "loco")]
-                live.for_each_window(|live| {
-                    dirty |= live.navigation.loco.refresh();
-                });
-                if dirty {
-                    dirty = false;
-                    if updates.send(Update::Snapshot(Box::new(live.snapshot()))).await.is_err() {
-                        return;
-                    }
+            _ = poll.tick() => dirty |= refresh_extensions(&mut live),
+            () = publish.ready(), if dirty => {
+                publish.fired();
+                dirty = false;
+                if updates.send(Update::Snapshot(Box::new(live.snapshot()))).await.is_err() {
+                    return;
                 }
             }
         }
@@ -1346,6 +1366,24 @@ mod tests {
 
     fn window_command(window: u64, command: Command) -> Command {
         Command::ForWindow(window, Box::new(command))
+    }
+
+    #[tokio::test]
+    async fn pod_rows_are_built_only_while_some_window_shows_the_pods_page() {
+        let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let mut live = test_live(dir.path());
+        let cluster = ClusterId::new("a");
+        for window in [FIRST_WINDOW, SECOND_WINDOW] {
+            let select = Command::SelectCluster(Some(cluster.clone()));
+            live.apply(&window_command(window, select));
+            let page = Command::SelectPage(Page::ConfigMaps);
+            live.apply(&window_command(window, page));
+        }
+        assert_eq!(live.viewing(&cluster), Some(false));
+        let pods = Command::SelectPage(Page::Pods);
+        live.apply(&window_command(SECOND_WINDOW, pods));
+        assert_eq!(live.viewing(&cluster), Some(true));
+        assert_eq!(live.viewing(&ClusterId::new("b")), None);
     }
 
     #[tokio::test]
