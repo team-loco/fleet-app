@@ -4,6 +4,7 @@ mod focus;
 mod git;
 mod grid;
 mod health;
+mod requests;
 mod watch;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -23,6 +24,7 @@ use focus::Focus;
 use git::{Mirrors, RepoKey};
 use grid::ClusterFluxView;
 use health::Workloads;
+use requests::Requests;
 use watch::{ClusterFlux, FluxInfo, KINDS};
 
 const CHANGE_BUFFER: usize = 1;
@@ -31,6 +33,7 @@ pub struct GitOpsState {
     clusters: BTreeMap<ClusterId, ClusterFlux>,
     focus: Option<Focus>,
     mirrors: Mirrors,
+    requests: Requests,
     changed_tx: async_channel::Sender<()>,
     changed_rx: async_channel::Receiver<()>,
 }
@@ -49,6 +52,7 @@ impl GitOpsState {
             clusters: BTreeMap::new(),
             focus: None,
             mirrors: Mirrors::start(git_timeout, changed_tx.clone()),
+            requests: Requests::default(),
             changed_tx,
             changed_rx,
         }
@@ -93,6 +97,7 @@ impl GitOpsState {
                 None => self.focus = None,
             },
             Command::OpenCommit(_) => self.focus = None,
+            Command::Flux(key, action) => self.requests.record(key, *action, Timestamp::now()),
             _ => {}
         }
     }
@@ -162,7 +167,11 @@ impl GitOpsState {
                     history,
                     releases,
                 };
-                snapshot.flux.extend(flux_object(parsed, inputs));
+                if let Some(mut object) = flux_object(parsed, inputs) {
+                    let handled = parsed.object.last_handled_reconcile_at.as_deref();
+                    self.requests.apply(&mut object, handled, now);
+                    snapshot.flux.push(object);
+                }
             }
             if let Some(summary) = snapshot.clusters.iter_mut().find(|c| c.id == cluster.id) {
                 summary.nav.extend(nav_counts(&cluster.objects));
