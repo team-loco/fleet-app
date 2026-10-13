@@ -188,7 +188,7 @@ impl Live {
                 self.page = key.kind.page();
                 self.resubscribe_page();
             }
-            Command::Flux(..) => {}
+            Command::Flux(..) => self.act(command),
             Command::ToggleClustersPanel => {}
             Command::ToggleResourcesPanel => {}
             Command::OpenResource(resource) => self.open(resource),
@@ -196,10 +196,10 @@ impl Live {
             Command::Compare(_) => {}
             Command::PortForward { .. } => self.act(command),
             Command::StopPortForward { .. } => self.act(command),
-            Command::Cordon(_) => {}
-            Command::Uncordon(_) => {}
-            Command::Drain(_) => {}
-            Command::Delete(_) => {}
+            Command::Cordon(_) => self.act(command),
+            Command::Uncordon(_) => self.act(command),
+            Command::Drain(_) => self.act(command),
+            Command::Delete(_) => self.act(command),
             Command::OpenAddCluster(_) => {
                 let files = kubeconfig_files(&self.discovery, &self.store, self.home.as_deref());
                 self.publish(Update::Contexts(files));
@@ -216,9 +216,9 @@ impl Live {
             Command::WatchWorkload { .. } => {}
             Command::StreamLogs(_) => self.act(command),
             Command::Exec(_) => self.act(command),
-            Command::RestartRollout(_) => {}
-            Command::Scale { .. } => {}
-            Command::Rollback { .. } => {}
+            Command::RestartRollout(_) => self.act(command),
+            Command::Scale { .. } => self.act(command),
+            Command::Rollback { .. } => self.act(command),
             #[cfg(feature = "loco")]
             Command::Loco(_) => {}
             Command::CopySpec { .. } => {}
@@ -368,8 +368,8 @@ impl Live {
             pods: Vec::new(),
             forwards: Vec::new(),
         };
-        self.actions.overlay(&mut snapshot);
         self.gitops.fill(&mut snapshot);
+        self.actions.overlay(&mut snapshot);
         snapshot
     }
 }

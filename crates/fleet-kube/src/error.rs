@@ -40,6 +40,12 @@ pub enum Error {
     NoNamedPort { pod: String, name: String },
     #[error("{action} is not supported for {kind}")]
     Unsupported { action: &'static str, kind: String },
+    #[error("revision {0} not found")]
+    RevisionNotFound(u64),
+    #[error("deployment {0} is paused; resume it before rolling back")]
+    Paused(String),
+    #[error("Flux object: {0}")]
+    Flux(#[from] fleet_flux::ObjectError),
     #[error("debug container {name} did not start: {reason}")]
     DebugContainer { name: String, reason: String },
 }

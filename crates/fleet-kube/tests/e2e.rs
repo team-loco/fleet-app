@@ -13,7 +13,7 @@ use fleet_kube::settings::KubeSettings;
 use fleet_kube::shell_env::ShellEnv;
 use fleet_kube::store::ClusterStore;
 use k8s_openapi::api::core::v1::{ConfigMap, Pod};
-use kube::api::{DeleteParams, PartialObjectMeta, PostParams};
+use kube::api::{DeleteParams, PartialObjectMeta, PostParams, PropagationPolicy};
 use kube::{Api, ResourceExt};
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -207,8 +207,18 @@ async fn check_patch_yaml_apply(handle: &ClusterHandle) {
     let applied = handle.apply_yaml(&manifest, false).await;
     assert!(applied.is_ok(), "{applied:?}");
     let configmap = object_ref::<ConfigMap>(Some(NAMESPACE), CONFIGMAP);
-    assert!(handle.delete(&configmap).await.is_ok());
-    assert!(handle.delete(&target).await.is_ok());
+    assert!(
+        handle
+            .delete(&configmap, PropagationPolicy::Background)
+            .await
+            .is_ok()
+    );
+    assert!(
+        handle
+            .delete(&target, PropagationPolicy::Background)
+            .await
+            .is_ok()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

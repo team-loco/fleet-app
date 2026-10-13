@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use fleet_core::flux::{FluxAction, FluxKey, FluxKind};
 use fleet_core::{
     Backend, ClusterId, Command, ContextRef, ExecEvent, ExecRequest, ExecTarget, LogLine,
     LogRequest, NewCluster, Receiver, ResourceRef, Sender, Sink, Snapshot, Source, Update,
@@ -8,7 +9,9 @@ use fleet_kube::LiveBackend;
 use fleet_kube::discovery::{DiscoverySources, KubeContext, discover};
 use fleet_kube::settings::KubeSettings;
 use fleet_kube::store::ClusterStore;
-use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::api::apps::v1::Deployment;
+use k8s_openapi::api::core::v1::{ConfigMap, Node, Pod, PodTemplateSpec};
+use kube::api::{ApiResource, DynamicObject, GroupVersionKind};
 use kube::api::{DeleteParams, ListParams, PostParams};
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::{Api, Client, Config, ResourceExt};
@@ -431,4 +434,214 @@ async fn port_forward_a_pod_port_from_the_pods_page() {
     harness
         .snapshot_until(|snapshot| snapshot.forwards.is_empty())
         .await;
+}
+
+const WEB_NAMESPACE: &str = "web";
+const FLUX_NAMESPACE: &str = "flux-system";
+const KUSTOMIZATION: &str = "apps";
+const NODE: &str = "fleet-a-control-plane";
+const SCRATCH_CONFIGMAP: &str = "fleet-actions-e2e";
+const RESTARTED_AT: &str = "kubectl.kubernetes.io/restartedAt";
+const REQUESTED_AT: &str = "reconcile.fluxcd.io/requestedAt";
+
+async fn eventually<F, Fut>(what: &str, check: F)
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = bool>,
+{
+    let deadline = Instant::now() + WAIT;
+    while !check().await {
+        assert!(Instant::now() < deadline, "{what} never happened");
+        tokio::time::sleep(POLL).await;
+    }
+}
+
+async fn replicas(deployments: &Api<Deployment>) -> Option<i32> {
+    let deployment = deployments.get(PODINFO).await.ok()?;
+    deployment.spec?.replicas
+}
+
+async fn template(deployments: &Api<Deployment>) -> Option<PodTemplateSpec> {
+    let deployment = deployments.get(PODINFO).await.ok()?;
+    Some(deployment.spec?.template)
+}
+
+fn no_notices(harness: &Harness) {
+    while let Ok(update) = harness.updates.try_recv() {
+        if let Update::Notice(notice) = update {
+            panic!("unexpected notice: {notice:?}");
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scale_up_then_back_down() {
+    let Some(harness) = Harness::start().await else {
+        return;
+    };
+    let deployments: Api<Deployment> = Api::namespaced(harness.client.clone(), WEB_NAMESPACE);
+    let Some(before) = replicas(&deployments).await else {
+        panic!("web/podinfo replicas");
+    };
+    let target = resource("Deployment", Some(WEB_NAMESPACE), PODINFO);
+    let up = u32::try_from(before + 1).unwrap_or_default();
+    harness.send(Command::Scale {
+        target: target.clone(),
+        replicas: up,
+    });
+    eventually("scale up", || async {
+        replicas(&deployments).await == Some(before + 1)
+    })
+    .await;
+    harness.send(Command::Scale {
+        target,
+        replicas: u32::try_from(before).unwrap_or_default(),
+    });
+    eventually("scale down", || async {
+        replicas(&deployments).await == Some(before)
+    })
+    .await;
+    no_notices(&harness);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restart_then_roll_back_to_the_original_template() {
+    let Some(harness) = Harness::start().await else {
+        return;
+    };
+    let deployments: Api<Deployment> = Api::namespaced(harness.client.clone(), WEB_NAMESPACE);
+    let Some(original) = template(&deployments).await else {
+        panic!("web/podinfo template");
+    };
+    let target = resource("Deployment", Some(WEB_NAMESPACE), PODINFO);
+    harness.send(Command::RestartRollout(target.clone()));
+    eventually("restart annotation", || async {
+        template(&deployments)
+            .await
+            .and_then(|t| t.metadata?.annotations)
+            .is_some_and(|annotations| annotations.contains_key(RESTARTED_AT))
+    })
+    .await;
+    harness.send(Command::Rollback {
+        target,
+        revision: 0,
+    });
+    eventually("rollback", || async {
+        template(&deployments).await.as_ref() == Some(&original)
+    })
+    .await;
+    no_notices(&harness);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cordon_then_uncordon_the_node() {
+    let Some(harness) = Harness::start().await else {
+        return;
+    };
+    let nodes: Api<Node> = Api::all(harness.client.clone());
+    let unschedulable = || async {
+        nodes
+            .get(NODE)
+            .await
+            .ok()
+            .and_then(|node| node.spec?.unschedulable)
+            .unwrap_or(false)
+    };
+    let target = resource("Node", None, NODE);
+    harness.send(Command::Cordon(target.clone()));
+    eventually("cordon", || async { unschedulable().await }).await;
+    harness.send(Command::Uncordon(target));
+    eventually("uncordon", || async { !unschedulable().await }).await;
+    no_notices(&harness);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn delete_waits_until_the_object_is_gone() {
+    let Some(harness) = Harness::start().await else {
+        return;
+    };
+    let configmaps: Api<ConfigMap> = Api::namespaced(harness.client.clone(), DEBUG_NAMESPACE);
+    let Ok(scratch) = serde_json::from_value::<ConfigMap>(json!({
+        "metadata": { "name": SCRATCH_CONFIGMAP },
+        "data": { "key": "value" }
+    })) else {
+        panic!("configmap fixture");
+    };
+    let _ = configmaps.create(&PostParams::default(), &scratch).await;
+    harness.send(Command::Delete(resource(
+        "ConfigMap",
+        Some(DEBUG_NAMESPACE),
+        SCRATCH_CONFIGMAP,
+    )));
+    eventually("delete", || async {
+        configmaps
+            .get_opt(SCRATCH_CONFIGMAP)
+            .await
+            .ok()
+            .flatten()
+            .is_none()
+    })
+    .await;
+    no_notices(&harness);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn flux_reconcile_requests_a_sync() {
+    let Some(harness) = Harness::start().await else {
+        return;
+    };
+    let key = FluxKey::new(
+        CONTEXT,
+        FluxKind::Kustomization,
+        FLUX_NAMESPACE,
+        KUSTOMIZATION,
+    );
+    let resource = ApiResource::from_gvk(&GroupVersionKind::gvk(
+        "kustomize.toolkit.fluxcd.io",
+        "v1",
+        "Kustomization",
+    ));
+    let kustomizations: Api<DynamicObject> =
+        Api::namespaced_with(harness.client.clone(), FLUX_NAMESPACE, &resource);
+    let requested = || async {
+        kustomizations
+            .get(KUSTOMIZATION)
+            .await
+            .ok()
+            .and_then(|object| object.annotations().get(REQUESTED_AT).cloned())
+    };
+    let before = requested().await;
+    harness.send(Command::Flux(key, FluxAction::ReconcileWithSource));
+    eventually("reconcile request", || async {
+        let now = requested().await;
+        now.is_some() && now != before
+    })
+    .await;
+    no_notices(&harness);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unsupported_actions_explain_themselves() {
+    let Some(harness) = Harness::start().await else {
+        return;
+    };
+    harness.send(Command::Scale {
+        target: resource("DaemonSet", Some("kube-system"), "kube-proxy"),
+        replicas: 2,
+    });
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let Ok(Ok(update)) = tokio::time::timeout(left, harness.updates.recv()).await else {
+            panic!("no notice");
+        };
+        if let Update::Notice(notice) = update {
+            assert_eq!(notice.title, "Scale ds/kube-proxy failed");
+            assert_eq!(
+                notice.detail.as_deref(),
+                Some("kind-fleet-a · Scale is not supported for DaemonSet")
+            );
+            return;
+        }
+    }
 }
