@@ -5,7 +5,7 @@ use futures::{AsyncBufReadExt, SinkExt, StreamExt};
 use k8s_openapi::api::core::v1::Pod;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Status;
 use kube::api::{
-    Api, AttachParams, DeleteParams, DynamicObject, LogParams, Patch, PatchParams,
+    Api, AttachParams, AttachedProcess, DeleteParams, DynamicObject, LogParams, Patch, PatchParams,
     PropagationPolicy, TerminalSize,
 };
 use kube::core::{ApiResource, GroupVersionKind};
@@ -348,9 +348,21 @@ impl ClusterHandle {
         if let Some(container) = &request.container {
             params = params.container(container.clone());
         }
-        let mut process = pods
+        let process = pods
             .exec(&request.pod, request.command.clone(), &params)
             .await?;
+        self.session(process)
+    }
+
+    pub async fn attach(&self, namespace: &str, pod: &str, container: &str) -> Result<ExecSession> {
+        let client = self.client()?;
+        let pods: Api<Pod> = Api::namespaced(client, namespace);
+        let params = AttachParams::interactive_tty().container(container);
+        let process = pods.attach(pod, &params).await?;
+        self.session(process)
+    }
+
+    fn session(&self, mut process: AttachedProcess) -> Result<ExecSession> {
         let mut writer = process.stdin().ok_or(Error::Exec("no stdin".to_owned()))?;
         let mut reader = process
             .stdout()

@@ -92,7 +92,8 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
                     }
                     outcome.changed
                 } else {
-                    let immediate = sim::apply_now(&mut state, &command);
+                    let forwards_changed = simulate::forward(&mut state, &command);
+                    let immediate = sim::apply_now(&mut state, &command) || forwards_changed;
                     let pending = simulate::apply(&mut state, &command);
                     let changed = immediate || pending.is_some();
                     if let Some(pending) = pending {
@@ -206,6 +207,7 @@ pub fn snapshot() -> Snapshot {
         comparisons: compare::comparisons(),
         catalog: settings::catalog(),
         pods: pods::pods(),
+        forwards: Vec::new(),
     }
 }
 

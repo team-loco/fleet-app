@@ -171,6 +171,14 @@ impl Shell {
         if let Update::Snapshot(_) = update {
             self.loaded = true;
         }
+        if let Update::Notice(notice) = &update {
+            let shown = Toast::new(notice.status, notice.title.clone());
+            let shown = match &notice.detail {
+                Some(detail) => shown.detail(detail.clone()),
+                None => shown,
+            };
+            toast(shown, cx);
+        }
         self.state.update(update);
         self.sync_cluster_menus(cx);
         let pending = std::mem::take(&mut self.pending);
@@ -305,6 +313,7 @@ impl Shell {
                 );
                 toast(Toast::new(Status::Ok, title).detail(detail), cx);
             }
+            Command::StopPortForward { .. } => {}
             Command::OpenCommit(ref sha) => {
                 self.changes.update(cx, |changes, cx| changes.open(sha, cx));
             }

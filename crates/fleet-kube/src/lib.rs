@@ -1,3 +1,4 @@
+pub mod actions;
 pub mod backoff;
 pub mod checks;
 pub mod client;

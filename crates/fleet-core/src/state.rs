@@ -1,7 +1,7 @@
 use crate::resource::page_for_kind;
 use crate::{
     AddClusterStep, CheckLine, ClusterId, ContextRef, ExecRequest, FluxAction, FluxKey, FluxKind,
-    KubeconfigFile, LogRequest, NewCluster, Page, Preferences, ResourceRef, Sink, Snapshot,
+    KubeconfigFile, LogRequest, NewCluster, Notice, Page, Preferences, ResourceRef, Sink, Snapshot,
     Verdict, Workload,
 };
 
@@ -19,6 +19,9 @@ pub enum Command {
         service: ResourceRef,
         local: u16,
         remote: u16,
+    },
+    StopPortForward {
+        local: u16,
     },
     Cordon(ResourceRef),
     Uncordon(ResourceRef),
@@ -65,6 +68,7 @@ pub enum Update {
     Contexts(Vec<KubeconfigFile>),
     Check(ContextRef, CheckLine),
     Checked(ContextRef, Verdict),
+    Notice(Notice),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -117,6 +121,7 @@ impl AppState {
             Command::FollowLogs(resource) => self.open_resource(resource),
             Command::Compare(resource) => self.compare(resource),
             Command::PortForward { .. } => {}
+            Command::StopPortForward { .. } => {}
             Command::Cordon(_) => {}
             Command::Uncordon(_) => {}
             Command::Drain(_) => {}
@@ -166,6 +171,7 @@ impl AppState {
             Update::Contexts(_) => {}
             Update::Check(..) => {}
             Update::Checked(..) => {}
+            Update::Notice(_) => {}
         }
     }
 

@@ -1,3 +1,4 @@
+pub mod action;
 pub mod add_cluster;
 pub mod changes;
 pub mod cluster;
@@ -25,6 +26,7 @@ pub mod stream;
 pub mod time;
 pub mod workload;
 
+pub use action::{Forward, Notice};
 pub use add_cluster::{
     AddClusterFlow, AddClusterStep, Candidate, CheckLine, CheckStatus, ContextChoice, ContextRef,
     KubeconfigFile, NewCluster, Verdict,
