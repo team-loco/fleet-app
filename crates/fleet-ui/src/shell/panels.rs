@@ -335,7 +335,9 @@ fn nav_row(
     palette: &Palette,
 ) -> gpui::Stateful<gpui::Div> {
     let hover = palette.hover;
+    let id = id.into();
     div()
+        .debug_selector(|| id.to_string())
         .id(id)
         .flex()
         .items_center()
@@ -394,6 +396,7 @@ fn icon_button(
 ) -> gpui::Stateful<gpui::Div> {
     let hover = palette.hover;
     div()
+        .debug_selector(|| id.to_owned())
         .id(id)
         .flex()
         .items_center()

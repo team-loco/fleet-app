@@ -90,12 +90,32 @@ gpui_platform::application()
   Content inside an animated width uses a fixed width and `overflow_hidden` so it clips instead of
   reflowing.
 
-## Screenshots
+## Headless rendering and UI tests
 
-`mise run shot -- <fleet|cluster|collapsed> <dark|light>` builds, launches
-`fleet --demo --screen <s> --appearance <a>`, finds the window id with `mise-tasks/window-id.swift`
-(CGWindowList by pid) and runs `screencapture -l`. Output: `target/shots/<screen>-<appearance>.png`.
-`FLEET_FEATURES=loco` builds with Loco. The terminal needs Screen Recording permission.
+`apps/fleet-shots` renders Fleet without any window, so nothing takes focus. It is dev-only: the
+shipped `fleet` binary never links it (`mise run bundle:loco` builds `-p fleet` only).
+
+- `gpui` and `gpui-platform` are used with `test-support`. `HeadlessAppContext::with_platform(text, assets,
+  gpui_platform::current_headless_renderer)` runs on `TestPlatform` (no NSApplication, no NSWindow) with
+  the real `gpui_apple::AppleTextSystem` (CoreText, the same shaper and rasterizer the app uses) and
+  `MetalHeadlessRenderer`, which draws the scene into an offscreen Metal texture.
+  `capture_screenshot(window)` returns an `RgbaImage`. Test windows default to scale 2, so 1440×900 gives
+  2880×1800.
+- `MacPlatform::new` needs the main thread, so the text system is built directly from `gpui-pre-apple`
+  (`font-kit`) instead of `current_platform(true).text_system()`; that keeps it usable in nextest threads.
+- Test mode draws dirty windows on every effect flush. Timers run on the `TestDispatcher` clock, so toasts
+  never time out; the demo backend runs on real threads, so `settle` pumps `run_until_parked` until
+  `Shell::settled()` (snapshot received, startup commands run) and then for a short quiet period.
+  `cx.set_reduce_motion(true)` puts every `with_animation` at its final frame.
+- Interaction tests use `TestAppContext::build_with_text_system` + `VisualTestContext`, because only
+  `VisualTestContext::debug_bounds` can read `.debug_selector(..)` bounds (recorded only in debug builds
+  with `test-support`). Its `TestPlatform` has no renderer, so `Ui::save_png` replays the recorded steps
+  (keys, text, clicks at the same coordinates) in a `HeadlessAppContext` and captures that.
+- Input goes through public `Window::dispatch_keystroke` / `Window::dispatch_event`; `Keystroke::parse`
+  per character types text (space is `space`).
+- Fidelity: glyphs, colours and layout match the windowed app. What differs: no traffic lights,
+  no rounded window corners or shadow (the old `screencapture -l` included the window frame), and the
+  appearance is always forced, never read from the OS.
 
 ## Lints
 

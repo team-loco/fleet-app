@@ -196,6 +196,7 @@ impl RenderOnce for Button {
         };
         let enabled = !self.disabled;
         div()
+            .debug_selector(|| self.id.to_string())
             .id(self.id)
             .flex()
             .flex_none()
@@ -322,6 +323,7 @@ impl RenderOnce for IconButton {
             (ICON_BUTTON, ICON_BUTTON)
         };
         div()
+            .debug_selector(|| self.id.to_string())
             .id(self.id)
             .flex()
             .flex_none()
@@ -438,6 +440,7 @@ impl RenderOnce for Segmented {
                 .child(label)
         });
         div()
+            .debug_selector(|| self.id.to_string())
             .id(self.id)
             .flex()
             .flex_none()
@@ -507,6 +510,7 @@ impl RenderOnce for Toggle {
             .child(div().size(TOGGLE_KNOB).rounded(RADIUS_SMALL).bg(knob));
         let on = self.on;
         div()
+            .debug_selector(|| self.id.to_string())
             .id(self.id)
             .flex()
             .items_center()
@@ -579,6 +583,7 @@ impl RenderOnce for Checkbox {
             });
         let checked = self.checked;
         div()
+            .debug_selector(|| self.id.to_string())
             .id(self.id)
             .flex()
             .items_center()

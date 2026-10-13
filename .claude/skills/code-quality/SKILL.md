@@ -13,8 +13,9 @@ Verified by running, not by reading:
 
 1. `mise run check` passes (fmt, clippy `-D warnings` with and without `--features loco`, nextest, typos, deny)
 2. A new or changed test fails without the change and passes with it
-3. UI changes: `mise run demo` launched, the affected screen screenshotted in dark and light
-   (`mise run shot -- <screen>`), and compared with the matching `design/` file
+3. UI changes: the affected screen rendered headlessly in dark and light (`mise run shot -- <screen> dark`
+   and `light`) and compared with the matching `design/` file; interactions covered by a `fleet_shots::Ui`
+   test in `apps/fleet-shots/tests/ui.rs`. Never launch the app or drive it with synthetic input
 4. `docs/TASKS.md` row updated (status, PR)
 5. Anything skipped or failing is stated in the report with output
 

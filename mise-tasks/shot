@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Screenshot a demo screen: mise run shot -- <screen> [dark|light]"
+#MISE description="Render a demo screen to a PNG headlessly: mise run shot -- <screen> [dark|light]"
 #USAGE arg "<screen>" help="fleet, cluster, collapsed, command, changes, compare, cluster-settings, gitops, overview, nodes, namespaces, events, resources, kit, kit-overlays, kit-panes, add-cluster, add-cluster-check, workload, pods, pods-shell, kustomization, helmrelease or source; with FLEET_FEATURES=loco also loco-platform, loco-apps, loco-builds or loco-routes"
 #USAGE arg "[appearance]" default="dark" help="dark or light"
 set -euo pipefail
@@ -8,32 +8,5 @@ screen="${usage_screen:-${1:?screen}}"
 appearance="${usage_appearance:-${2:-dark}}"
 root="$(git rev-parse --show-toplevel)"
 out="$root/target/shots/$screen-$appearance.png"
-helper="$root/target/shots/window-id"
-wait_steps=100
-settle_seconds=1.5
 
-mkdir -p "$root/target/shots"
-cargo build -p fleet --quiet ${FLEET_FEATURES:+--features "$FLEET_FEATURES"}
-if [[ ! -x "$helper" || "$root/mise-tasks/window-id.swift" -nt "$helper" ]]; then
-  swiftc -O -o "$helper" "$root/mise-tasks/window-id.swift"
-fi
-
-"$root/target/debug/fleet" --demo --screen "$screen" --appearance "$appearance" &
-pid=$!
-trap 'kill "$pid" 2>/dev/null || true' EXIT
-
-window=""
-for _ in $(seq "$wait_steps"); do
-  if window="$("$helper" "$pid")"; then
-    break
-  fi
-  sleep 0.1
-done
-if [[ -z "$window" ]]; then
-  echo "no window for fleet (pid $pid)" >&2
-  exit 1
-fi
-
-sleep "$settle_seconds"
-screencapture -x -o -l "$window" "$out"
-echo "$out"
+cargo run -p fleet-shots --quiet ${FLEET_FEATURES:+--features "$FLEET_FEATURES"} -- "$screen" "$appearance" --out "$out"
