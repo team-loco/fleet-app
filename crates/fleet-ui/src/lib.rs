@@ -1,7 +1,10 @@
 pub mod assets;
+mod gallery;
+pub mod kit;
 mod shell;
 pub mod theme;
 
+pub use gallery::Gallery;
 pub use gpui_component::Root;
 pub use shell::Shell;
 
@@ -16,5 +19,6 @@ pub fn init(
     gpui_component::init(cx);
     assets::register_fonts(cx)?;
     theme::init(forced, cx);
+    kit::init(cx);
     Ok(())
 }

@@ -13,7 +13,7 @@ Spec column points at `design/`.
 
 | id | unit | spec | owner | branch | status |
 |---|---|---|---|---|---|
-| F1 | ui-kit: status glyph, section label, rule, buttons, ⋯ action menu with descriptions, table on uniform_list, dock, collapsible panel animation, code/diff view | HANDOFF visual rules | | | todo |
+| F1 | ui-kit: status glyph, section label, rule, buttons, ⋯ action menu with descriptions, table on uniform_list, dock, collapsible panel animation, code/diff view | HANDOFF visual rules | claude | f1-ui-kit | doing |
 | F2 | fleet-kube: kubeconfig discovery + watch, login-shell env capture, cluster connect + checks, per-cluster watchers → core snapshots | AddCluster, AddClusterCheck | | | todo |
 | F3 | fleet-flux: CRD types (kopium, Flux 2.9.6), status summarizer, inventory, Helm storage decode, cross-cluster matrix | Kustomization, Flux | | | todo |
 | F4 | fleet-loco: CRD types from crds/loco, app/build/route/platform models | Loco* | | | todo |

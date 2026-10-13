@@ -6,7 +6,7 @@ use gpui::{
 use super::Shell;
 use crate::theme::{
     ActiveTheme, FONT_MONO, ICON_BUTTON, PAGE_HEADER, Palette, RADIUS, RULE, SPACE_2, SPACE_5,
-    SPACE_7, SPACE_8, TEXT_BADGE, TEXT_LABEL, TEXT_TITLE,
+    SPACE_7, SPACE_8, TEXT_LABEL, TEXT_SMALL, TEXT_TITLE,
 };
 
 const LIVE: &str = "live";
@@ -62,7 +62,7 @@ impl Shell {
             .child(
                 div()
                     .font_family(FONT_MONO)
-                    .text_size(TEXT_BADGE)
+                    .text_size(TEXT_SMALL)
                     .text_color(status_color)
                     .child(status),
             )

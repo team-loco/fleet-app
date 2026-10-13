@@ -1,0 +1,262 @@
+use std::rc::Rc;
+
+use gpui::{
+    AnyElement, App, ClickEvent, ElementId, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, Pixels, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window,
+    div, prelude::FluentBuilder,
+};
+
+use crate::theme::{
+    ActiveTheme, FONT_MONO, KV_LABEL, RADIUS, RULE, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_7,
+    SPACE_8, TEXT_LABEL, TEXT_SMALL,
+};
+
+type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
+#[derive(IntoElement)]
+pub struct SectionLabel {
+    text: SharedString,
+}
+
+impl SectionLabel {
+    pub fn new(text: impl Into<SharedString>) -> Self {
+        Self { text: text.into() }
+    }
+}
+
+impl RenderOnce for SectionLabel {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        div()
+            .flex_none()
+            .text_size(TEXT_LABEL)
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(cx.palette().mute)
+            .whitespace_nowrap()
+            .child(self.text.to_uppercase())
+    }
+}
+
+#[derive(IntoElement)]
+pub struct SectionHeader {
+    label: SharedString,
+    count: Option<SharedString>,
+    end: Option<AnyElement>,
+}
+
+impl SectionHeader {
+    pub fn new(label: impl Into<SharedString>) -> Self {
+        Self {
+            label: label.into(),
+            count: None,
+            end: None,
+        }
+    }
+
+    pub fn count(mut self, count: impl Into<SharedString>) -> Self {
+        self.count = Some(count.into());
+        self
+    }
+
+    pub fn end(mut self, end: impl IntoElement) -> Self {
+        self.end = Some(end.into_any_element());
+        self
+    }
+}
+
+impl RenderOnce for SectionHeader {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let mute = cx.palette().mute;
+        div()
+            .flex()
+            .items_center()
+            .gap(SPACE_4)
+            .px(SPACE_8)
+            .pt(SPACE_7)
+            .pb(SPACE_3)
+            .child(SectionLabel::new(self.label))
+            .when_some(self.count, |row, count| {
+                row.child(
+                    div()
+                        .font_family(FONT_MONO)
+                        .text_size(TEXT_SMALL)
+                        .text_color(mute)
+                        .truncate()
+                        .child(count),
+                )
+            })
+            .child(div().flex_1())
+            .children(self.end)
+    }
+}
+
+#[derive(IntoElement)]
+pub struct Rule {
+    vertical: bool,
+}
+
+impl Rule {
+    pub fn horizontal() -> Self {
+        Self { vertical: false }
+    }
+
+    pub fn vertical() -> Self {
+        Self { vertical: true }
+    }
+}
+
+impl RenderOnce for Rule {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let line = div().flex_none().bg(cx.palette().line);
+        if self.vertical {
+            line.w(RULE).h_full()
+        } else {
+            line.h(RULE).w_full()
+        }
+    }
+}
+
+#[derive(IntoElement)]
+pub struct Link {
+    id: ElementId,
+    text: SharedString,
+    mono: bool,
+    on_click: Option<ClickHandler>,
+}
+
+impl Link {
+    pub fn new(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Self {
+        Self {
+            id: id.into(),
+            text: text.into(),
+            mono: false,
+            on_click: None,
+        }
+    }
+
+    pub fn mono(mut self) -> Self {
+        self.mono = true;
+        self
+    }
+
+    pub fn on_click(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_click = Some(Rc::new(handler));
+        self
+    }
+}
+
+impl RenderOnce for Link {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let acc = cx.palette().acc;
+        div()
+            .id(self.id)
+            .text_color(acc)
+            .cursor_pointer()
+            .whitespace_nowrap()
+            .when(self.mono, |link| link.font_family(FONT_MONO))
+            .hover(Styled::underline)
+            .when_some(self.on_click, |link, handler| {
+                link.on_click(move |event, window, cx| handler(event, window, cx))
+            })
+            .child(self.text)
+    }
+}
+
+#[derive(IntoElement)]
+pub struct Kbd {
+    keys: SharedString,
+}
+
+impl Kbd {
+    pub fn new(keys: impl Into<SharedString>) -> Self {
+        Self { keys: keys.into() }
+    }
+}
+
+impl RenderOnce for Kbd {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let palette = cx.palette();
+        div()
+            .flex_none()
+            .px(SPACE_2)
+            .py(RULE)
+            .rounded(RADIUS)
+            .border(RULE)
+            .border_color(palette.line2)
+            .bg(palette.raise)
+            .font_family(FONT_MONO)
+            .text_size(TEXT_LABEL)
+            .text_color(palette.fg2)
+            .child(self.keys)
+    }
+}
+
+#[derive(IntoElement)]
+pub struct KeyValue {
+    label_width: Pixels,
+    mono: bool,
+    rows: Vec<(SharedString, AnyElement)>,
+}
+
+impl Default for KeyValue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl KeyValue {
+    pub fn new() -> Self {
+        Self {
+            label_width: KV_LABEL,
+            mono: true,
+            rows: Vec::new(),
+        }
+    }
+
+    pub fn label_width(mut self, width: Pixels) -> Self {
+        self.label_width = width;
+        self
+    }
+
+    pub fn sans(mut self) -> Self {
+        self.mono = false;
+        self
+    }
+
+    pub fn row(mut self, label: impl Into<SharedString>, value: impl IntoElement) -> Self {
+        self.rows.push((label.into(), value.into_any_element()));
+        self
+    }
+}
+
+impl RenderOnce for KeyValue {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let palette = cx.palette();
+        let mute = palette.mute;
+        let rows = self.rows.into_iter().map(|(label, value)| {
+            div()
+                .flex()
+                .gap(SPACE_5)
+                .child(
+                    div()
+                        .w(self.label_width)
+                        .flex_none()
+                        .text_color(mute)
+                        .truncate()
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .when(self.mono, |value| {
+                            value.font_family(FONT_MONO).text_size(TEXT_SMALL)
+                        })
+                        .child(value),
+                )
+        });
+        div().flex().flex_col().gap(SPACE_3).children(rows)
+    }
+}
