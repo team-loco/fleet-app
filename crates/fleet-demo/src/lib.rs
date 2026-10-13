@@ -79,6 +79,11 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
     while let Ok(input) = input_rx.recv() {
         let changed = match input {
             Input::Command(command) => {
+                let command = match command {
+                    Command::ForWindow(_, command) => *command,
+                    Command::WindowClosed(_) => continue,
+                    command => command,
+                };
                 if adding.handle(&command, &mut state, updates) {
                     continue;
                 }

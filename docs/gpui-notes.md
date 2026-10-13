@@ -35,7 +35,14 @@ gpui_platform::application()
   traffic_light_position: Some(point(px(10.), px(8.))) }` gives the hidden titlebar with traffic lights
   in our 28px strip. Dragging: `on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())`
   on the strip and page header; buttons inside call `cx.stop_propagation()` on mouse down.
-- Close the app with the window: `cx.on_window_closed(|cx, _| cx.quit()).detach()`.
+- Quit after the last window closes: check `cx.windows().is_empty()` in `on_window_closed`.
+  Backend updates go through the shared `fleet_ui::Store`; subscribe once per shell so receivers
+  broadcast snapshots rather than competing for updates. The Store replays its latest snapshot
+  when a window subscribes. `Command::ForWindow(shell_entity_id, command)` scopes backend
+  navigation and detail watches; `Command::WindowClosed(shell_entity_id)` releases those owners
+  from the window-close event, while cluster connections and mutation actions remain shared.
+  Confirmation dialogs have separate focus and handlers per window; the Store publishes shared
+  backend notices once so subscribers do not create duplicate toasts.
 
 ## Fonts and assets
 

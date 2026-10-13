@@ -52,7 +52,7 @@ impl Extras {
 
 pub struct Selection<'a> {
     pub event_limit: usize,
-    pub yaml: Option<&'a (ResourceRef, String)>,
+    pub yaml: &'a [&'a (ResourceRef, String)],
 }
 
 pub struct Built {
@@ -164,7 +164,7 @@ fn cluster_detail(
         }
     };
     let mut resources = watched_lists(handle, &index, now);
-    if let Some((target, yaml)) = selection.yaml {
+    for (target, yaml) in selection.yaml.iter().copied() {
         let row = resources
             .iter_mut()
             .filter(|(kind, _)| kind.name() == target.kind)

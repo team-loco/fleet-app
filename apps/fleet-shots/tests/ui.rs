@@ -1,5 +1,5 @@
 use fleet::Screen;
-use fleet_core::{ClusterId, Page};
+use fleet_core::{ClusterId, Command, Page};
 use fleet_shots::Ui;
 
 const EXPECTED_WIDTH: u32 = 2880;
@@ -80,5 +80,25 @@ fn save_png_renders_the_state_the_steps_reached() -> anyhow::Result<()> {
     ui.save_png(&path)?;
     let (width, height) = image::image_dimensions(&path)?;
     assert_eq!((width, height), (EXPECTED_WIDTH, EXPECTED_HEIGHT));
+    Ok(())
+}
+
+#[test]
+fn option_enter_requests_a_window_with_the_cluster_page_without_navigating_the_source()
+-> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    let before = ui.state();
+    ui.press("cmd-k")?;
+    ui.type_text("nodes")?;
+    ui.press("alt-enter")?;
+    assert_eq!(
+        ui.take_new_window(),
+        Some(vec![
+            Command::SelectCluster(before.cluster.clone()),
+            Command::SelectPage(Page::Nodes)
+        ])
+    );
+    assert_eq!(ui.take_new_window(), None);
+    assert_eq!(ui.state(), before);
     Ok(())
 }

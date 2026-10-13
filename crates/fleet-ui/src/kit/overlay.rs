@@ -1,11 +1,13 @@
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use fleet_core::Status;
 use gpui::{
     Anchor, AnchoredPositionMode, Animation, AnimationExt, App, AppContext, Context, ElementId,
     Entity, FocusHandle, Focusable, FontWeight, Global, InteractiveElement, IntoElement,
-    KeyDownEvent, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
-    anchored, deferred, div, ease_out_quint, point, prelude::FluentBuilder, relative,
+    KeyDownEvent, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, Window, WindowId, anchored, deferred, div, ease_out_quint, point,
+    prelude::FluentBuilder, relative,
 };
 
 use super::button::{Button, IconButton};
@@ -98,31 +100,49 @@ struct Shown {
     toast: Toast,
 }
 
-pub struct Overlays {
-    dialog: Option<(u64, ConfirmDialog)>,
-    toasts: Vec<Shown>,
-    next: u64,
+struct WindowDialog {
+    id: u64,
+    dialog: ConfirmDialog,
     focus: FocusHandle,
     restore: Option<FocusHandle>,
 }
 
-struct OverlayHost(Entity<Overlays>);
+pub struct Overlays {
+    dialogs: BTreeMap<WindowId, WindowDialog>,
+    toasts: Vec<Shown>,
+    next: u64,
+}
+
+struct OverlayHost {
+    overlays: Entity<Overlays>,
+    _closed: Subscription,
+}
 
 impl Global for OverlayHost {}
 
 pub fn init(cx: &mut App) {
-    let overlays = cx.new(|cx| Overlays {
-        dialog: None,
+    let overlays = cx.new(|_| Overlays {
+        dialogs: BTreeMap::new(),
         toasts: Vec::new(),
         next: 0,
-        focus: cx.focus_handle(),
-        restore: None,
     });
-    cx.set_global(OverlayHost(overlays));
+    let on_close = overlays.downgrade();
+    let closed = cx.on_window_closed(move |cx, window| {
+        if let Some(overlays) = on_close.upgrade() {
+            overlays.update(cx, |overlays, cx| {
+                overlays.dialogs.remove(&window);
+                cx.notify();
+            });
+        }
+    });
+    cx.set_global(OverlayHost {
+        overlays,
+        _closed: closed,
+    });
 }
 
 pub fn layer(cx: &App) -> Entity<Overlays> {
-    cx.global::<OverlayHost>().0.clone()
+    cx.global::<OverlayHost>().overlays.clone()
 }
 
 pub fn confirm(dialog: ConfirmDialog, window: &mut Window, cx: &mut App) {
@@ -136,29 +156,44 @@ pub fn toast(toast: Toast, cx: &mut App) {
 impl Overlays {
     fn open(&mut self, dialog: ConfirmDialog, window: &mut Window, cx: &mut Context<Self>) {
         self.next += 1;
-        self.restore = window.focused(cx);
+        let window_id = window.window_handle().window_id();
+        let restore = self
+            .dialogs
+            .get(&window_id)
+            .map_or_else(|| window.focused(cx), |shown| shown.restore.clone());
         let focus = dialog.field.as_ref().map_or_else(
-            || self.focus.clone(),
+            || cx.focus_handle(),
             |field| field.read(cx).focus_handle(cx),
         );
-        self.dialog = Some((self.next, dialog));
         window.focus(&focus, cx);
+        self.dialogs.insert(
+            window_id,
+            WindowDialog {
+                id: self.next,
+                dialog,
+                focus,
+                restore,
+            },
+        );
         cx.notify();
     }
 
     fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.dialog = None;
-        if let Some(previous) = self.restore.take() {
+        let window_id = window.window_handle().window_id();
+        if let Some(shown) = self.dialogs.remove(&window_id)
+            && let Some(previous) = shown.restore
+        {
             window.focus(&previous, cx);
         }
         cx.notify();
     }
 
     fn accept(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((_, dialog)) = self.dialog.as_ref() else {
+        let window_id = window.window_handle().window_id();
+        let Some(shown) = self.dialogs.get(&window_id) else {
             return;
         };
-        let handler = dialog.on_confirm.clone();
+        let handler = shown.dialog.on_confirm.clone();
         self.dismiss(window, cx);
         handler(window, cx);
     }
@@ -221,14 +256,13 @@ impl Overlays {
     }
 
     fn render_dialog(
-        &self,
-        id: u64,
-        dialog: &ConfirmDialog,
+        shown: &WindowDialog,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let palette = *cx.palette();
         let viewport = window.viewport_size();
+        let dialog = &shown.dialog;
         let header = div()
             .flex()
             .items_center()
@@ -282,13 +316,13 @@ impl Overlays {
             .border_color(palette.line2)
             .rounded(RADIUS_MENU)
             .shadow(popover::shadow(&palette))
-            .track_focus(&self.focus)
+            .track_focus(&shown.focus)
             .on_key_down(cx.listener(Self::key_down))
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(header)
             .child(body)
             .child(footer);
-        let key = ElementId::NamedInteger("dialog".into(), id);
+        let key = ElementId::NamedInteger("dialog".into(), shown.id);
         let scrim = div()
             .id("scrim")
             .w(viewport.width)
@@ -379,11 +413,102 @@ impl Overlays {
 
 impl Render for Overlays {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let dialog = self.dialog.as_ref().map(|(id, dialog)| {
-            self.render_dialog(*id, dialog, window, cx)
-                .into_any_element()
-        });
+        let window_id = window.window_handle().window_id();
+        let dialog = self
+            .dialogs
+            .get(&window_id)
+            .map(|shown| Self::render_dialog(shown, window, cx).into_any_element());
         let toasts = (!self.toasts.is_empty()).then(|| self.render_toasts(window, cx));
         div().children(dialog).children(toasts)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+    use gpui::TestAppContext;
+
+    struct TestView;
+
+    impl Render for TestView {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(layer(cx))
+        }
+    }
+
+    #[gpui::test]
+    fn confirmations_only_accept_in_their_own_window_and_drop_on_close(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(Some(crate::theme::Appearance::Dark), cx)
+                .unwrap_or_else(|error| panic!("UI init: {error}"));
+        });
+        let first = cx.add_window(|_, _| TestView);
+        let second = cx.add_window(|_, _| TestView);
+        let first_accepted = Rc::new(Cell::new(false));
+        let second_accepted = Rc::new(Cell::new(false));
+        for (window, accepted) in [
+            (first, first_accepted.clone()),
+            (second, second_accepted.clone()),
+        ] {
+            assert!(
+                window
+                    .update(cx, |_, window, cx| {
+                        let dialog = ConfirmDialog::new(
+                            "Delete",
+                            "Delete this resource?",
+                            "Delete",
+                            move |_, _| accepted.set(true),
+                        );
+                        confirm(dialog, window, cx);
+                    })
+                    .is_ok()
+            );
+        }
+        cx.run_until_parked();
+        let overlays = cx.read(layer);
+        assert_eq!(
+            overlays.read_with(cx, |overlays, _| overlays.dialogs.len()),
+            2
+        );
+        cx.simulate_keystrokes(first.into(), "cmd-enter");
+        assert!(first_accepted.get());
+        assert!(!second_accepted.get());
+        assert_eq!(
+            overlays.read_with(cx, |overlays, _| overlays.dialogs.len()),
+            1
+        );
+        assert!(
+            second
+                .update(cx, |_, window, _| window.remove_window())
+                .is_ok()
+        );
+        assert!(overlays.read_with(cx, |overlays, _| overlays.dialogs.is_empty()));
+    }
+
+    #[gpui::test]
+    fn backend_notices_are_shown_once_for_multiple_subscribers(cx: &mut TestAppContext) {
+        cx.update(init);
+        let (backend, updates) = async_channel::unbounded();
+        let (commands, _) = async_channel::unbounded();
+        let store = cx.new(|cx| crate::Store::new(updates, commands, cx));
+        let first = store.update(cx, |store, _| store.subscribe());
+        let second = store.update(cx, |store, _| store.subscribe());
+        let notice = fleet_core::Notice {
+            status: Status::Ok,
+            title: "Connected".into(),
+            detail: None,
+        };
+        let update = fleet_core::Update::Notice(notice);
+        assert!(backend.try_send(update.clone()).is_ok());
+        cx.run_until_parked();
+        assert_eq!(first.try_recv(), Ok(update.clone()));
+        assert_eq!(second.try_recv(), Ok(update));
+        let overlays = cx.read(layer);
+        assert_eq!(
+            overlays.read_with(cx, |overlays, _| overlays.toasts.len()),
+            1
+        );
     }
 }

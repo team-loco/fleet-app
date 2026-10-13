@@ -7,7 +7,7 @@ use gpui::{
     anchored, deferred, div, ease_out_quint, point, prelude::FluentBuilder,
 };
 
-use crate::actions::{CompareAcrossClusters, FollowLogs, ShowFluxOwner};
+use crate::actions::{CompareAcrossClusters, FollowLogs, OpenSelectedNewWindow, ShowFluxOwner};
 use crate::kit::status_symbols;
 use crate::kit::{
     Highlighted, InputEvent, SectionLabel, Step, TextField, TextFieldDown, TextFieldEscape,
@@ -31,7 +31,7 @@ const HINTS: &[(&str, &str)] = &[
     ("l:", "label=value"),
     (">", "command"),
 ];
-const FOOTER_START: &[&str] = &["↑↓ move", "↵ open"];
+const FOOTER_START: &[&str] = &["↑↓ move", "↵ open", "⌥↵ open in new window"];
 const FOOTER_END: &str = "esc";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +43,7 @@ enum Phase {
 
 pub enum PaletteEvent {
     Run(Command),
+    NewWindow(Command),
 }
 
 pub struct CommandPalette {
@@ -415,6 +416,12 @@ impl Render for CommandPalette {
         let panel = div()
             .id("command-palette")
             .key_context(KEY_CONTEXT)
+            .capture_action(cx.listener(|this, _: &OpenSelectedNewWindow, _, cx| {
+                if let Some(hit) = this.selected.and_then(|ix| this.results.hits.get(ix)) {
+                    cx.emit(PaletteEvent::NewWindow(hit.command.clone()));
+                }
+                cx.stop_propagation();
+            }))
             .flex()
             .flex_col()
             .w(PALETTE_WIDTH)

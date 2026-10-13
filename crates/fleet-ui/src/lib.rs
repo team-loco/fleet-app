@@ -3,11 +3,13 @@ mod gallery;
 pub mod kit;
 pub mod screens;
 mod shell;
+mod store;
 pub mod theme;
 
 pub use gallery::{Gallery, GalleryPage};
 pub use gpui_component::Root;
-pub use shell::Shell;
+pub use shell::{NewWindowRequest, Shell};
+pub use store::Store;
 
 pub mod actions {
     gpui::actions!(
@@ -18,7 +20,9 @@ pub mod actions {
             ToggleCommandPalette,
             FollowLogs,
             CompareAcrossClusters,
-            ShowFluxOwner
+            ShowFluxOwner,
+            OpenSelectedNewWindow,
+            CloseWindow
         ]
     );
 }

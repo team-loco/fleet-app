@@ -5,7 +5,7 @@ use std::rc::Rc;
 use anyhow::Context as _;
 use clap::Parser;
 use fleet::{
-    AppearanceArg, Object, Preset, Quit, Screen, WINDOW_HEIGHT, WINDOW_WIDTH, bind_keys,
+    AppearanceArg, NewWindow, Object, Preset, Quit, Screen, WINDOW_HEIGHT, WINDOW_WIDTH, bind_keys,
     parse_object, root_view,
 };
 use fleet_core::{Backend, ClusterId, Command};
@@ -15,7 +15,7 @@ use fleet_kube::discovery::DiscoverySources;
 use fleet_kube::settings::KubeSettings;
 use fleet_kube::store::ClusterStore;
 use fleet_ui::theme::{Appearance, TRAFFIC_LIGHT_X, TRAFFIC_LIGHT_Y};
-use fleet_ui::{Root, assets};
+use fleet_ui::{NewWindowRequest, Root, Shell, Store, assets};
 use gpui::{
     App, AppContext as _, Bounds, Size, TitlebarOptions, WindowBounds, WindowOptions, point, px,
     size,
@@ -148,11 +148,26 @@ fn launch(
     fleet_ui::init(forced, cx)?;
     bind_keys(cx);
     cx.on_action(|_: &Quit, cx| cx.quit());
-    cx.on_window_closed(|cx, _| cx.quit()).detach();
+    cx.on_window_closed(|cx, _| {
+        if cx.windows().is_empty() {
+            cx.quit();
+        }
+    })
+    .detach();
+    let store = cx.new(|cx| Store::new(updates, commands, cx));
+    let new_window_store = store.clone();
+    cx.on_action(move |_: &NewWindow, cx| {
+        if let Err(error) = open_fleet_window(new_window_store.clone(), Vec::new(), cx) {
+            tracing::error!(%error, "opening a Fleet window");
+        }
+    });
+    open_startup_window(store, screen, preset, cx)
+}
 
+fn window_options(cx: &App) -> WindowOptions {
     let window_size = size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT));
     let bounds = Bounds::centered(None, window_size, cx);
-    let options = WindowOptions {
+    WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         titlebar: Some(TitlebarOptions {
             title: None,
@@ -164,12 +179,91 @@ fn launch(
             height: px(MIN_HEIGHT),
         }),
         ..WindowOptions::default()
-    };
+    }
+}
+
+fn open_startup_window(
+    store: gpui::Entity<Store>,
+    screen: Screen,
+    preset: &Preset,
+    cx: &mut App,
+) -> anyhow::Result<()> {
+    let options = window_options(cx);
     cx.open_window(options, |window, cx| {
-        let view = root_view(screen, preset, updates, commands, window, cx);
+        let view = root_view(screen, preset, store.clone(), window, cx);
+        if let Ok(shell) = view.clone().downcast::<Shell>() {
+            subscribe_windows(&shell, store, cx);
+        }
         cx.new(|cx| Root::new(view, window, cx))
     })
     .context("opening the Fleet window")?;
     cx.activate(true);
     Ok(())
+}
+
+fn subscribe_windows(shell: &gpui::Entity<Shell>, store: gpui::Entity<Store>, cx: &mut App) {
+    cx.subscribe(shell, move |_, request: &NewWindowRequest, cx| {
+        if let Err(error) = open_fleet_window(store.clone(), request.0.clone(), cx) {
+            tracing::error!(%error, "opening a Fleet window");
+        }
+    })
+    .detach();
+}
+
+fn open_fleet_window(
+    store: gpui::Entity<Store>,
+    initial: Vec<Command>,
+    cx: &mut App,
+) -> anyhow::Result<()> {
+    let options = window_options(cx);
+    cx.open_window(options, |window, cx| {
+        let shell = cx.new(|cx| Shell::new(store.clone(), initial, window, cx));
+        subscribe_windows(&shell, store, cx);
+        cx.new(|cx| Root::new(shell, window, cx))
+    })
+    .context("opening the Fleet window")?;
+    cx.activate(true);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[gpui::test]
+    fn new_window_shortcut_and_close_keep_other_windows_open(cx: &mut gpui::TestAppContext) {
+        let (backend, updates) = async_channel::unbounded();
+        let (commands, _received) = async_channel::unbounded();
+        cx.update(|cx| {
+            launch(
+                cx,
+                Some(Appearance::Dark),
+                updates,
+                commands,
+                Screen::Fleet,
+                &Preset::default(),
+            )
+            .unwrap_or_else(|error| panic!("test launch: {error}"));
+        });
+        assert!(
+            backend
+                .try_send(fleet_core::Update::Snapshot(Box::default()))
+                .is_ok()
+        );
+        cx.run_until_parked();
+        let first = cx
+            .read(|cx| cx.windows().into_iter().next())
+            .unwrap_or_else(|| panic!("first window missing"));
+        cx.simulate_keystrokes(first, "cmd-n");
+        let windows = cx.read(App::windows);
+        assert_eq!(windows.len(), 2);
+        let second = windows
+            .into_iter()
+            .find(|window| *window != first)
+            .unwrap_or_else(|| panic!("second window missing"));
+        cx.simulate_keystrokes(first, "cmd-w");
+        assert_eq!(cx.read(App::windows), vec![second]);
+        cx.simulate_keystrokes(second, "cmd-n");
+        assert_eq!(cx.read(|cx| cx.windows().len()), 2);
+    }
 }

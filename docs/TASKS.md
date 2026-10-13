@@ -53,3 +53,9 @@ Spec column points at `design/`.
 | id | unit | owner | branch | status |
 |---|---|---|---|---|
 | GLYPH | restore upstream Plex and ship Fleet Status glyph font (#95) | Codex | status-glyph-font | done |
+
+## Follow-ups
+
+| id | unit | owner | branch | status |
+|---|---|---|---|---|
+| C77 | Palette open in new window; split follow-up in #77 | codex | c77-windows-split | done |
