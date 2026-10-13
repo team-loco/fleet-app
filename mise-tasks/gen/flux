@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+#MISE description="Generate Flux CRD types from the pinned Flux CLI"
+import pathlib
+import re
+import subprocess
+import tempfile
+
+root = pathlib.Path(__file__).resolve().parents[2]
+output = root / "crates/fleet-flux/src/generated"
+output.mkdir(parents=True, exist_ok=True)
+resources = {
+    "helmreleases.helm.toolkit.fluxcd.io": ("helm_release", "v2"),
+    "gitrepositories.source.toolkit.fluxcd.io": ("git_repository", "v1"),
+    "helmrepositories.source.toolkit.fluxcd.io": ("helm_repository", "v1"),
+    "helmcharts.source.toolkit.fluxcd.io": ("helm_chart", "v1"),
+    "ocirepositories.source.toolkit.fluxcd.io": ("oci_repository", "v1"),
+    "kustomizations.kustomize.toolkit.fluxcd.io": ("kustomization", "v1"),
+}
+export = subprocess.check_output(["flux", "install", "--export"], text=True)
+found = set()
+with tempfile.TemporaryDirectory(prefix="fleet-flux-") as temporary:
+    for document in re.split(r"^---\s*$", export, flags=re.MULTILINE):
+        if not re.search(r"^kind: CustomResourceDefinition$", document, re.MULTILINE):
+            continue
+        name = re.search(r"^  name: (\S+)$", document, re.MULTILINE)
+        if name is None or name[1] not in resources:
+            continue
+        module, version = resources[name[1]]
+        crd = pathlib.Path(temporary) / f"{module}.yaml"
+        crd.write_text(document)
+        code = subprocess.check_output(["kopium", "-f", str(crd), "--api-version", version], text=True)
+        code = "\n".join(line for line in code.splitlines() if not line.lstrip().startswith("//"))
+        target = output / f"{module}.rs"
+        target.write_text("#![allow(clippy::all, clippy::pedantic, unused_imports)]\n" + code + "\n")
+        subprocess.run(["rustfmt", "--edition", "2024", str(target)], check=True)
+        found.add(name[1])
+if found != set(resources):
+    raise SystemExit(f"Missing CRDs: {set(resources) - found}")

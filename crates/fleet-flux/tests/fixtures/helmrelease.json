@@ -1,0 +1,85 @@
+{
+  "apiVersion": "helm.toolkit.fluxcd.io/v2",
+  "kind": "HelmRelease",
+  "metadata": {
+    "name": "monitoring",
+    "namespace": "flux-system",
+    "generation": 2
+  },
+  "spec": {
+    "interval": "5m",
+    "chart": {
+      "spec": {
+        "chart": "kube-prometheus-stack",
+        "sourceRef": {
+          "kind": "HelmRepository",
+          "name": "prometheus-community"
+        }
+      }
+    },
+    "upgrade": {
+      "remediation": {
+        "retries": 3
+      }
+    }
+  },
+  "status": {
+    "observedGeneration": 2,
+    "helmChart": "flux-system/flux-system-monitoring",
+    "lastAttemptedRevision": "62.7.0",
+    "upgradeFailures": 2,
+    "conditions": [
+      {
+        "type": "Ready",
+        "status": "False",
+        "reason": "UpgradeFailed",
+        "message": "context deadline exceeded",
+        "observedGeneration": 2,
+        "lastTransitionTime": "2026-10-12T18:11:00Z"
+      },
+      {
+        "type": "Remediated",
+        "status": "True",
+        "reason": "RollbackSucceeded",
+        "message": "Rolled back to 61.9.0",
+        "observedGeneration": 2,
+        "lastTransitionTime": "2026-10-12T18:11:00Z"
+      }
+    ],
+    "history": [
+      {
+        "name": "monitoring",
+        "namespace": "monitoring",
+        "version": 3,
+        "status": "failed",
+        "chartName": "kube-prometheus-stack",
+        "chartVersion": "62.7.0",
+        "appVersion": "v0.77.0",
+        "configDigest": "sha256:a",
+        "digest": "sha256:b",
+        "firstDeployed": "2026-10-10T00:00:00Z",
+        "lastDeployed": "2026-10-12T18:00:00Z"
+      },
+      {
+        "name": "monitoring",
+        "namespace": "monitoring",
+        "version": 2,
+        "status": "deployed",
+        "chartName": "kube-prometheus-stack",
+        "chartVersion": "61.9.0",
+        "configDigest": "sha256:a",
+        "digest": "sha256:c",
+        "firstDeployed": "2026-10-10T00:00:00Z",
+        "lastDeployed": "2026-10-11T18:00:00Z"
+      }
+    ],
+    "inventory": {
+      "entries": [
+        {
+          "id": "monitoring_prometheus_apps_StatefulSet",
+          "v": "v1"
+        }
+      ]
+    }
+  }
+}
