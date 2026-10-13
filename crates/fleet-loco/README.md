@@ -14,7 +14,7 @@ combines routes with complete Service/EndpointSlice snapshots, and sorts problem
 rollups and agent discovery observations. Cluster input errors use the crate's `Error` enum.
 
 Regenerate CRDs and Rust types with `mise run gen:loco`. `LOCO_CORE` defaults to
-`/Users/nikhil/Documents/loco/core`; the task only reads that checkout and copies
+`../core` (a loco checkout next to this repo); the task only reads that checkout and copies
 `controller/config/crd/bases` into Fleet. It runs pinned kopium and rustfmt. The two phase enums
 are maintained in `generated/mod.rs` so new server phases remain readable. Do not edit generated
 `applications.rs` or `builds.rs` manually.

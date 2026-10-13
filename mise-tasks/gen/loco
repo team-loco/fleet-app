@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-loco_core="${LOCO_CORE:-/Users/nikhil/Documents/loco/core}"
+loco_core="${LOCO_CORE:-../core}"
 mkdir -p crds/loco crates/fleet-loco/src/generated
 for resource in applications builds; do
   source_crd="$loco_core/controller/config/crd/bases/infra.loco.io_${resource}.yaml"

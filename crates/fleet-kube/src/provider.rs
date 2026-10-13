@@ -475,7 +475,7 @@ mod tests {
             ),
             "westus2"
         );
-        assert_eq!(region(Provider::Doks, "do-nyc1-loco-cluster", None), "nyc1");
+        assert_eq!(region(Provider::Doks, "do-nyc1-example", None), "nyc1");
         assert_eq!(region(Provider::Kind, "kind-fleet-a", None), "local");
         assert_eq!(
             region(Provider::Generic, "edge", Some("https://127.0.0.1:6443")),
