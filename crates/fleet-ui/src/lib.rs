@@ -5,7 +5,7 @@ mod screens;
 mod shell;
 pub mod theme;
 
-pub use gallery::Gallery;
+pub use gallery::{Gallery, GalleryPage};
 pub use gpui_component::Root;
 pub use shell::Shell;
 
