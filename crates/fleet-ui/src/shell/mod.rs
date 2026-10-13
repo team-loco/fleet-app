@@ -137,6 +137,7 @@ impl Shell {
     fn screen_event(&mut self, event: &ScreenEvent, cx: &mut Context<Self>) {
         match event {
             ScreenEvent::Command(command) => self.dispatch(command.clone(), cx),
+            ScreenEvent::Navigate(page) => self.dispatch(Command::SelectPage(*page), cx),
         }
     }
 

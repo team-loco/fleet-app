@@ -4,6 +4,7 @@ mod events;
 pub mod fleet;
 mod namespaces;
 mod nodes;
+mod overview;
 mod resources;
 
 use fleet_core::{ClusterDetail, ClusterSummary, Command, Page, ResourceKind, ResourceRef, Status};
@@ -12,6 +13,7 @@ use gpui::{AnyElement, App, AppContext, Context, Entity, IntoElement, Subscripti
 pub use events::EventsScreen;
 pub use namespaces::NamespacesScreen;
 pub use nodes::NodesScreen;
+pub use overview::OverviewScreen;
 pub use resources::ResourcesScreen;
 
 pub const NODE_KIND: &str = "Node";
@@ -19,9 +21,11 @@ pub const NODE_KIND: &str = "Node";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenEvent {
     Command(Command),
+    Navigate(Page),
 }
 
 pub struct ClusterPages {
+    overview: Entity<OverviewScreen>,
     nodes: Entity<NodesScreen>,
     namespaces: Entity<NamespacesScreen>,
     events: Entity<EventsScreen>,
@@ -35,17 +39,20 @@ impl ClusterPages {
         cx: &mut Context<V>,
         on_event: impl Fn(&mut V, &ScreenEvent, &mut Context<V>) + Clone + 'static,
     ) -> Self {
+        let overview = cx.new(OverviewScreen::new);
         let nodes = cx.new(|cx| NodesScreen::new(window, cx));
         let namespaces = cx.new(NamespacesScreen::new);
         let events = cx.new(|cx| EventsScreen::new(window, cx));
         let resources = cx.new(|cx| ResourcesScreen::new(window, cx));
         let subscriptions = vec![
+            subscribe(&overview, on_event.clone(), cx),
             subscribe(&nodes, on_event.clone(), cx),
             subscribe(&namespaces, on_event.clone(), cx),
             subscribe(&events, on_event.clone(), cx),
             subscribe(&resources, on_event, cx),
         ];
         Self {
+            overview,
             nodes,
             namespaces,
             events,
@@ -65,6 +72,9 @@ impl ClusterPages {
             return;
         };
         match page {
+            Page::ClusterOverview => self
+                .overview
+                .update(cx, |screen, cx| screen.set(cluster, detail, cx)),
             Page::Nodes => self
                 .nodes
                 .update(cx, |screen, cx| screen.set(cluster, detail, cx)),
@@ -102,6 +112,7 @@ impl ClusterPages {
             return None;
         }
         let element = match page {
+            Page::ClusterOverview => self.overview.clone().into_any_element(),
             Page::Nodes => self.nodes.clone().into_any_element(),
             Page::Namespaces => self.namespaces.clone().into_any_element(),
             Page::Events => self.events.clone().into_any_element(),
