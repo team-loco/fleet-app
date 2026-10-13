@@ -78,9 +78,7 @@ gpui_platform::application()
 - Tailwind-like API: `.flex().flex_col().flex_1().min_h_0().w(px).h(px).px().gap().rounded()
   .border_b(px(1.)).border_color(c).bg(c).text_size(px).font_weight(FontWeight::SEMIBOLD).truncate()`.
   Scrolling containers need an id: `.id("x").overflow_y_scroll()`.
-- No letter-spacing and no text rotation. `kit::VerticalLabel` (the collapsed panels' label) turns
-  the Plex SemiBold glyph outlines into one rotated SVG path (`ttf-parser`, `svg().data(..)`), with
-  the design's `.07em` tracking, in place of `writing-mode: vertical-rl`.
+- No letter-spacing and no text rotation.
 - No CSS grid; tables should be `uniform_list` rows of fixed-width flex cells.
 
 ## Animation

@@ -28,3 +28,10 @@ Settled; change only with a new entry that says why.
     undo in one click, so they run at once. Drain (evicts pods), delete and apply-from-compare are
     destructive and confirm in-app unless the cluster's "Confirm destructive actions" setting is
     off.
+16. **Collapsed strips are useful, not decorative**: deviates from HANDOFF's "vertical label",
+    requested by the product owner. The clusters strip (28px) shows the expand chevron, an "All
+    clusters" glyph row, then one status-glyph row per cluster (selected marked with `sel`, tooltip
+    `name · state`, click selects). The resources strip shows the chevron and one glyph-over-count
+    row per nav entry that has problems (worst status first, tooltip = entry name, click
+    navigates); with no problems it is the chevron alone. `kit::VerticalLabel` and `ttf-parser` are
+    removed.

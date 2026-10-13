@@ -41,7 +41,6 @@ SectionHeader::new("Pods").count("3 · click to follow logs").end(Segmented::new
 SectionHeader::new("Problems").annotation(badges)  // any element right after the label
 SectionLabel::new("Container")            // uppercase 11px mute label alone
 Rule::horizontal()  /  Rule::vertical()   // 1px `line`
-VerticalLabel::new("Clusters")            // uppercase 11px mute label turned 90° (collapsed strips)
 Link::new("rev", "a41e07c").mono().on_click(|_, window, cx| ..)
 Highlighted::new("checkout-api", vec![0..8])  // byte ranges drawn in `acc` (fuzzy match hits)
 Kbd::new("⌘K")

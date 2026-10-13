@@ -2,6 +2,7 @@ mod cluster_menu;
 mod page;
 mod panels;
 mod status_bar;
+mod strip;
 
 use std::collections::BTreeMap;
 

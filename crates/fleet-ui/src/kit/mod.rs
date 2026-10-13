@@ -20,7 +20,6 @@ mod table;
 mod terminal;
 mod text;
 mod tooltip;
-mod vertical;
 
 pub use button::{Button, ButtonSize, ButtonVariant, Checkbox, IconButton, Segmented, Toggle};
 pub use chart::{LineChart, Meter, MiniMeter, Series, StackedBar};
@@ -49,7 +48,6 @@ pub use text::{
     BreakAnywhere, Highlighted, Kbd, KeyValue, Link, Rule, SectionHeader, SectionLabel,
 };
 pub use tooltip::Tooltip;
-pub use vertical::VerticalLabel;
 
 pub(crate) fn init(cx: &mut gpui::App) {
     overlay::init(cx);
