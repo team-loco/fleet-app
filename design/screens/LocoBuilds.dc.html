@@ -16,8 +16,9 @@ body{margin:0}
 </helmet>
 <div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--editor);width:100%;height:900px;display:flex;flex-direction:column;overflow:hidden">
   <div style="flex:1;min-height:0;display:flex;flex-wrap:wrap">
-    <div style="flex:0 0 auto;display:flex"><dc-import name="Nav" theme="{{theme}}" mode="cluster" active="loco-builds" hint-size="360px,874px"></dc-import></div>
+    <div style="flex:0 0 auto;display:flex"><dc-import name="Nav" theme="{{theme}}" mode="cluster" active="loco-builds" hint-size="200px,874px"></dc-import></div>
     <div style="flex:999 1 560px;min-width:0;height:874px;display:flex;flex-direction:column">
+      <dc-import name="PaneTabs" theme="{{theme}}" tabs="{{paneTabs}}" hint-size="100%,32px"></dc-import>
       <div style="height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line)">
         <h1 style="margin:0;font-size:14px;font-weight:600">Builds</h1>
         <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">loco-builds · pool=builds · kept 24h</span>
@@ -57,7 +58,7 @@ body{margin:0}
       </div>
     </div>
   </div>
-  <dc-import name="StatusBar" theme="{{theme}}" left="EKS · us-east-1 · v1.31.2" agent="4s ago" hint-size="100%,26px"></dc-import>
+  <dc-import name="StatusBar" theme="{{theme}}" left="EKS · us-east-1 · v1.31.2" agent="4s ago" cluster="prod-us-east" hint-size="100%,26px"></dc-import>
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
@@ -113,7 +114,7 @@ class Component extends DCLogic {
     }
     const f = st(b.fetch), k = st(b.kit);
     const cur = { svc: b.svc, id: b.id, job: 'job/build-' + b.id + ' · node ip-10-4-40-7', fg: f[0], fc: f[1], kg: k[0], kc: k[1], canCancel: b.phase === 'Running', log };
-    return { theme: v.theme, vars: v.vars, builds, cur };
+    return { paneTabs: [{ kind: 'loco', label: 'Builds', ctx: 'us-east', active: true }, { kind: 'loco', label: 'Applications', ctx: 'us-east' }], theme: v.theme, vars: v.vars, builds, cur };
   }
 }
 </script>

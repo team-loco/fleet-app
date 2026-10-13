@@ -17,9 +17,10 @@ body{margin:0}
 </helmet>
 <div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--editor);width:100%;height:900px;display:flex;flex-direction:column;overflow:hidden">
   <div style="flex:1;min-height:0;display:flex;flex-wrap:wrap">
-    <div style="flex:0 0 auto;display:flex"><dc-import name="Nav" theme="{{theme}}" mode="cluster" active="kustomizations" clusters="{{ false }}" hint-size="224px,874px"></dc-import></div>
+    <div style="flex:0 0 auto;display:flex"><dc-import name="Nav" theme="{{theme}}" mode="cluster" active="kustomizations" hint-size="200px,874px"></dc-import></div>
     <div style="flex:999 1 560px;min-width:0;height:874px;display:flex;flex-wrap:wrap">
-      <div style="flex:999 1 520px;min-width:0;height:100%;overflow:auto">
+      <div style="flex:0 0 100%;height:32px"><dc-import name="PaneTabs" theme="{{theme}}" tabs="{{paneTabs}}" hint-size="100%,32px"></dc-import></div>
+      <div style="flex:999 1 520px;min-width:0;height:calc(100% - 32px);overflow:auto">
         <div style="padding:16px 16px 14px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line)">
           <div style="display:flex;align-items:center;gap:10px">
             <h1 style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600">apps-payments</h1>
@@ -86,7 +87,7 @@ body{margin:0}
         </div>
       </div>
 
-      <aside aria-label="Related" style="flex:1 1 300px;min-width:0;height:100%;overflow:auto;border-left:1px solid var(--line);background:var(--panel);font-size:12.5px">
+      <aside aria-label="Related" style="flex:1 1 300px;min-width:0;height:calc(100% - 32px);overflow:auto;border-left:1px solid var(--line);background:var(--panel);font-size:12.5px">
         <div style="padding:14px 12px 6px;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Other clusters</div>
         <sc-for list="{{peers}}" as="p" hint-placeholder-count="4">
           <div style="display:grid;grid-template-columns:12px 96px 64px minmax(0,1fr);column-gap:8px;align-items:center;height:24px;padding:0 12px;font-family:'IBM Plex Mono',monospace;font-size:12px">
@@ -113,7 +114,7 @@ body{margin:0}
       </aside>
     </div>
   </div>
-  <dc-import name="StatusBar" theme="{{theme}}" left="EKS · us-east-1 · v1.31.2 · flux v2.4.0" agent="4s ago" hint-size="100%,26px"></dc-import>
+  <dc-import name="StatusBar" theme="{{theme}}" left="EKS · us-east-1 · v1.31.2 · flux v2.4.0" agent="4s ago" cluster="prod-us-east" hint-size="100%,26px"></dc-import>
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"menu":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
@@ -166,7 +167,7 @@ class Component extends DCLogic {
     const P = (s, cluster, rev, note) => ({ g: G[s], c: C[s], cluster, rev, note });
     const menuOpen = this.state.menu;
     return {
-      theme: v.theme, vars: v.vars, st, inventory, invFilters, history,
+      paneTabs: [{ kind: 'deploy', label: 'checkout-api', ctx: 'us-east', g: '✕', gc: 'var(--err)' }, { kind: 'ks', label: 'apps-payments', ctx: 'us-east', g: '✕', gc: 'var(--err)', active: true }, { kind: 'logs', label: 'x2lqp', ctx: 'us-east' }], theme: v.theme, vars: v.vars, st, inventory, invFilters, history,
       menuOpen, menuBg: menuOpen ? 'var(--sel)' : 'transparent',
       toggleMenu: () => this.setState({ menu: !menuOpen }),
       reconcile: () => this.setState({ reconciling: true, menu: false }),

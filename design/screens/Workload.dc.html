@@ -16,8 +16,9 @@ body{margin:0}
 </helmet>
 <div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--editor);width:100%;height:900px;display:flex;flex-direction:column;overflow:hidden">
   <div style="flex:1;min-height:0;display:flex;flex-wrap:wrap">
-    <div style="flex:0 0 auto;display:flex"><dc-import name="Nav" theme="{{theme}}" mode="cluster" active="deployments" hint-size="360px,874px"></dc-import></div>
+    <div style="flex:0 0 auto;display:flex"><dc-import name="Nav" theme="{{theme}}" mode="cluster" active="deployments" hint-size="200px,874px"></dc-import></div>
     <div style="flex:999 1 560px;min-width:0;height:874px;display:flex;flex-direction:column">
+      <dc-import name="PaneTabs" theme="{{theme}}" tabs="{{paneTabs}}" hint-size="100%,32px"></dc-import>
 
       <div style="flex:1;min-height:0;display:flex;flex-wrap:wrap">
         <div style="flex:999 1 520px;min-width:0;height:100%;overflow:auto">
@@ -161,10 +162,10 @@ body{margin:0}
       </section>
     </div>
   </div>
-  <dc-import name="StatusBar" theme="{{theme}}" left="EKS · us-east-1 · v1.31.2" agent="4s ago" hint-size="100%,26px"></dc-import>
+  <dc-import name="StatusBar" theme="{{theme}}" left="EKS · us-east-1 · v1.31.2" agent="4s ago" cluster="prod-us-east" open="{{switcher}}" hint-size="100%,26px"></dc-import>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"switcher":{"editor":"boolean","default":false},"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
@@ -226,6 +227,12 @@ class Component extends DCLogic {
     const menuOpen = this.state.menu;
     const M = (label, key, desc) => ({ label, key, desc: desc || '', hasDesc: !!desc });
     return {
+      switcher: !!this.props.switcher,
+      paneTabs: [
+        { kind: 'deploy', label: 'checkout-api', ctx: 'us-east', g: '✕', gc: 'var(--err)', active: true },
+        { kind: 'ks', label: 'apps-payments', ctx: 'us-east' },
+        { kind: 'deploy', label: 'checkout-api', ctx: 'eu-west' }
+      ],
       menuOpen, menuBg: menuOpen ? 'var(--sel)' : 'transparent',
       toggleMenu: () => this.setState({ menu: !menuOpen }),
       menu: [
