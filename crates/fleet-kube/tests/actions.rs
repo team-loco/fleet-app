@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use fleet_core::flux::{FluxAction, FluxKey, FluxKind};
 use fleet_core::{
@@ -18,11 +18,13 @@ use kube::{Api, Client, Config, ResourceExt};
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+mod common;
+
+use common::{WAIT, eventually};
+
 const E2E_VAR: &str = "FLEET_E2E";
 const SUPPORT_DIR: &str = "support";
 const CONTEXT: &str = "kind-fleet-a";
-const WAIT: Duration = Duration::from_secs(120);
-const POLL: Duration = Duration::from_millis(500);
 const CRASHING_NAMESPACE: &str = "payments";
 const CRASHING_SELECTOR: &str = "app.kubernetes.io/name=checkout-api";
 const CRASHING_CONTAINER: &str = "podinfo";
@@ -151,16 +153,18 @@ impl Harness {
 
     async fn snapshot_until(&self, done: impl Fn(&Snapshot) -> bool) -> Snapshot {
         let deadline = Instant::now() + WAIT;
+        let mut last = None;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             let update = tokio::time::timeout(left, self.updates.recv()).await;
             let Ok(Ok(update)) = update else {
-                panic!("snapshot condition never met");
+                panic!("snapshot condition never met; last cluster summary: {last:#?}");
             };
-            if let Update::Snapshot(snapshot) = update
-                && done(&snapshot)
-            {
-                return *snapshot;
+            if let Update::Snapshot(snapshot) = update {
+                if done(&snapshot) {
+                    return *snapshot;
+                }
+                last = snapshot.cluster(&cluster()).cloned();
             }
         }
     }
@@ -286,26 +290,20 @@ fn debug_pod() -> Pod {
 
 async fn recreate(pods: &Api<Pod>) {
     let _ = pods.delete(DEBUG_POD, &DeleteParams::default()).await;
-    let deadline = Instant::now() + WAIT;
-    while pods.get_opt(DEBUG_POD).await.ok().flatten().is_some() {
-        assert!(Instant::now() < deadline, "old pod lingers");
-        tokio::time::sleep(POLL).await;
-    }
+    eventually(
+        "old debug pod deleted",
+        || async { pods.get_opt(DEBUG_POD).await.ok().flatten() },
+        Option::is_none,
+    )
+    .await;
     let created = pods.create(&PostParams::default(), &debug_pod()).await;
     assert!(created.is_ok(), "{created:?}");
-    loop {
-        let phase = pods
-            .get(DEBUG_POD)
-            .await
-            .ok()
-            .and_then(|pod| pod.status)
-            .and_then(|status| status.phase);
-        if phase.as_deref() == Some("Running") {
-            return;
-        }
-        assert!(Instant::now() < deadline, "debug pod never ran");
-        tokio::time::sleep(POLL).await;
-    }
+    eventually(
+        "debug pod running",
+        || async { pods.get(DEBUG_POD).await.ok().and_then(|pod| pod.status) },
+        |status| status.as_ref().and_then(|status| status.phase.as_deref()) == Some("Running"),
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -445,18 +443,6 @@ const SCRATCH_CONFIGMAP: &str = "fleet-actions-e2e";
 const RESTARTED_AT: &str = "kubectl.kubernetes.io/restartedAt";
 const REQUESTED_AT: &str = "reconcile.fluxcd.io/requestedAt";
 
-async fn eventually<F, Fut>(what: &str, check: F)
-where
-    F: Fn() -> Fut,
-    Fut: Future<Output = bool>,
-{
-    let deadline = Instant::now() + WAIT;
-    while !check().await {
-        assert!(Instant::now() < deadline, "{what} never happened");
-        tokio::time::sleep(POLL).await;
-    }
-}
-
 async fn replicas(deployments: &Api<Deployment>) -> Option<i32> {
     let deployment = deployments.get(PODINFO).await.ok()?;
     deployment.spec?.replicas
@@ -490,17 +476,21 @@ async fn scale_up_then_back_down() {
         target: target.clone(),
         replicas: up,
     });
-    eventually("scale up", || async {
-        replicas(&deployments).await == Some(before + 1)
-    })
+    eventually(
+        "scale up",
+        || replicas(&deployments),
+        |observed| *observed == Some(before + 1),
+    )
     .await;
     harness.send(Command::Scale {
         target,
         replicas: u32::try_from(before).unwrap_or_default(),
     });
-    eventually("scale down", || async {
-        replicas(&deployments).await == Some(before)
-    })
+    eventually(
+        "scale down",
+        || replicas(&deployments),
+        |observed| *observed == Some(before),
+    )
     .await;
     no_notices(&harness);
 }
@@ -516,20 +506,27 @@ async fn restart_then_roll_back_to_the_original_template() {
     };
     let target = resource("Deployment", Some(WEB_NAMESPACE), PODINFO);
     harness.send(Command::RestartRollout(target.clone()));
-    eventually("restart annotation", || async {
-        template(&deployments)
-            .await
-            .and_then(|t| t.metadata?.annotations)
-            .is_some_and(|annotations| annotations.contains_key(RESTARTED_AT))
-    })
+    eventually(
+        "restart annotation",
+        || template(&deployments),
+        |observed| {
+            let annotations = observed
+                .as_ref()
+                .and_then(|t| t.metadata.as_ref())
+                .and_then(|meta| meta.annotations.as_ref());
+            annotations.is_some_and(|annotations| annotations.contains_key(RESTARTED_AT))
+        },
+    )
     .await;
     harness.send(Command::Rollback {
         target,
         revision: 0,
     });
-    eventually("rollback", || async {
-        template(&deployments).await.as_ref() == Some(&original)
-    })
+    eventually(
+        "rollback",
+        || template(&deployments),
+        |observed| observed.as_ref() == Some(&original),
+    )
     .await;
     no_notices(&harness);
 }
@@ -550,9 +547,9 @@ async fn cordon_then_uncordon_the_node() {
     };
     let target = resource("Node", None, NODE);
     harness.send(Command::Cordon(target.clone()));
-    eventually("cordon", || async { unschedulable().await }).await;
+    eventually("cordon", unschedulable, |observed| *observed).await;
     harness.send(Command::Uncordon(target));
-    eventually("uncordon", || async { !unschedulable().await }).await;
+    eventually("uncordon", unschedulable, |observed| !*observed).await;
     no_notices(&harness);
 }
 
@@ -574,14 +571,11 @@ async fn delete_waits_until_the_object_is_gone() {
         Some(DEBUG_NAMESPACE),
         SCRATCH_CONFIGMAP,
     )));
-    eventually("delete", || async {
-        configmaps
-            .get_opt(SCRATCH_CONFIGMAP)
-            .await
-            .ok()
-            .flatten()
-            .is_none()
-    })
+    eventually(
+        "delete",
+        || async { configmaps.get_opt(SCRATCH_CONFIGMAP).await.ok().flatten() },
+        Option::is_none,
+    )
     .await;
     no_notices(&harness);
 }
@@ -613,9 +607,8 @@ async fn flux_reconcile_requests_a_sync() {
     };
     let before = requested().await;
     harness.send(Command::Flux(key, FluxAction::ReconcileWithSource));
-    eventually("reconcile request", || async {
-        let now = requested().await;
-        now.is_some() && now != before
+    eventually("reconcile request", requested, |now| {
+        now.is_some() && *now != before
     })
     .await;
     no_notices(&harness);

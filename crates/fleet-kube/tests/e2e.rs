@@ -1,6 +1,3 @@
-use std::sync::Arc;
-use std::time::Duration;
-
 use fleet_core::{Backend, ClusterId, Command, ContextRef, NewCluster, Page, Update};
 use fleet_kube::LiveBackend;
 use fleet_kube::checks::{CheckKind, CheckStatus, Verdict, run_checks};
@@ -16,7 +13,12 @@ use k8s_openapi::api::core::v1::{ConfigMap, Pod};
 use kube::api::{DeleteParams, PartialObjectMeta, PostParams, PropagationPolicy};
 use kube::{Api, ResourceExt};
 use serde_json::json;
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+mod common;
+
+use common::{WAIT, eventually};
 
 const E2E_VAR: &str = "FLEET_E2E";
 const CONTEXT: &str = "kind-fleet-a";
@@ -25,8 +27,6 @@ const POD: &str = "fleet-kube-e2e";
 const CONFIGMAP: &str = "fleet-kube-e2e";
 const IMAGE: &str = "busybox:1.37";
 const HTTP_PORT: u16 = 8080;
-const WAIT: Duration = Duration::from_secs(120);
-const POLL: Duration = Duration::from_millis(500);
 const GREETING: &str = "hello from fleet";
 const SUPPORT_DIR: &str = "support";
 
@@ -44,15 +44,12 @@ fn kind_context() -> Option<KubeContext> {
 
 async fn connected(manager: &ClusterManager, context: KubeContext) -> ClusterHandle {
     let handle = manager.connect(context);
-    let deadline = tokio::time::Instant::now() + WAIT;
-    while handle.status() != ConnectionStatus::Connected {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "{:?}",
-            handle.status()
-        );
-        tokio::time::sleep(POLL).await;
-    }
+    eventually(
+        "cluster connected",
+        || async { handle.status() },
+        |status| *status == ConnectionStatus::Connected,
+    )
+    .await;
     handle
 }
 
@@ -80,18 +77,21 @@ fn test_pod() -> Pod {
 }
 
 async fn wait_running(handle: &ClusterHandle) {
-    let deadline = tokio::time::Instant::now() + WAIT;
-    loop {
-        let running = handle.objects::<Pod>().iter().any(|pod| {
-            pod.name_any() == POD
-                && pod.status.as_ref().and_then(|s| s.phase.as_deref()) == Some("Running")
-        });
-        if running {
-            return;
-        }
-        assert!(tokio::time::Instant::now() < deadline, "pod never ran");
-        tokio::time::sleep(POLL).await;
-    }
+    eventually(
+        "pod running",
+        || async {
+            let pods = handle.objects::<Pod>();
+            pods.iter().find(|pod| pod.name_any() == POD).cloned()
+        },
+        |pod| {
+            let phase = pod
+                .as_ref()
+                .and_then(|pod| pod.status.as_ref())
+                .and_then(|status| status.phase.as_deref());
+            phase == Some("Running")
+        },
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -121,11 +121,12 @@ async fn recreate_pod(handle: &ClusterHandle) {
     };
     let pod_api: Api<Pod> = Api::namespaced(client, NAMESPACE);
     let _ = pod_api.delete(POD, &DeleteParams::default()).await;
-    let deadline = tokio::time::Instant::now() + WAIT;
-    while pod_api.get_opt(POD).await.ok().flatten().is_some() {
-        assert!(tokio::time::Instant::now() < deadline, "old pod lingers");
-        tokio::time::sleep(POLL).await;
-    }
+    eventually(
+        "old pod deleted",
+        || async { pod_api.get_opt(POD).await.ok().flatten() },
+        Option::is_none,
+    )
+    .await;
     let created = pod_api.create(&PostParams::default(), &test_pod()).await;
     assert!(created.is_ok(), "{created:?}");
     wait_running(handle).await;
@@ -312,14 +313,19 @@ fn live_backend_publishes_kind_cluster() {
     let page = Command::SelectPage(Page::Deployments);
     assert!(commands.send_blocking(page).is_ok());
     let deadline = std::time::Instant::now() + WAIT;
+    let mut last = None;
     loop {
-        assert!(std::time::Instant::now() < deadline, "no healthy snapshot");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no healthy snapshot; last cluster summary: {last:#?}"
+        );
         let Ok(Update::Snapshot(snapshot)) = updates.recv_blocking() else {
             panic!("backend stopped");
         };
         let Some(cluster) = snapshot.cluster(&ClusterId::new(CONTEXT)) else {
             continue;
         };
+        last = Some(cluster.clone());
         let deployments = cluster.nav.get(&Page::Deployments).and_then(|c| c.total);
         if cluster.nodes == Some(1) && deployments.is_some_and(|n| n > 0) {
             assert_eq!(cluster.distro, "kind");

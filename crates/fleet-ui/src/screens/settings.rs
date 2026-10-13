@@ -11,8 +11,8 @@ use gpui::{
 };
 
 use crate::kit::{
-    ActionMenu, Button, Column, InputEvent, KeyValue, MenuItem, SectionLabel, StatusText, Table,
-    TableEvent, TextField, TextFieldState, Toggle,
+    ActionMenu, BreakAnywhere, Button, Column, InputEvent, KeyValue, MenuItem, SectionLabel,
+    StatusText, Table, TableEvent, TextField, TextFieldState, Toggle,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, LINE_PROSE, PAGE_HEADER, Palette, ROW_CATALOG, RULE, SPACE_1, SPACE_2,
@@ -331,8 +331,8 @@ impl SettingsScreen {
         let connection = &settings.connection;
         let details = KeyValue::new()
             .label_width(CONNECTION_LABEL)
-            .row("Context", connection.context.clone())
-            .row("Server", connection.server.clone())
+            .row("Context", BreakAnywhere::new(connection.context.clone()))
+            .row("Server", BreakAnywhere::new(connection.server.clone()))
             .row("Auth", connection.auth.label())
             .row("Kubeconfig", connection.kubeconfig.clone());
         let preferences = self.preferences(&settings, palette, cx);
