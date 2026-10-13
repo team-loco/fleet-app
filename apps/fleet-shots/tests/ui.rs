@@ -45,7 +45,7 @@ fn cancelling_a_confirm_dialog_leaves_the_state_unchanged() -> anyhow::Result<()
     let mut ui = Ui::open(Screen::Workload)?;
     let before = ui.state();
     ui.click("workload-actions")?;
-    ui.click("workload-actions-item-3")?;
+    ui.click("workload-actions-item-4")?;
     assert!(ui.bounds("dialog-cancel").is_some());
     ui.click("dialog-cancel")?;
     assert!(ui.bounds("dialog-cancel").is_none());

@@ -4,7 +4,7 @@ use crate::resource::page_for_kind;
 use crate::{
     AddClusterStep, CheckLine, ClusterId, ContextRef, ExecRequest, FluxAction, FluxKey, FluxKind,
     KubeconfigFile, LogRequest, NewCluster, Notice, Page, Preferences, ResourceRef, Sink, Snapshot,
-    Verdict, Workload,
+    Verdict, Workload, WorkloadKind,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,6 +20,10 @@ pub enum Command {
     InspectResource(ResourceRef),
     FollowLogs(ResourceRef),
     Compare(ResourceRef),
+    CompareWith {
+        base: ResourceRef,
+        other: ClusterId,
+    },
     PortForward {
         service: ResourceRef,
         local: u16,
@@ -122,6 +126,7 @@ impl AppState {
             Command::OpenResource(_) => Some(vec![command.clone()]),
             Command::FollowLogs(_) => Some(vec![command.clone()]),
             Command::Compare(_) => Some(vec![command.clone()]),
+            Command::CompareWith { .. } => Some(vec![command.clone()]),
             Command::OpenFluxObject(_) => Some(vec![command.clone()]),
             Command::OpenCommit(_) => Some(vec![command.clone()]),
             Command::ShowClusterSettings(_) => Some(vec![command.clone()]),
@@ -155,6 +160,7 @@ impl AppState {
             Command::InspectResource(_) => {}
             Command::FollowLogs(resource) => self.open_resource(resource),
             Command::Compare(resource) => self.compare(resource),
+            Command::CompareWith { base, .. } => self.compare(base),
             Command::PortForward { .. } => {}
             Command::StopPortForward { .. } => {}
             Command::Cordon(_) => {}
@@ -193,6 +199,7 @@ impl AppState {
             Command::OpenResource(resource) => has_cluster(&resource.cluster),
             Command::FollowLogs(resource) => has_cluster(&resource.cluster),
             Command::Compare(resource) => has_cluster(&resource.cluster),
+            Command::CompareWith { base, .. } => has_cluster(&base.cluster),
             Command::ShowClusterSettings(id) => has_cluster(id),
             Command::OpenFluxObject(key) => self.snapshot.flux_object(key).is_some(),
             _ => true,
@@ -237,6 +244,13 @@ impl AppState {
             self.resource = None;
             self.flux_object = None;
         }
+    }
+
+    pub fn workload(&self) -> Option<&ResourceRef> {
+        self.resource
+            .as_ref()
+            .filter(|_| self.page != Page::Compare)
+            .filter(|target| WorkloadKind::from_kind(&target.kind).is_some())
     }
 
     fn compare(&mut self, resource: &ResourceRef) {
@@ -464,6 +478,22 @@ mod tests {
         assert_eq!(state.page, Page::Compare);
         assert_eq!(state.cluster, Some(ClusterId::new("a")));
         assert_eq!(state.resource, Some(deploy));
+    }
+
+    #[test]
+    fn comparing_a_workload_shows_compare_not_the_workload_page() {
+        let mut state = loaded();
+        state.apply(&Command::OpenResource(deployment("a")));
+        assert_eq!(state.workload(), Some(&deployment("a")));
+        state.apply(&Command::Compare(deployment("a")));
+        assert_eq!(state.page, Page::Compare);
+        assert_eq!(state.workload(), None);
+        state.apply(&Command::CompareWith {
+            base: deployment("b"),
+            other: ClusterId::new("a"),
+        });
+        assert_eq!(state.resource, Some(deployment("b")));
+        assert_eq!(state.workload(), None);
     }
 
     #[test]

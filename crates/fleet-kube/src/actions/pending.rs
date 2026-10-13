@@ -1,7 +1,11 @@
+use fleet_core::action::Notice;
+use fleet_core::compare::short_names;
 use fleet_core::flux::{FluxAction, FluxKey, Phase};
-use fleet_core::{Command, ResourceKind, ResourceRef, Snapshot, Status};
+use fleet_core::{ClusterId, Command, ResourceKind, ResourceRef, Snapshot, Status};
+use serde_json::Value;
 
 const POD: &str = "Pod";
+const APPLYING: &str = "Applying";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Mutation {
@@ -13,6 +17,12 @@ pub enum Mutation {
     Scale(ResourceRef, u32),
     Rollback(ResourceRef, u64),
     Flux(FluxKey, FluxAction),
+    CopySpec {
+        target: ResourceRef,
+        from: ClusterId,
+        path: String,
+        template: Value,
+    },
 }
 
 impl Mutation {
@@ -40,6 +50,7 @@ impl Mutation {
             Self::Restart(target) => target.clone(),
             Self::Scale(target, _) => target.clone(),
             Self::Rollback(target, _) => target.clone(),
+            Self::CopySpec { target, .. } => target.clone(),
             Self::Flux(key, _) => ResourceRef {
                 cluster: key.cluster.clone(),
                 kind: key.kind.label().to_owned(),
@@ -58,12 +69,28 @@ impl Mutation {
             Self::Restart(_) => "Restart",
             Self::Scale(..) => "Scale",
             Self::Rollback(..) => "Roll back",
+            Self::CopySpec { .. } => "Apply",
             Self::Flux(_, FluxAction::Reconcile) => "Reconcile",
             Self::Flux(_, FluxAction::ReconcileWithSource) => "Reconcile",
             Self::Flux(_, FluxAction::Force) => "Force",
             Self::Flux(_, FluxAction::Suspend) => "Suspend",
             Self::Flux(_, FluxAction::Resume) => "Resume",
         }
+    }
+
+    pub fn done(&self) -> Option<Notice> {
+        let Self::CopySpec {
+            target, from, path, ..
+        } = self
+        else {
+            return None;
+        };
+        let (base, other) = short_names(target.cluster.as_str(), from.as_str());
+        Some(Notice {
+            status: Status::Ok,
+            title: format!("Applied {other} {path} to {base}"),
+            detail: Some(format!("{} · {target}", target.cluster)),
+        })
     }
 
     fn node_state(&self) -> Option<&'static str> {
@@ -134,7 +161,26 @@ fn mark_flux(snapshot: &mut Snapshot, key: &FluxKey) {
     }
 }
 
+fn mark_comparison(snapshot: &mut Snapshot, target: &ResourceRef, from: &ClusterId, path: &str) {
+    let column = snapshot
+        .comparisons
+        .iter_mut()
+        .filter(|comparison| comparison.matches(target))
+        .flat_map(|comparison| comparison.clusters.iter_mut())
+        .find(|compared| compared.cluster == target.cluster);
+    if let Some(compared) = column {
+        compared.status = Status::Progress;
+        compared.health = format!("{APPLYING} {from} {path}");
+    }
+}
+
 pub fn mark(snapshot: &mut Snapshot, mutation: &Mutation) {
+    if let Mutation::CopySpec {
+        target, from, path, ..
+    } = mutation
+    {
+        mark_comparison(snapshot, target, from, path);
+    }
     if let Some(state) = mutation.node_state() {
         mark_node(snapshot, &mutation.target(), state);
         return;
@@ -234,5 +280,47 @@ mod tests {
             .detail(&ClusterId::new("a"))
             .map(|detail| detail.resources(ResourceKind::Deployment)[0].status);
         assert_eq!(status, Some(Status::Progress));
+    }
+
+    #[test]
+    fn copying_a_spec_marks_the_compare_column_and_reports_success() {
+        use fleet_core::compare::{ComparedCluster, Comparison};
+        let target = target("Deployment", Some("payments"), "checkout-api");
+        let mut snapshot = Snapshot::default();
+        snapshot.comparisons.push(Comparison {
+            kind: "Deployment".into(),
+            namespace: Some("payments".into()),
+            name: "checkout-api".into(),
+            clusters: vec![ComparedCluster {
+                cluster: ClusterId::new("a"),
+                status: Status::Err,
+                health: "Degraded".into(),
+            }],
+            fields: Vec::new(),
+            spec: None,
+        });
+        let mutation = Mutation::CopySpec {
+            target: target.clone(),
+            from: ClusterId::new("b"),
+            path: "spec.template".into(),
+            template: Value::Null,
+        };
+        assert_eq!(
+            Mutation::from_command(&Command::CopySpec {
+                from: ClusterId::new("b"),
+                to: target,
+                path: "spec.template".into(),
+            }),
+            None
+        );
+        mark(&mut snapshot, &mutation);
+        let column = &snapshot.comparisons[0].clusters[0];
+        assert_eq!(column.status, Status::Progress);
+        assert_eq!(column.health, "Applying b spec.template");
+        assert_eq!(
+            mutation.done().map(|notice| notice.title),
+            Some("Applied b spec.template to a".to_owned())
+        );
+        assert_eq!(mutation.verb(), "Apply");
     }
 }

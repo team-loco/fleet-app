@@ -17,6 +17,7 @@ const DEPLOYMENT: &str = "Deployment";
 const STATEFUL_SET: &str = "StatefulSet";
 const DAEMON_SET: &str = "DaemonSet";
 const REPLICA_SET: &str = "ReplicaSet";
+const TEMPLATE_PATH: &str = "/spec/template";
 const DELETE_POLL: Duration = Duration::from_millis(500);
 const DELETE_WAIT: Duration = Duration::from_secs(60);
 const BUILTIN: [(&str, &str); 16] = [
@@ -123,6 +124,25 @@ pub async fn scale(handle: &ClusterHandle, target: &ResourceRef, replicas: u32) 
     require("Scale", target, &[DEPLOYMENT, STATEFUL_SET, REPLICA_SET])?;
     let replicas = i32::try_from(replicas).unwrap_or(i32::MAX);
     handle.scale(&object_ref(target)?, replicas).await
+}
+
+pub fn template_patch(template: &Value) -> Value {
+    json!([{ "op": "replace", "path": TEMPLATE_PATH, "value": template }])
+}
+
+pub async fn replace_template(
+    handle: &ClusterHandle,
+    target: &ResourceRef,
+    template: &Value,
+) -> Result<()> {
+    require("Apply", target, &[DEPLOYMENT, STATEFUL_SET, DAEMON_SET])?;
+    handle
+        .patch(
+            &object_ref(target)?,
+            PatchBody::Json(template_patch(template)),
+        )
+        .await?;
+    Ok(())
 }
 
 pub async fn delete(handle: &ClusterHandle, target: &ResourceRef) -> Result<()> {
@@ -261,5 +281,14 @@ mod tests {
         );
         let reconcile = flux_patch(FluxAction::Reconcile, at);
         assert!(reconcile["metadata"]["annotations"][actions::REQUESTED_AT].is_string());
+    }
+
+    #[test]
+    fn template_patch_replaces_the_whole_pod_template() {
+        let template = json!({ "spec": { "containers": [{ "name": "api", "image": "api:1" }] } });
+        assert_eq!(
+            template_patch(&template),
+            json!([{ "op": "replace", "path": "/spec/template", "value": template }])
+        );
     }
 }

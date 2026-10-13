@@ -1850,6 +1850,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_norway",
+ "similar 3.2.0",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

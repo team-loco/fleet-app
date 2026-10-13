@@ -511,7 +511,7 @@ pub struct Event {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::ClusterId;
 
@@ -552,7 +552,7 @@ mod tests {
         }
     }
 
-    fn workload(pods: Vec<Pod>, stalled: bool) -> Workload {
+    pub(crate) fn workload(pods: Vec<Pod>, stalled: bool) -> Workload {
         Workload {
             target: ResourceRef {
                 cluster: ClusterId::new("prod-us-east"),
@@ -572,11 +572,11 @@ mod tests {
         }
     }
 
-    fn running(name: &str) -> Pod {
+    pub(crate) fn running(name: &str) -> Pod {
         pod(name, "Running", Status::Ok, true)
     }
 
-    fn crashing(name: &str) -> Pod {
+    pub(crate) fn crashing(name: &str) -> Pod {
         pod(name, CRASH_LOOP, Status::Err, false)
     }
 

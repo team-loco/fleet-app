@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use fleet_core::compare::{Field, SpecDiff};
 use fleet_core::flux::{FluxAction, FluxKey, FluxKind};
 use fleet_core::{
     Backend, ClusterId, Command, ContextRef, ExecEvent, ExecRequest, ExecTarget, LogLine,
@@ -38,6 +39,8 @@ const DEBUG_NAMESPACE: &str = "default";
 const DEBUG_POD: &str = "fleet-actions-e2e";
 const DEBUG_IMAGE: &str = "busybox:1.37";
 const ECHO_MARKER: &str = "fleet-e2e-exec";
+const OTHER_CONTEXT: &str = "kind-fleet-b";
+const SCRATCH_DEPLOYMENT: &str = "fleet-compare-e2e";
 const SCRATCH_STATEFUL_SET: &str = "fleet-rollback-e2e";
 const NEWER_IMAGE: &str = "busybox:1.36";
 const SHELL_SIZE: TermSize = TermSize { cols: 97, rows: 23 };
@@ -46,24 +49,26 @@ fn enabled() -> bool {
     std::env::var(E2E_VAR).is_ok_and(|value| value == "1")
 }
 
-fn kind_context() -> Option<KubeContext> {
+fn kind_context(name: &str) -> Option<KubeContext> {
     discover(&DiscoverySources::from_env())
         .contexts
         .into_iter()
-        .find(|context| context.id.context == CONTEXT)
+        .find(|context| context.id.context == name)
 }
 
-fn kind_only_home(context: &KubeContext) -> tempfile::TempDir {
-    let Ok(mut config) = Kubeconfig::read_from(&context.id.file) else {
+fn kind_only_home(contexts: &[KubeContext]) -> tempfile::TempDir {
+    let Some(first) = contexts.first() else {
+        panic!("at least one kind context");
+    };
+    let Ok(mut config) = Kubeconfig::read_from(&first.id.file) else {
         panic!("kubeconfig readable");
     };
-    config.contexts.retain(|named| named.name == CONTEXT);
-    config
-        .clusters
-        .retain(|named| named.name == context.cluster);
-    config
-        .auth_infos
-        .retain(|named| Some(&named.name) == context.user.as_ref());
+    let wanted = |name: &str| contexts.iter().any(|c| c.id.context == name);
+    let clusters = |name: &str| contexts.iter().any(|c| c.cluster == name);
+    let users = |name: &String| contexts.iter().any(|c| c.user.as_ref() == Some(name));
+    config.contexts.retain(|named| wanted(&named.name));
+    config.clusters.retain(|named| clusters(&named.name));
+    config.auth_infos.retain(|named| users(&named.name));
     config.current_context = Some(CONTEXT.to_owned());
     let Ok(home) = tempfile::tempdir() else {
         panic!("tempdir");
@@ -99,11 +104,15 @@ fn resource(kind: &str, namespace: Option<&str>, name: &str) -> ResourceRef {
 
 impl Harness {
     async fn start() -> Option<Self> {
+        Self::start_with(&[CONTEXT]).await
+    }
+
+    async fn start_with(names: &[&str]) -> Option<Self> {
         if !enabled() {
             return None;
         }
-        let context = kind_context()?;
-        let home = kind_only_home(&context);
+        let contexts: Option<Vec<KubeContext>> = names.iter().map(|n| kind_context(n)).collect();
+        let home = kind_only_home(&contexts?);
         let options = KubeConfigOptions {
             context: Some(CONTEXT.to_owned()),
             ..KubeConfigOptions::default()
@@ -123,14 +132,17 @@ impl Harness {
             folders: Vec::new(),
         };
         let mut store = ClusterStore::empty(&home.path().join(SUPPORT_DIR));
-        let added = NewCluster {
-            context: ContextRef {
-                file: home.path().join(".kube").join("config"),
-                context: CONTEXT.to_owned(),
-            },
-            name: CONTEXT.to_owned(),
-        };
-        assert!(store.add(&[added]).is_ok());
+        let added: Vec<NewCluster> = names
+            .iter()
+            .map(|name| NewCluster {
+                context: ContextRef {
+                    file: home.path().join(".kube").join("config"),
+                    context: (*name).to_owned(),
+                },
+                name: (*name).to_owned(),
+            })
+            .collect();
+        assert!(store.add(&added).is_ok());
         let backend = LiveBackend::new(KubeSettings::default(), sources, store);
         let (updates_tx, updates) = async_channel::unbounded();
         let (commands, commands_rx) = async_channel::unbounded();
@@ -648,6 +660,129 @@ async fn stateful_set_rolls_back_through_controller_revisions() {
         .delete(SCRATCH_STATEFUL_SET, &DeleteParams::default())
         .await;
     assert!(deleted.is_ok(), "{deleted:?}");
+}
+
+async fn client_for(name: &str) -> Client {
+    let options = KubeConfigOptions {
+        context: Some(name.to_owned()),
+        ..KubeConfigOptions::default()
+    };
+    let Some(context) = kind_context(name) else {
+        panic!("{name} context");
+    };
+    let Ok(kubeconfig) = Kubeconfig::read_from(&context.id.file) else {
+        panic!("kubeconfig readable");
+    };
+    let Ok(config) = Config::from_custom_kubeconfig(kubeconfig, &options).await else {
+        panic!("{name} client config");
+    };
+    let Ok(client) = Client::try_from(config) else {
+        panic!("{name} client");
+    };
+    client
+}
+
+fn scratch_deployment(image: &str) -> Deployment {
+    let Ok(deployment) = serde_json::from_value(json!({
+        "metadata": { "name": SCRATCH_DEPLOYMENT },
+        "spec": {
+            "replicas": 0,
+            "selector": { "matchLabels": { "app": SCRATCH_DEPLOYMENT } },
+            "template": {
+                "metadata": { "labels": { "app": SCRATCH_DEPLOYMENT } },
+                "spec": { "containers": [{ "name": "main", "image": image, "command": ["sleep", "3600"] }] }
+            }
+        }
+    })) else {
+        panic!("deployment fixture");
+    };
+    deployment
+}
+
+async fn deployment_image(deployments: &Api<Deployment>) -> Option<String> {
+    let deployment = deployments.get(SCRATCH_DEPLOYMENT).await.ok()?;
+    deployment
+        .spec?
+        .template
+        .spec?
+        .containers
+        .first()?
+        .image
+        .clone()
+}
+
+async fn recreate_scratch(deployments: &Api<Deployment>, image: &str) {
+    let _ = deployments
+        .delete(SCRATCH_DEPLOYMENT, &DeleteParams::default())
+        .await;
+    eventually(
+        "old scratch deployment gone",
+        || async { deployments.get_opt(SCRATCH_DEPLOYMENT).await.ok().flatten() },
+        Option::is_none,
+    )
+    .await;
+    let created = deployments
+        .create(&PostParams::default(), &scratch_deployment(image))
+        .await;
+    assert!(created.is_ok(), "{created:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn compare_diffs_two_clusters_and_applies_the_other_template() {
+    let Some(harness) = Harness::start_with(&[CONTEXT, OTHER_CONTEXT]).await else {
+        return;
+    };
+    let ours: Api<Deployment> = Api::namespaced(harness.client.clone(), DEBUG_NAMESPACE);
+    let other_client = client_for(OTHER_CONTEXT).await;
+    let theirs: Api<Deployment> = Api::namespaced(other_client, DEBUG_NAMESPACE);
+    recreate_scratch(&ours, DEBUG_IMAGE).await;
+    recreate_scratch(&theirs, NEWER_IMAGE).await;
+    let target = resource("Deployment", Some(DEBUG_NAMESPACE), SCRATCH_DEPLOYMENT);
+    harness.send(Command::Compare(target.clone()));
+    let snapshot = harness
+        .snapshot_until(|snapshot| {
+            snapshot.comparison(&target).is_some_and(|comparison| {
+                comparison.clusters.len() == 2
+                    && comparison.spec.as_ref().is_some_and(SpecDiff::has_changes)
+            })
+        })
+        .await;
+    let Some(comparison) = snapshot.comparison(&target) else {
+        panic!("comparison");
+    };
+    let columns: Vec<&str> = comparison
+        .clusters
+        .iter()
+        .map(|c| c.cluster.as_str())
+        .collect();
+    assert_eq!(columns, [CONTEXT, OTHER_CONTEXT]);
+    let image = comparison.fields.iter().find(|f| f.label == "Image");
+    assert!(image.is_some_and(Field::differs), "{comparison:#?}");
+    harness.send(Command::CopySpec {
+        from: ClusterId::new(OTHER_CONTEXT),
+        to: target.clone(),
+        path: "spec.template".into(),
+    });
+    eventually(
+        "template applied",
+        || deployment_image(&ours),
+        |image| image.as_deref() == Some(NEWER_IMAGE),
+    )
+    .await;
+    harness
+        .snapshot_until(|snapshot| {
+            snapshot
+                .comparison(&target)
+                .and_then(|comparison| comparison.spec.as_ref())
+                .is_some_and(|spec| !spec.has_changes())
+        })
+        .await;
+    for deployments in [&ours, &theirs] {
+        let deleted = deployments
+            .delete(SCRATCH_DEPLOYMENT, &DeleteParams::default())
+            .await;
+        assert!(deleted.is_ok(), "{deleted:?}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

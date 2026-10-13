@@ -129,6 +129,10 @@ impl Actions {
         }
     }
 
+    pub fn copy_spec(&self, mutation: Mutation, handle: Option<ClusterHandle>) {
+        self.mutate(mutation, handle);
+    }
+
     fn mutate(&self, mutation: Mutation, handle: Option<ClusterHandle>) {
         let id = {
             let mut registry = lock(&self.registry);
@@ -150,7 +154,11 @@ impl Actions {
             this.touch();
             let target = mutation.target();
             match outcome {
-                Ok(blocked) if blocked.is_empty() => {}
+                Ok(blocked) if blocked.is_empty() => {
+                    if let Some(notice) = mutation.done() {
+                        this.notify(notice);
+                    }
+                }
                 Ok(blocked) => this.notify(Notice {
                     status: Status::Warn,
                     title: format!("Drain {} incomplete", target.name),
@@ -280,6 +288,9 @@ async fn perform(handle: &ClusterHandle, mutation: &Mutation) -> Result<Vec<drai
             }
         }
         Mutation::Flux(key, action) => mutate::flux(handle, key, *action).await?,
+        Mutation::CopySpec {
+            target, template, ..
+        } => mutate::replace_template(handle, target, template).await?,
     }
     Ok(Vec::new())
 }
