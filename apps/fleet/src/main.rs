@@ -71,6 +71,8 @@ enum Screen {
     AddCluster,
     AddClusterCheck,
     Workload,
+    Pods,
+    PodsShell,
     Kustomization,
     Helmrelease,
     Source,
@@ -114,6 +116,8 @@ impl Screen {
             Self::AddCluster => vec![Command::OpenAddCluster(AddClusterStep::Pick)],
             Self::AddClusterCheck => vec![Command::OpenAddCluster(AddClusterStep::Check)],
             Self::Workload => vec![sample, Command::OpenResource(fleet_demo::sample_workload())],
+            Self::Pods => vec![sample, Command::SelectPage(Page::Pods)],
+            Self::PodsShell => vec![sample, Command::SelectPage(Page::Pods)],
             Self::Kustomization => flux_screen(FluxKey::new(
                 SAMPLE_CLUSTER,
                 FluxKind::Kustomization,
@@ -266,6 +270,8 @@ fn launch(
             Screen::AddClusterCheck => shell_view(updates, commands, screen, window, cx),
             Screen::Gitops => shell_view(updates, commands, screen, window, cx),
             Screen::Workload => shell_view(updates, commands, screen, window, cx),
+            Screen::Pods => shell_view(updates, commands, screen, window, cx),
+            Screen::PodsShell => shell_view(updates, commands, screen, window, cx),
             Screen::Kustomization => shell_view(updates, commands, screen, window, cx),
             Screen::Helmrelease => shell_view(updates, commands, screen, window, cx),
             Screen::Source => shell_view(updates, commands, screen, window, cx),
@@ -294,6 +300,9 @@ fn shell_view(
     let shell = cx.new(|cx| Shell::new(updates, commands, initial, window, cx));
     if let Screen::Command = screen {
         shell.update(cx, |shell, cx| shell.open_palette(SAMPLE_QUERY, window, cx));
+    }
+    if let Screen::PodsShell = screen {
+        shell.update(cx, |shell, cx| shell.show_pod_terminal(window, cx));
     }
     shell.into()
 }

@@ -345,6 +345,7 @@ impl Live {
                 sources: sources.len(),
                 clusters: settings,
             },
+            pods: Vec::new(),
         }
     }
 }

@@ -15,6 +15,7 @@ pub mod nav;
 pub mod nodes;
 pub mod overview;
 pub mod palette;
+pub mod pods;
 pub mod resource;
 pub mod resources;
 pub mod settings;

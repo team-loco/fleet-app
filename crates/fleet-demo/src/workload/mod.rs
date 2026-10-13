@@ -72,6 +72,10 @@ impl Workloads {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    pub fn knows_pod(&self, pod: &ResourceRef) -> bool {
+        self.lock().pod_status(pod).is_some()
+    }
+
     pub fn handle(&self, command: &Command) {
         match command {
             Command::WatchWorkload { target, sink } => self.watch(target, sink),

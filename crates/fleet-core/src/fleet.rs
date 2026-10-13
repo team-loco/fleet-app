@@ -45,6 +45,7 @@ pub struct Snapshot {
     pub loco: BTreeMap<ClusterId, crate::loco::LocoCluster>,
     pub comparisons: Vec<Comparison>,
     pub catalog: ClusterCatalog,
+    pub pods: Vec<crate::pods::Pod>,
 }
 
 impl Snapshot {
@@ -113,6 +114,7 @@ pub(crate) mod tests {
             loco: BTreeMap::new(),
             comparisons: Vec::new(),
             catalog: ClusterCatalog::default(),
+            pods: Vec::new(),
         }
     }
 

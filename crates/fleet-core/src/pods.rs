@@ -1,0 +1,569 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::Duration;
+
+use crate::{ClusterId, ResourceRef, Status};
+
+pub const POD_KIND: &str = "Pod";
+const RESTARTS_ERR: u32 = 5;
+const SHORT_NAME_MIN: usize = 4;
+const MILLIS_PER_CORE: u32 = 1000;
+const MIB_PER_GIB: u32 = 1024;
+const SEPARATOR: &str = " · ";
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PodPhase {
+    #[default]
+    Pending,
+    Running,
+    Succeeded,
+    Failed,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Qos {
+    Guaranteed,
+    #[default]
+    Burstable,
+    BestEffort,
+}
+
+impl Qos {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Guaranteed => "Guaranteed",
+            Self::Burstable => "Burstable",
+            Self::BestEffort => "BestEffort",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ContainerState {
+    Running,
+    #[default]
+    Waiting,
+    Terminated,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContainerPort {
+    pub port: u16,
+    pub protocol: String,
+    pub name: Option<String>,
+}
+
+impl ContainerPort {
+    pub fn label(&self) -> String {
+        match &self.name {
+            Some(name) => format!("{}/{} {name}", self.port, self.protocol),
+            None => format!("{}/{}", self.port, self.protocol),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Container {
+    pub name: String,
+    pub image: String,
+    pub state: ContainerState,
+    pub status: Status,
+    pub reason: String,
+    pub ready: bool,
+    pub restarts: u32,
+    pub ports: Vec<ContainerPort>,
+    pub note: Option<String>,
+}
+
+impl Container {
+    fn started(&self) -> bool {
+        self.state != ContainerState::Waiting || self.restarts > 0
+    }
+
+    pub fn meta(&self) -> String {
+        if !self.started() {
+            return self.note.clone().unwrap_or_default();
+        }
+        let restarts = format!("restarts {}", self.restarts);
+        let ports = self.ports.iter().map(|p| format!(":{}", p.port));
+        std::iter::once(restarts)
+            .chain(self.note.clone())
+            .chain(ports)
+            .collect::<Vec<_>>()
+            .join(SEPARATOR)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Usage {
+    pub cpu_millis: u32,
+    pub memory_mib: u32,
+}
+
+impl Usage {
+    pub fn cpu_label(self) -> String {
+        if self.cpu_millis < MILLIS_PER_CORE {
+            return format!("{}m", self.cpu_millis);
+        }
+        let cores = f64::from(self.cpu_millis) / f64::from(MILLIS_PER_CORE);
+        format!("{cores:.1}")
+    }
+
+    pub fn memory_label(self) -> String {
+        if self.memory_mib < MIB_PER_GIB {
+            return format!("{}Mi", self.memory_mib);
+        }
+        let gib = f64::from(self.memory_mib) / f64::from(MIB_PER_GIB);
+        format!("{gib:.1}Gi")
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Condition {
+    pub kind: String,
+    pub ok: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Volume {
+    pub name: String,
+    pub source: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PodEvent {
+    pub status: Status,
+    pub reason: String,
+    pub message: String,
+    pub count: u32,
+    pub age: Duration,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Pod {
+    pub cluster: ClusterId,
+    pub namespace: String,
+    pub name: String,
+    pub phase: PodPhase,
+    pub status: Status,
+    pub reason: String,
+    pub node: Option<String>,
+    pub ip: Option<String>,
+    pub owner: Option<ResourceRef>,
+    pub qos: Qos,
+    pub age: Duration,
+    pub labels: BTreeMap<String, String>,
+    pub containers: Vec<Container>,
+    pub usage: Option<Usage>,
+    pub conditions: Vec<Condition>,
+    pub volumes: Vec<Volume>,
+    pub events: Vec<PodEvent>,
+}
+
+impl Pod {
+    pub fn resource(&self) -> ResourceRef {
+        ResourceRef {
+            cluster: self.cluster.clone(),
+            kind: POD_KIND.to_owned(),
+            namespace: Some(self.namespace.clone()),
+            name: self.name.clone(),
+        }
+    }
+
+    pub fn is(&self, resource: &ResourceRef) -> bool {
+        resource.kind == POD_KIND
+            && resource.cluster == self.cluster
+            && resource.name == self.name
+            && resource.namespace.as_deref() == Some(self.namespace.as_str())
+    }
+
+    pub fn ready_label(&self) -> String {
+        let ready = self.containers.iter().filter(|c| c.ready).count();
+        format!("{ready}/{}", self.containers.len())
+    }
+
+    pub fn restarts(&self) -> u32 {
+        self.containers.iter().map(|c| c.restarts).sum()
+    }
+
+    pub fn restart_status(&self) -> Option<Status> {
+        match self.restarts() {
+            0 => None,
+            n if n > RESTARTS_ERR => Some(Status::Err),
+            _ => Some(Status::Warn),
+        }
+    }
+
+    pub fn short_name(&self) -> &str {
+        match self.name.rsplit_once('-') {
+            Some((_, suffix)) if suffix.len() >= SHORT_NAME_MIN => suffix,
+            Some(_) => &self.name,
+            None => &self.name,
+        }
+    }
+
+    pub fn node_short(&self) -> Option<&str> {
+        let node = self.node.as_deref()?;
+        Some(node.split_once('.').map_or(node, |(host, _)| host))
+    }
+
+    pub fn ports(&self) -> impl Iterator<Item = (&Container, &ContainerPort)> {
+        self.containers
+            .iter()
+            .flat_map(|c| c.ports.iter().map(move |p| (c, p)))
+    }
+
+    pub fn sentence(&self) -> String {
+        if self.status == Status::Ok {
+            let node = self.node_short().unwrap_or_default();
+            return format!("Running and ready on {node}.");
+        }
+        let worst = self
+            .containers
+            .iter()
+            .filter(|c| c.status != Status::Ok)
+            .max_by_key(|c| c.status);
+        match (self.status, worst) {
+            (Status::Progress, _) => format!("{}.", self.reason),
+            (_, Some(container)) => container_sentence(container),
+            (_, None) => format!("{}.", self.reason),
+        }
+    }
+}
+
+fn container_sentence(container: &Container) -> String {
+    let name = &container.name;
+    let note = container.note.as_deref().unwrap_or(&container.reason);
+    match container.state {
+        ContainerState::Running => format!("{name} is running but not ready ({note})."),
+        ContainerState::Waiting if container.restarts > 0 => format!(
+            "{name} keeps crashing ({note}) and has restarted {} times.",
+            container.restarts
+        ),
+        ContainerState::Waiting => format!("{name} is waiting to start: {note}."),
+        ContainerState::Terminated => format!("{name} has terminated ({note})."),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PodFilter {
+    #[default]
+    All,
+    Running,
+    Pending,
+    Failing,
+}
+
+impl PodFilter {
+    pub const ALL: [Self; 4] = [Self::All, Self::Running, Self::Pending, Self::Failing];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Running => "Running",
+            Self::Pending => "Pending",
+            Self::Failing => "Failing",
+        }
+    }
+
+    pub fn keeps(self, pod: &Pod) -> bool {
+        match self {
+            Self::All => true,
+            Self::Running => pod.phase == PodPhase::Running && pod.status != Status::Err,
+            Self::Pending => pod.phase == PodPhase::Pending,
+            Self::Failing => pod.status == Status::Err,
+        }
+    }
+}
+
+pub fn filter_counts(pods: &[&Pod]) -> Vec<(PodFilter, usize)> {
+    PodFilter::ALL
+        .iter()
+        .map(|filter| {
+            let count = pods.iter().filter(|pod| filter.keeps(pod)).count();
+            (*filter, count)
+        })
+        .collect()
+}
+
+pub fn matches_query(pod: &Pod, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return true;
+    }
+    let contains = |text: &str| text.to_lowercase().contains(&query);
+    let label_hit = pod
+        .labels
+        .iter()
+        .any(|(key, value)| contains(&format!("{key}={value}")));
+    contains(&pod.name)
+        || contains(&pod.namespace)
+        || pod.node.as_deref().is_some_and(contains)
+        || label_hit
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PodQuery {
+    pub text: String,
+    pub namespace: Option<String>,
+    pub filter: PodFilter,
+}
+
+impl PodQuery {
+    pub fn base<'a>(&self, pods: &'a [Pod], cluster: &ClusterId) -> Vec<&'a Pod> {
+        pods.iter()
+            .filter(|pod| &pod.cluster == cluster)
+            .filter(|pod| {
+                self.namespace
+                    .as_ref()
+                    .is_none_or(|namespace| &pod.namespace == namespace)
+            })
+            .filter(|pod| matches_query(pod, &self.text))
+            .collect()
+    }
+
+    pub fn apply<'a>(&self, pods: &'a [Pod], cluster: &ClusterId) -> Vec<&'a Pod> {
+        self.base(pods, cluster)
+            .into_iter()
+            .filter(|pod| self.filter.keeps(pod))
+            .collect()
+    }
+}
+
+pub fn namespaces(pods: &[Pod], cluster: &ClusterId) -> Vec<String> {
+    let unique: BTreeSet<&str> = pods
+        .iter()
+        .filter(|pod| &pod.cluster == cluster)
+        .map(|pod| pod.namespace.as_str())
+        .collect();
+    unique.into_iter().map(str::to_owned).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn port(port: u16) -> ContainerPort {
+        ContainerPort {
+            port,
+            protocol: "TCP".into(),
+            name: None,
+        }
+    }
+
+    fn container(name: &str, state: ContainerState, status: Status, restarts: u32) -> Container {
+        Container {
+            name: name.into(),
+            image: format!("{name}:1"),
+            state,
+            status,
+            reason: String::new(),
+            ready: status == Status::Ok,
+            restarts,
+            ports: Vec::new(),
+            note: None,
+        }
+    }
+
+    fn crashing() -> Pod {
+        let mut api = container("api", ContainerState::Waiting, Status::Err, 14);
+        api.note = Some("exit 1".into());
+        api.reason = "CrashLoopBackOff".into();
+        api.ports = vec![port(8080)];
+        let mut envoy = container("envoy", ContainerState::Running, Status::Ok, 0);
+        envoy.ports = vec![port(9901)];
+        Pod {
+            cluster: ClusterId::new("prod"),
+            namespace: "payments".into(),
+            name: "checkout-api-7f9c6d-x2lqp".into(),
+            phase: PodPhase::Running,
+            status: Status::Err,
+            reason: "CrashLoopBackOff".into(),
+            node: Some("ip-10-4-12-87.ec2.internal".into()),
+            labels: BTreeMap::from([("app".into(), "checkout-api".into())]),
+            containers: vec![api, envoy],
+            ..Pod::default()
+        }
+    }
+
+    fn healthy(name: &str, namespace: &str) -> Pod {
+        Pod {
+            cluster: ClusterId::new("prod"),
+            namespace: namespace.into(),
+            name: name.into(),
+            phase: PodPhase::Running,
+            status: Status::Ok,
+            reason: "Running".into(),
+            node: Some("ip-10-4-30-5.ec2.internal".into()),
+            containers: vec![container("web", ContainerState::Running, Status::Ok, 0)],
+            ..Pod::default()
+        }
+    }
+
+    fn pending() -> Pod {
+        let mut trainer = container("trainer", ContainerState::Waiting, Status::Warn, 0);
+        trainer.note = Some("unschedulable · nvidia.com/gpu: 1".into());
+        Pod {
+            cluster: ClusterId::new("prod"),
+            namespace: "ml".into(),
+            name: "ml-batch-5c7f-9kq2d".into(),
+            phase: PodPhase::Pending,
+            status: Status::Warn,
+            reason: "Pending".into(),
+            containers: vec![trainer],
+            ..Pod::default()
+        }
+    }
+
+    #[test]
+    fn container_meta_matches_the_design() {
+        let pod = crashing();
+        let metas: Vec<String> = pod.containers.iter().map(Container::meta).collect();
+        assert_eq!(
+            metas,
+            ["restarts 14 · exit 1 · :8080", "restarts 0 · :9901"]
+        );
+        assert_eq!(
+            pending().containers[0].meta(),
+            "unschedulable · nvidia.com/gpu: 1"
+        );
+    }
+
+    #[test]
+    fn ready_restarts_and_names_derive_from_containers() {
+        let pod = crashing();
+        assert_eq!(pod.ready_label(), "1/2");
+        assert_eq!(pod.restarts(), 14);
+        assert_eq!(pod.restart_status(), Some(Status::Err));
+        assert_eq!(pod.short_name(), "x2lqp");
+        assert_eq!(pod.node_short(), Some("ip-10-4-12-87"));
+        assert_eq!(
+            healthy("payments-db-0", "payments").short_name(),
+            "payments-db-0"
+        );
+        assert_eq!(healthy("a", "b").restart_status(), None);
+    }
+
+    #[test]
+    fn a_few_restarts_warn() {
+        let mut pod = healthy("worker", "payments");
+        pod.containers[0].restarts = 2;
+        assert_eq!(pod.restart_status(), Some(Status::Warn));
+    }
+
+    #[test]
+    fn sentences_say_what_is_wrong_first() {
+        assert_eq!(
+            crashing().sentence(),
+            "api keeps crashing (exit 1) and has restarted 14 times."
+        );
+        assert_eq!(
+            pending().sentence(),
+            "trainer is waiting to start: unschedulable · nvidia.com/gpu: 1."
+        );
+        assert_eq!(
+            healthy("db-0", "payments").sentence(),
+            "Running and ready on ip-10-4-30-5."
+        );
+        let mut terminating = healthy("db-0", "payments");
+        terminating.status = Status::Progress;
+        terminating.reason = "Terminating".into();
+        assert_eq!(terminating.sentence(), "Terminating.");
+    }
+
+    #[test]
+    fn not_ready_containers_explain_the_probe() {
+        let mut pod = healthy("search-indexer-0", "search");
+        pod.status = Status::Warn;
+        pod.containers[0].status = Status::Warn;
+        pod.containers[0].note = Some("readiness 503".into());
+        assert_eq!(
+            pod.sentence(),
+            "web is running but not ready (readiness 503)."
+        );
+    }
+
+    #[test]
+    fn filters_split_running_pending_and_failing() {
+        let pods = [crashing(), healthy("a", "web"), pending()];
+        let refs: Vec<&Pod> = pods.iter().collect();
+        let counts: Vec<usize> = filter_counts(&refs).into_iter().map(|(_, n)| n).collect();
+        assert_eq!(counts, [3, 1, 1, 1]);
+    }
+
+    #[test]
+    fn query_matches_name_namespace_node_and_labels() {
+        let pod = crashing();
+        assert!(matches_query(&pod, ""));
+        assert!(matches_query(&pod, "X2LQP"));
+        assert!(matches_query(&pod, "payments"));
+        assert!(matches_query(&pod, "10-4-12-87"));
+        assert!(matches_query(&pod, "app=checkout"));
+        assert!(!matches_query(&pod, "grafana"));
+    }
+
+    #[test]
+    fn query_scopes_to_cluster_namespace_and_filter() {
+        let mut other = healthy("elsewhere", "web");
+        other.cluster = ClusterId::new("staging");
+        let pods = vec![crashing(), healthy("a", "web"), pending(), other];
+        let prod = ClusterId::new("prod");
+        let query = PodQuery {
+            namespace: Some("web".into()),
+            ..PodQuery::default()
+        };
+        let names: Vec<&str> = query
+            .apply(&pods, &prod)
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(names, ["a"]);
+        let failing = PodQuery {
+            filter: PodFilter::Failing,
+            ..PodQuery::default()
+        };
+        assert_eq!(failing.apply(&pods, &prod).len(), 1);
+        assert_eq!(failing.base(&pods, &prod).len(), 3);
+        assert_eq!(namespaces(&pods, &prod), ["ml", "payments", "web"]);
+    }
+
+    #[test]
+    fn resource_refs_round_trip() {
+        let pod = crashing();
+        let resource = pod.resource();
+        assert!(pod.is(&resource));
+        assert_eq!(resource.to_string(), "payments/checkout-api-7f9c6d-x2lqp");
+        let mut other = resource;
+        other.kind = "Deployment".into();
+        assert!(!pod.is(&other));
+    }
+
+    #[test]
+    fn usage_labels_switch_units() {
+        let small = Usage {
+            cpu_millis: 212,
+            memory_mib: 301,
+        };
+        assert_eq!(
+            (small.cpu_label(), small.memory_label()),
+            ("212m".into(), "301Mi".into())
+        );
+        let large = Usage {
+            cpu_millis: 1500,
+            memory_mib: 2048,
+        };
+        assert_eq!(
+            (large.cpu_label(), large.memory_label()),
+            ("1.5".into(), "2.0Gi".into())
+        );
+    }
+
+    #[test]
+    fn port_labels_include_the_name() {
+        let mut named = port(8080);
+        named.name = Some("http".into());
+        assert_eq!(named.label(), "8080/TCP http");
+        assert_eq!(port(53).label(), "53/TCP");
+    }
+}

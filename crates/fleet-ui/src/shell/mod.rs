@@ -5,6 +5,7 @@ mod status_bar;
 
 use std::collections::BTreeMap;
 
+use fleet_core::resource::short_kind;
 use fleet_core::{AddClusterStep, AppState, ClusterId, Command, Receiver, Sender, Status, Update};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement,
@@ -20,6 +21,7 @@ use crate::screens::compare::CompareScreen;
 use crate::screens::fleet::FleetScreen;
 use crate::screens::flux_object::FluxObjectPage;
 use crate::screens::gitops::GitOpsScreen;
+use crate::screens::pods::PodsScreen;
 use crate::screens::settings::SettingsScreen;
 use crate::screens::workload::WorkloadScreen;
 use crate::screens::{ClusterPages, ScreenEvent};
@@ -53,6 +55,8 @@ pub struct Shell {
     _palette_events: Subscription,
     gitops: Entity<GitOpsScreen>,
     _gitops_commands: Subscription,
+    pods: Entity<PodsScreen>,
+    _pod_commands: Subscription,
     _flux_object: Subscription,
     _screen_commands: [Subscription; 2],
 }
@@ -104,6 +108,10 @@ impl Shell {
                 this.dispatch(command.clone(), cx);
             }),
         ];
+        let pods = cx.new(|cx| PodsScreen::new(window, cx));
+        let pod_commands = cx.subscribe(&pods, |this, _, command: &Command, cx| {
+            this.dispatch(command.clone(), cx);
+        });
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         theme::follow_window(window, cx);
@@ -149,6 +157,8 @@ impl Shell {
             _palette_events: palette_events,
             gitops,
             _gitops_commands: gitops_commands,
+            pods,
+            _pod_commands: pod_commands,
             _flux_object: flux_commands,
             _screen_commands: screen_commands,
         }
@@ -183,6 +193,8 @@ impl Shell {
             .update(cx, |gitops, cx| gitops.set_snapshot(snapshot, cx));
         self.settings
             .update(cx, |settings, cx| settings.set_snapshot(snapshot, cx));
+        self.pods
+            .update(cx, |pods, cx| pods.set_snapshot(snapshot, cx));
         self.sync_page(cx);
         self.sync_palette(cx);
         cx.notify();
@@ -282,7 +294,8 @@ impl Shell {
                 remote,
             } => {
                 let title = format!(
-                    "Forwarding localhost:{local} → svc/{}:{remote}",
+                    "Forwarding localhost:{local} → {}/{}:{remote}",
+                    short_kind(&service.kind),
                     service.name
                 );
                 let detail = format!(
@@ -338,6 +351,15 @@ impl Shell {
         self.compare.update(cx, |compare, cx| {
             compare.set_snapshot(snapshot, resource, cx);
         });
+        let cluster = self.state.cluster.as_ref();
+        let resource = self.state.resource.as_ref();
+        self.pods
+            .update(cx, |pods, cx| pods.set_context(cluster, resource, cx));
+    }
+
+    pub fn show_pod_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.pods
+            .update(cx, |pods, cx| pods.show_terminal(window, cx));
     }
 
     fn strip(cx: &App) -> impl IntoElement {

@@ -8,6 +8,8 @@ mod home;
 mod lists;
 #[cfg(feature = "loco")]
 mod loco;
+mod pod_streams;
+mod pods;
 mod resources;
 mod settings;
 mod sim;
@@ -84,6 +86,9 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
                     continue;
                 }
                 tracing::debug!(?command, "demo backend received command");
+                if pod_streams::handle(&command, &state, &workloads) {
+                    continue;
+                }
                 workloads.handle(&command);
                 if let Command::Flux(key, action) = &command {
                     let outcome = flux.apply(&mut state, key, *action);
@@ -102,7 +107,9 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
                 }
             }
             Input::Settle(pending) => {
-                simulate::settle(&mut state, &pending);
+                if let Some(next) = simulate::settle(&mut state, &pending) {
+                    schedule(&input_tx, Input::Settle(next));
+                }
                 true
             }
             Input::SettleFlux(pending) => {
@@ -203,6 +210,7 @@ pub fn snapshot() -> Snapshot {
         loco: loco::clusters(),
         comparisons: compare::comparisons(),
         catalog: settings::catalog(),
+        pods: pods::pods(),
     }
 }
 
