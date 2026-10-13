@@ -12,7 +12,10 @@ use fleet_kube::LiveBackend;
 use fleet_kube::discovery::DiscoverySources;
 use fleet_kube::settings::KubeSettings;
 use fleet_kube::store::ClusterStore;
-use fleet_ui::actions::{ToggleClustersPanel, ToggleCommandPalette, ToggleResourcesPanel};
+use fleet_ui::actions::{
+    CompareAcrossClusters, FollowLogs, ShowFluxOwner, ToggleClustersPanel, ToggleCommandPalette,
+    ToggleResourcesPanel,
+};
 use fleet_ui::theme::{Appearance, TRAFFIC_LIGHT_X, TRAFFIC_LIGHT_Y};
 use fleet_ui::{Gallery, GalleryPage, Root, Shell, assets};
 use gpui::{
@@ -293,6 +296,9 @@ fn launch(
         KeyBinding::new("cmd-shift-b", ToggleClustersPanel, None),
         KeyBinding::new("cmd-b", ToggleResourcesPanel, None),
         KeyBinding::new("cmd-k", ToggleCommandPalette, None),
+        KeyBinding::new("cmd-l", FollowLogs, None),
+        KeyBinding::new("cmd-shift-d", CompareAcrossClusters, None),
+        KeyBinding::new("cmd-shift-g", ShowFluxOwner, None),
         KeyBinding::new("cmd-q", Quit, None),
     ]);
     cx.bind_keys(fleet_ui::screens::workload::key_bindings());

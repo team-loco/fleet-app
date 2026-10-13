@@ -10,6 +10,7 @@ use gpui::{
 
 use super::Shell;
 use crate::assets::{CHEVRON_LEFT, CHEVRON_RIGHT};
+use crate::kit::VerticalLabel;
 use crate::theme::{
     ActiveTheme, CLUSTERS_PANEL, COLLAPSE, FONT_MONO, GLYPH_SLOT, ICON, ICON_BUTTON, PANEL_HEADER,
     Palette, RADIUS, RESOURCES_PANEL, ROW_CLUSTER, ROW_NAV, RULE, SPACE_1, SPACE_2, SPACE_3,
@@ -82,6 +83,7 @@ impl Shell {
         let all = nav_row("all-clusters", ROW_CLUSTER, fleet_mode, palette)
             .gap(SPACE_4)
             .font_weight(FontWeight::MEDIUM)
+            .when(!fleet_mode, |row| row.text_color(palette.fg2))
             .child(div().w(GLYPH_SLOT).flex_none())
             .child(ALL_CLUSTERS)
             .on_click(cx.listener(|this, _, _, cx| {
@@ -171,7 +173,7 @@ impl Shell {
             let open = menu.read(cx).is_open();
             div()
                 .flex_none()
-                .when(!open && !selected, |slot| {
+                .when(!open, |slot| {
                     slot.invisible().group_hover(group, Styled::visible)
                 })
                 .child(menu)
@@ -366,11 +368,6 @@ fn collapse_button(id: &'static str, palette: &Palette) -> gpui::Stateful<gpui::
 }
 
 fn collapsed_strip(id: &'static str, label: &str, palette: &Palette) -> gpui::Stateful<gpui::Div> {
-    let letters = label
-        .to_uppercase()
-        .chars()
-        .map(|c| div().child(SharedString::from(c.to_string())))
-        .collect::<Vec<_>>();
     div()
         .id(id)
         .w(STRIP)
@@ -388,16 +385,7 @@ fn collapsed_strip(id: &'static str, label: &str, palette: &Palette) -> gpui::St
                 .size(ICON)
                 .text_color(palette.mute),
         )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .text_size(TEXT_LABEL)
-                .font_weight(FontWeight::SEMIBOLD)
-                .line_height(TEXT_LABEL)
-                .children(letters),
-        )
+        .child(VerticalLabel::new(label.to_owned()))
 }
 
 fn animated_panel(

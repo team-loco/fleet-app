@@ -11,8 +11,8 @@ use gpui::{
 };
 
 use crate::kit::{
-    ActionMenu, Button, Column, InputEvent, KeyValue, MenuItem, SectionLabel, Select, SelectEvent,
-    StatusText, Table, TableEvent, TextField, TextFieldState, Toggle,
+    ActionMenu, Button, Column, InputEvent, KeyValue, MenuItem, SectionLabel, StatusText, Table,
+    TableEvent, TextField, TextFieldState, Toggle,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, LINE_PROSE, PAGE_HEADER, Palette, ROW_CATALOG, RULE, SPACE_1, SPACE_2,
@@ -39,6 +39,9 @@ const CONFIRM_DESTRUCTIVE: &str = "Confirm destructive actions";
 const NAMESPACE_PLACEHOLDER: &str = "default";
 const LABELS_PLACEHOLDER: &str = "env=prod team=platform";
 const LABELS_HINT: &str = "Space-separated. Press Return to save.";
+const SYNC_FOLDER: &str = "Sync a folder…";
+const SYNC_FOLDER_DESCRIPTION: &str =
+    "Watch a folder of kubeconfig files and list new contexts here. Not available yet.";
 pub(crate) const DISCONNECT: &str = "Disconnect";
 pub(crate) const DISCONNECT_DESCRIPTION: &str =
     "Stop watching this cluster until you connect again. Nothing changes on the cluster.";
@@ -57,8 +60,9 @@ pub struct SettingsScreen {
     table: Entity<Table<CatalogRow>>,
     namespace: Entity<TextFieldState>,
     labels: Entity<TextFieldState>,
-    metrics: Entity<Select>,
+    metrics: Entity<TextFieldState>,
     menu: Entity<ActionMenu>,
+    page_menu: Entity<ActionMenu>,
     _subscriptions: [Subscription; 4],
 }
 
@@ -76,8 +80,15 @@ impl SettingsScreen {
         let namespace =
             cx.new(|cx| TextFieldState::new(window, cx).placeholder(NAMESPACE_PLACEHOLDER));
         let labels = cx.new(|cx| TextFieldState::new(window, cx).placeholder(LABELS_PLACEHOLDER));
-        let metrics = cx.new(|cx| Select::new("cluster-metrics", Vec::new(), cx).mono());
+        let metrics = cx
+            .new(|cx| TextFieldState::new(window, cx).placeholder(MetricsSource::Auto.label(None)));
         let menu = cx.new(|cx| ActionMenu::new("cluster-actions", cx));
+        let page_menu = cx.new(|cx| {
+            let sync = MenuItem::new(SYNC_FOLDER, |_, _| {})
+                .description(SYNC_FOLDER_DESCRIPTION)
+                .disabled(true);
+            ActionMenu::new("cluster-settings-actions", cx).items(vec![sync])
+        });
         let subscriptions = [
             cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
                 let TableEvent::Selected(ix) = *event else {
@@ -97,7 +108,11 @@ impl SettingsScreen {
                     this.commit(cx);
                 }
             }),
-            cx.subscribe(&metrics, |this, _, _: &SelectEvent, cx| this.commit(cx)),
+            cx.subscribe(&metrics, |this, _, event: &InputEvent, cx| {
+                if commits(event) {
+                    this.commit(cx);
+                }
+            }),
         ];
         Self {
             clusters: Vec::new(),
@@ -109,6 +124,7 @@ impl SettingsScreen {
             labels,
             metrics,
             menu,
+            page_menu,
             _subscriptions: subscriptions,
         }
     }
@@ -194,27 +210,16 @@ impl SettingsScreen {
             .update(cx, |field, cx| field.set_value(namespace, window, cx));
         self.labels
             .update(cx, |field, cx| field.set_value(labels, window, cx));
-        let detected = settings.prometheus.as_deref();
-        let options = MetricsSource::ALL
-            .iter()
-            .map(|s| SharedString::from(s.label(detected)))
-            .collect();
-        let selected = preferences.metrics.index();
-        self.metrics.update(cx, |select, cx| {
-            select.set_options(options, cx);
-            select.set_selected(selected, cx);
-        });
+        let metrics = preferences.metrics.label(settings.prometheus.as_deref());
+        self.metrics
+            .update(cx, |field, cx| field.set_value(metrics, window, cx));
     }
 
     fn edited(&self, cx: &Context<Self>) -> Option<(ClusterId, Preferences)> {
         let settings = self.settings()?;
         let namespace = self.namespace.read(cx).value();
         let labels = self.labels.read(cx).value();
-        let metrics_index = self.metrics.read(cx).selected_index();
-        let metrics = MetricsSource::ALL
-            .get(metrics_index)
-            .copied()
-            .unwrap_or_default();
+        let metrics = MetricsSource::parse(&self.metrics.read(cx).value())?;
         let preferences = Preferences {
             default_namespace: parse_namespace(&namespace),
             metrics,
@@ -229,6 +234,8 @@ impl SettingsScreen {
             return;
         }
         let Some((cluster, preferences)) = self.edited(cx) else {
+            self.loaded = None;
+            cx.notify();
             return;
         };
         let unchanged = self
@@ -265,6 +272,8 @@ impl SettingsScreen {
                     .text_color(palette.mute)
                     .child(self.clusters.len().to_string()),
             )
+            .child(div().flex_1())
+            .child(self.page_menu.clone())
     }
 
     fn inspector(&self, palette: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -378,7 +387,7 @@ impl SettingsScreen {
         section(PREFERENCES, palette)
             .gap(SPACE_6)
             .child(labelled(DEFAULT_NAMESPACE, TextField::new(&self.namespace)))
-            .child(labelled(METRICS_SOURCE, self.metrics.clone()))
+            .child(labelled(METRICS_SOURCE, TextField::new(&self.metrics)))
             .child(toggle)
     }
 }
@@ -500,7 +509,12 @@ fn columns() -> Vec<Column<CatalogRow>> {
         .fixed(DISTRO),
         Column::colored_text(
             "Version",
-            |r: &CatalogRow| r.summary.version.clone().unwrap_or_default().into(),
+            |r: &CatalogRow| {
+                r.summary
+                    .version
+                    .clone()
+                    .map_or_else(|| MISSING.into(), Into::into)
+            },
             |_, palette| palette.fg2,
         )
         .mono()

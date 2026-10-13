@@ -5,8 +5,8 @@ use gpui::{
 use gpui_component::input::{Input, InputState, Textarea};
 
 use crate::theme::{
-    ActiveTheme, CONTROL, CONTROL_SMALL, FONT_MONO, RADIUS, RULE, SEARCH_WIDTH, SPACE_3, SPACE_4,
-    TEXT_MONO, TEXT_SMALL,
+    ActiveTheme, CONTROL, CONTROL_COMPACT, CONTROL_SMALL, FONT_MONO, RADIUS, RULE, SEARCH_WIDTH,
+    SPACE_3, SPACE_4, TEXT_MONO, TEXT_SMALL,
 };
 
 pub use gpui_component::input::{
@@ -14,12 +14,19 @@ pub use gpui_component::input::{
     MoveUp as TextFieldUp, TextareaState as TextAreaState,
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FieldSize {
+    Regular,
+    Compact,
+    Small,
+}
+
 #[derive(IntoElement)]
 pub struct TextField {
     state: Entity<InputState>,
     prefix: Option<SharedString>,
     width: Option<Pixels>,
-    small: bool,
+    size: FieldSize,
     bare: Option<Pixels>,
 }
 
@@ -29,7 +36,7 @@ impl TextField {
             state: state.clone(),
             prefix: None,
             width: None,
-            small: false,
+            size: FieldSize::Regular,
             bare: None,
         }
     }
@@ -56,7 +63,12 @@ impl TextField {
     }
 
     pub fn small(mut self) -> Self {
-        self.small = true;
+        self.size = FieldSize::Small;
+        self
+    }
+
+    pub fn compact(mut self) -> Self {
+        self.size = FieldSize::Compact;
         self
     }
 }
@@ -78,10 +90,10 @@ impl RenderOnce for TextField {
             .read(cx)
             .focus_handle(cx)
             .contains_focused(window, cx);
-        let (height, text, padding) = if self.small {
-            (CONTROL_SMALL, TEXT_SMALL, SPACE_3)
-        } else {
-            (CONTROL, TEXT_MONO, SPACE_4)
+        let (height, text, padding) = match self.size {
+            FieldSize::Regular => (CONTROL, TEXT_MONO, SPACE_4),
+            FieldSize::Compact => (CONTROL_COMPACT, TEXT_SMALL, SPACE_4),
+            FieldSize::Small => (CONTROL_SMALL, TEXT_SMALL, SPACE_3),
         };
         div()
             .flex()

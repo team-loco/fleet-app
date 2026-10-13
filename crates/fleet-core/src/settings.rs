@@ -101,11 +101,19 @@ impl MetricsSource {
         }
     }
 
-    pub fn index(self) -> usize {
-        Self::ALL
-            .iter()
-            .position(|s| *s == self)
+    pub fn parse(text: &str) -> Option<Self> {
+        let name = text
+            .split(SEPARATOR.trim())
+            .next()
             .unwrap_or_default()
+            .trim();
+        if name.is_empty() {
+            return Some(Self::Auto);
+        }
+        Self::ALL.into_iter().find(|source| {
+            let label = source.label(None);
+            label.eq_ignore_ascii_case(name)
+        })
     }
 }
 
@@ -252,6 +260,20 @@ mod tests {
     }
 
     #[test]
+    fn metrics_source_parses_its_own_labels() {
+        let endpoint = Some("monitoring/prometheus-k8s:9090");
+        for source in MetricsSource::ALL {
+            assert_eq!(MetricsSource::parse(&source.label(endpoint)), Some(source));
+        }
+        assert_eq!(
+            MetricsSource::parse(" Metrics-Server "),
+            Some(MetricsSource::MetricsServer)
+        );
+        assert_eq!(MetricsSource::parse(""), Some(MetricsSource::Auto));
+        assert_eq!(MetricsSource::parse("graphite"), None);
+    }
+
+    #[test]
     fn metrics_labels_show_the_detected_endpoint() {
         let endpoint = Some("monitoring/prometheus-k8s:9090");
         assert_eq!(
@@ -263,7 +285,6 @@ mod tests {
             MetricsSource::MetricsServer.label(endpoint),
             "metrics-server"
         );
-        assert_eq!(MetricsSource::Prometheus.index(), 2);
     }
 
     #[test]

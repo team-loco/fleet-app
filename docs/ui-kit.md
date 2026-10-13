@@ -41,6 +41,7 @@ SectionHeader::new("Pods").count("3 · click to follow logs").end(Segmented::new
 SectionHeader::new("Problems").annotation(badges)  // any element right after the label
 SectionLabel::new("Container")            // uppercase 11px mute label alone
 Rule::horizontal()  /  Rule::vertical()   // 1px `line`
+VerticalLabel::new("Clusters")            // uppercase 11px mute label turned 90° (collapsed strips)
 Link::new("rev", "a41e07c").mono().on_click(|_, window, cx| ..)
 Highlighted::new("checkout-api", vec![0..8])  // byte ranges drawn in `acc` (fuzzy match hits)
 Kbd::new("⌘K")
@@ -100,6 +101,7 @@ cx.subscribe(&filter, |this, state, event: &InputEvent, cx| {
 }).detach();
 
 TextField::new(&self.filter).prefix("path:").width(px)    // 24px, mono 12
+TextField::new(&self.path).prefix("path:").compact()       // 22px, mono 11.5 (page header filters)
 TextField::search(&self.filter)                            // 20px x 180px, mono 11.5 (dock filters)
 TextField::bare(&self.query, theme::TEXT_PALETTE)          // no box, mono at the given size (palette)
 ```
@@ -117,7 +119,8 @@ select.read(cx).selected_index()
 select.update(cx, |s, cx| s.set_selected(ix, cx));   // e.g. when the edited object changes
 ```
 
-Own popover (same look and keyboard as the action menu); arrow keys, Enter, Esc.
+Own popover (same look and keyboard as the action menu); arrow keys, Enter, Esc. `.compact()` draws
+the trigger as a plain 22px button without the chevron (page header filters such as `All clusters`).
 `select.update(cx, |s, cx| { s.set_options(options, cx); s.set_selected(ix, cx) })` changes it from code
 (no `Changed` event).
 
@@ -221,6 +224,9 @@ rows are otherwise Sans 12.5), `.sortable(cmp)` / `.sort_by_key(key)`. Table opt
 element across the full width instead of cells (group headers). `set_columns(columns, cx)` swaps
 columns at runtime (e.g. one per cluster).
 Column widths are design values; define them as `const`s at the top of your screen file.
+`table.read(cx).min_width()` is the narrowest row that fits every column (fixed widths, flex minimums,
+gaps and padding); wrap a `fit_content` table in an `overflow_x_scroll` box with that `min_w` so it
+scrolls inside its section instead of overflowing the page.
 
 ## Matrix
 

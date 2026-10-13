@@ -148,6 +148,20 @@ fn cell_frame(width: Width, align: Align) -> Div {
     }
 }
 
+pub fn min_row_width(widths: impl Iterator<Item = Width>, gap: Pixels, padding: Pixels) -> Pixels {
+    let mut total = padding;
+    for (ix, width) in widths.enumerate() {
+        if ix > 0 {
+            total += gap;
+        }
+        total += match width {
+            Width::Fixed(width) => width,
+            Width::Flex { min, .. } => min,
+        };
+    }
+    total
+}
+
 pub fn sort_order<R>(
     rows: &[R],
     compare: &dyn Fn(&R, &R) -> Ordering,
@@ -332,6 +346,11 @@ impl<R: 'static> Table<R> {
         self.sort = Some((column, direction));
         self.resort();
         self
+    }
+
+    pub fn min_width(&self) -> Pixels {
+        let widths = self.columns.iter().map(|c| c.width);
+        min_row_width(widths, self.column_gap, self.inset + SPACE_8)
     }
 
     pub fn row(&self, index: usize) -> Option<&R> {
@@ -677,6 +696,8 @@ impl<R: 'static> Render for Table<R> {
 
 #[cfg(test)]
 mod tests {
+    use gpui::px;
+
     use super::*;
 
     #[test]
@@ -691,6 +712,23 @@ mod tests {
             sort_order(&rows, &by_number, SortDirection::Descending),
             [0, 2, 1, 3]
         );
+    }
+
+    #[test]
+    fn min_width_adds_columns_gaps_and_padding() {
+        let widths = [
+            Width::Flex {
+                weight: 1.3,
+                min: px(140.),
+            },
+            Width::Fixed(px(128.)),
+            Width::Fixed(px(76.)),
+        ];
+        assert_eq!(
+            min_row_width(widths.into_iter(), px(14.), px(32.)),
+            px(140. + 128. + 76. + 2. * 14. + 32.)
+        );
+        assert_eq!(min_row_width(std::iter::empty(), px(14.), px(32.)), px(32.));
     }
 
     #[test]

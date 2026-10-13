@@ -15,7 +15,10 @@ pub mod actions {
         [
             ToggleClustersPanel,
             ToggleResourcesPanel,
-            ToggleCommandPalette
+            ToggleCommandPalette,
+            FollowLogs,
+            CompareAcrossClusters,
+            ShowFluxOwner
         ]
     );
 }

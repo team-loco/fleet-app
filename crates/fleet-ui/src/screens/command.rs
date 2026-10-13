@@ -1,4 +1,4 @@
-use fleet_core::palette::{Hit, Results, Section, search};
+use fleet_core::palette::{COMPARE_KEY, Hit, LOGS_KEY, OWNER_KEY, Results, Section, search};
 use fleet_core::{ClusterId, Command, Snapshot};
 use gpui::{
     AnchoredPositionMode, Animation, AnimationExt, AnyElement, AppContext, Context, ElementId,
@@ -7,6 +7,7 @@ use gpui::{
     anchored, deferred, div, ease_out_quint, point, prelude::FluentBuilder,
 };
 
+use crate::actions::{CompareAcrossClusters, FollowLogs, ShowFluxOwner};
 use crate::kit::{
     Highlighted, InputEvent, SectionLabel, Step, TextField, TextFieldDown, TextFieldEscape,
     TextFieldState, TextFieldUp, shadow, step,
@@ -157,6 +158,18 @@ impl CommandPalette {
     fn run_selected(&mut self, cx: &mut Context<Self>) {
         if let Some(ix) = self.selected {
             self.run(ix, cx);
+        }
+    }
+
+    fn run_shortcut(&mut self, key: &str, cx: &mut Context<Self>) {
+        let hit = self
+            .results
+            .hits
+            .iter()
+            .position(|hit| hit.shortcut == Some(key));
+        match hit {
+            Some(ix) => self.run(ix, cx),
+            None => cx.propagate(),
         }
     }
 
@@ -420,6 +433,15 @@ impl Render for CommandPalette {
             }))
             .on_action(cx.listener(|this, _: &TextFieldEscape, window, cx| {
                 this.close(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FollowLogs, _, cx| {
+                this.run_shortcut(LOGS_KEY, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CompareAcrossClusters, _, cx| {
+                this.run_shortcut(COMPARE_KEY, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ShowFluxOwner, _, cx| {
+                this.run_shortcut(OWNER_KEY, cx);
             }))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(self.render_query(&palette))
