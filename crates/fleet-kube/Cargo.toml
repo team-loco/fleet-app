@@ -13,6 +13,7 @@ loco = ["fleet-core/loco"]
 [dependencies]
 async-channel.workspace = true
 fleet-core.workspace = true
+fleet-flux.workspace = true
 futures.workspace = true
 http.workspace = true
 jiff.workspace = true

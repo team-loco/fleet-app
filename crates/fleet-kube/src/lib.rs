@@ -5,6 +5,7 @@ pub mod client;
 pub mod discovery;
 pub mod error;
 pub mod failure;
+pub mod gitops;
 pub mod live;
 pub mod manager;
 pub mod metrics;

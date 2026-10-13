@@ -1762,6 +1762,7 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "fleet-core",
+ "fleet-flux",
  "futures",
  "http",
  "jiff",
