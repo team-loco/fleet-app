@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: stripe
+  namespace: payments
+type: Opaque
+stringData:
+  webhook-secret: fleet-e2e-placeholder
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stripe-webhook
+  namespace: payments
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stripe-webhook
+  template:
+    metadata:
+      labels:
+        app: stripe-webhook
+    spec:
+      containers:
+        - name: webhook
+          image: ghcr.io/stefanprodan/podinfo:latest
+          env:
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: stripe
+                  key: webhook_secret
+                  optional: false
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: unschedulable
+  namespace: apps
+spec:
+  nodeSelector:
+    fleet.dev/scenario: nonexistent-node
+  containers:
+    - name: podinfo
+      image: ghcr.io/stefanprodan/podinfo:latest

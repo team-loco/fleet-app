@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CLUSTERS=(fleet-a fleet-b)
+WAIT_TIMEOUT=300s
+
+for cluster in "${CLUSTERS[@]}"; do
+  context="kind-${cluster}"
+  kubectl=(mise exec -- kubectl --context "${context}")
+  "${kubectl[@]}" -n kube-system rollout status deployment/metrics-server --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" wait apiservice/v1beta1.metrics.k8s.io --for=condition=Available --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n flux-system wait helmrepository/podinfo gitrepository/podinfo --for=condition=Ready --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n apps wait helmrelease/podinfo --for=condition=Ready --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n apps rollout status deployment/podinfo --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n flux-system wait helmchart --all --for=condition=Ready --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n flux-system wait kustomization/apps --for=condition=Ready --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n web rollout status deployment/podinfo --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n flux-system wait kustomization/broken-kustomization --for=jsonpath='{.status.conditions[?(@.type=="Ready")].reason}'=ArtifactFailed --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n search wait helmrelease/search-indexer --for=jsonpath='{.spec.suspend}'=true --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n payments wait pod -l app=stripe-webhook --for=jsonpath='{.status.containerStatuses[0].state.waiting.reason}'=CreateContainerConfigError --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n apps wait pod/unschedulable --for=jsonpath='{.status.phase}'=Pending --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n apps wait pod/unschedulable --for=jsonpath='{.status.conditions[?(@.type=="PodScheduled")].reason}'=Unschedulable --timeout="${WAIT_TIMEOUT}"
+  scheduling_events="$("${kubectl[@]}" -n apps get events --field-selector involvedObject.name=unschedulable,reason=FailedScheduling -o name)"
+  test -n "${scheduling_events}"
+  if [[ "${cluster}" == fleet-a ]]; then
+    "${kubectl[@]}" -n payments wait helmrelease/checkout-api --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=False --timeout="${WAIT_TIMEOUT}"
+    "${kubectl[@]}" -n payments wait pod -l app.kubernetes.io/name=checkout-api --for=jsonpath='{.status.containerStatuses[0].state.waiting.reason}'=CrashLoopBackOff --timeout="${WAIT_TIMEOUT}"
+  else
+    "${kubectl[@]}" -n payments wait helmrelease/checkout-api --for=condition=Ready --timeout="${WAIT_TIMEOUT}"
+    "${kubectl[@]}" -n payments rollout status deployment/checkout-api --timeout="${WAIT_TIMEOUT}"
+  fi
+  printf '%s: all scenario assertions passed\n' "${context}"
+done

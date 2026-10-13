@@ -1,0 +1,60 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: podinfo
+  namespace: apps
+spec:
+  interval: 1m
+  timeout: 1m
+  releaseName: podinfo
+  chart:
+    spec:
+      chart: podinfo
+      sourceRef:
+        kind: HelmRepository
+        name: podinfo
+        namespace: flux-system
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: checkout-api
+  namespace: payments
+spec:
+  interval: 1m
+  timeout: 1m
+  releaseName: checkout-api
+  install:
+    strategy:
+      name: RetryOnFailure
+      retryInterval: 1m
+  upgrade:
+    strategy:
+      name: RetryOnFailure
+      retryInterval: 1m
+  chart:
+    spec:
+      chart: podinfo
+      sourceRef:
+        kind: HelmRepository
+        name: podinfo
+        namespace: flux-system
+  values:
+    fullnameOverride: checkout-api
+    extraArgs: []
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: search-indexer
+  namespace: search
+spec:
+  suspend: true
+  interval: 1m
+  chart:
+    spec:
+      chart: podinfo
+      sourceRef:
+        kind: HelmRepository
+        name: podinfo
+        namespace: flux-system

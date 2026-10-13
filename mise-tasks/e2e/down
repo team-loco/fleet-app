@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Delete Fleet's two local kind scenario clusters"
+set -euo pipefail
+
+CLUSTERS=(fleet-a fleet-b)
+
+for cluster in "${CLUSTERS[@]}"; do
+  mise exec -- kind delete cluster --name "${cluster}"
+done
