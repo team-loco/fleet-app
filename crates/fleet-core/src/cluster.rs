@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::events::{self, Event, recent_warnings};
+use crate::filter::TextFilter;
 use crate::nodes::{Node, NodeSummary};
 use crate::overview::{Capacity, Overview, WorkloadHealth, join_clauses, named, plural, verb};
 use crate::resources::{Resource, ResourceKind};
@@ -26,6 +27,10 @@ pub struct Namespace {
 }
 
 impl Namespace {
+    pub fn matches(&self, query: &TextFilter) -> bool {
+        query.matches(Some(&self.name), &[self.name.as_str(), self.phase.as_str()])
+    }
+
     pub fn phase_note(&self) -> Option<&str> {
         (!self.phase.is_empty() && self.phase != ACTIVE_PHASE).then_some(self.phase.as_str())
     }
@@ -222,6 +227,14 @@ mod tests {
             detail(pods, nodes).sentence(),
             "1 pod is failing and 1 node is not ready."
         );
+    }
+
+    #[test]
+    fn namespace_filter_matches_its_name() {
+        let ns = namespace("payments", Counts::default());
+        assert!(ns.matches(&TextFilter::parse("pay")));
+        assert!(ns.matches(&TextFilter::parse("ns:pay")));
+        assert!(!ns.matches(&TextFilter::parse("orders")));
     }
 
     fn namespace(name: &str, problems: Counts) -> Namespace {

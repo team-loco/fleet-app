@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use super::{Workspace, short_digest};
+use crate::filter::TextFilter;
 use crate::{ResourceRef, Status};
 
 const MISSING: &str = "—";
@@ -88,6 +89,16 @@ pub struct Build {
 }
 
 impl Build {
+    pub fn matches(&self, query: &TextFilter) -> bool {
+        let fields = [
+            self.id.as_str(),
+            self.service.as_str(),
+            self.workspace.label(),
+            self.workspace.namespace.as_str(),
+        ];
+        query.matches(Some(&self.workspace.namespace), &fields)
+    }
+
     pub fn took_label(&self) -> String {
         self.took
             .map_or_else(|| MISSING.to_owned(), minutes_seconds)
@@ -193,6 +204,14 @@ mod tests {
             buildkit: Status::Ok,
             log: Vec::new(),
         }
+    }
+
+    #[test]
+    fn builds_match_service_and_workspace() {
+        let web = build(BuildPhase::Failed, None, None);
+        assert!(web.matches(&TextFilter::parse("WEB")));
+        assert!(web.matches(&TextFilter::parse("ns:ws-1")));
+        assert!(!web.matches(&TextFilter::parse("api")));
     }
 
     #[test]

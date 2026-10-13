@@ -661,7 +661,10 @@ mod tests {
         );
         assert_eq!((routes.total, routes.problems()), (44, 2));
         let problems: Vec<String> = routes
-            .ranked(fleet_core::loco::RouteFilter::Problems)
+            .ranked(
+                fleet_core::loco::RouteFilter::Problems,
+                &fleet_core::filter::TextFilter::default(),
+            )
             .iter()
             .map(|r| format!("{} {} {}", r.host_label(), r.ready_label(), r.detail))
             .collect();

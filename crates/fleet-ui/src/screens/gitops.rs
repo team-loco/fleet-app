@@ -1,14 +1,18 @@
+use fleet_core::filter::TextFilter;
 use fleet_core::gitops::{
-    FluxInstall, Source, SyncCell, SyncFilter, SyncRow, VisibleGroup, visible_groups,
+    FluxInstall, Source, SyncCell, SyncFilter, SyncRow, VisibleGroup, filter_counts, visible_groups,
 };
 use fleet_core::{ClusterId, Command, GitOps, Snapshot, Status};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, Hsla, IntoElement,
-    ParentElement, Pixels, Render, SharedString, Styled, Window, div, px,
+    AnyElement, AppContext as _, Context, Entity, EventEmitter, Hsla, IntoElement, ParentElement,
+    Pixels, Render, SharedString, Styled, Window, div, px,
 };
 
 use crate::kit::status_symbols;
-use crate::kit::{Column, Matrix, MatrixCell, SectionHeader, Segmented, Table};
+use crate::kit::{
+    Column, FilterBar, FilterEvent, Highlighted, Matrix, MatrixCell, SectionHeader, Table,
+    chip_label,
+};
 use crate::theme::{
     ActiveTheme, FONT_MONO, Palette, RULE, SPACE_2, SPACE_3, SPACE_6, SPACE_8, TEXT_BODY,
     TEXT_CONTROL, TEXT_GLYPH, TEXT_MONO, TEXT_SMALL,
@@ -45,7 +49,7 @@ const LEGEND_BEHIND: &str = "dim rev = behind HEAD";
 pub struct GitOpsScreen {
     gitops: GitOps,
     columns: Vec<SharedString>,
-    filter: SyncFilter,
+    filter: Entity<FilterBar>,
     sources: Entity<Table<Source>>,
     installs: Entity<Table<FluxInstall>>,
 }
@@ -53,7 +57,7 @@ pub struct GitOpsScreen {
 impl EventEmitter<Command> for GitOpsScreen {}
 
 impl GitOpsScreen {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let sources = cx.new(|cx| {
             Table::new("gitops-sources", source_columns(), cx)
                 .headerless()
@@ -64,10 +68,15 @@ impl GitOpsScreen {
                 .headerless()
                 .fit_content()
         });
+        let filter = cx.new(|cx| FilterBar::new("gitops-filter", window, cx));
+        cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
+            this.refresh(cx);
+        })
+        .detach();
         Self {
             gitops: GitOps::default(),
             columns: Vec::new(),
-            filter: SyncFilter::All,
+            filter,
             sources,
             installs,
         }
@@ -81,45 +90,60 @@ impl GitOpsScreen {
             .iter()
             .map(|id| cluster_name(snapshot, id))
             .collect();
-        let sources = self.gitops.sources.clone();
-        self.sources
-            .update(cx, |table, cx| table.set_rows(sources, cx));
         let installs = self.gitops.installs.clone();
         self.installs
             .update(cx, |table, cx| table.set_rows(installs, cx));
-        cx.notify();
+        self.refresh(cx);
     }
 
-    pub fn set_filter(&mut self, filter: SyncFilter, cx: &mut Context<Self>) {
-        self.filter = filter;
-        cx.notify();
+    pub fn filter_bar(&self) -> &Entity<FilterBar> {
+        &self.filter
     }
 
-    pub fn filter_control(screen: &Entity<Self>, cx: &App) -> impl IntoElement {
-        let current = screen.read(cx).filter;
-        let selected = SyncFilter::ALL
+    fn sync_filter(&self, cx: &Context<Self>) -> SyncFilter {
+        let chip = self.filter.read(cx).chip();
+        SyncFilter::ALL.get(chip).copied().unwrap_or_default()
+    }
+
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        let query = self.filter.read(cx).query().clone();
+        let counts = filter_counts(&self.gitops.groups, &query);
+        let chips = counts
+            .into_iter()
+            .map(|(filter, n)| chip_label(filter.label(), n))
+            .collect();
+        let filter = self.sync_filter(cx);
+        let shown: usize = visible_groups(&self.gitops.groups, filter, &query)
             .iter()
-            .position(|f| *f == current)
-            .unwrap_or_default();
-        let screen = screen.clone();
-        SyncFilter::ALL
+            .map(|group| group.rows.len())
+            .sum();
+        let everything: usize = self.gitops.groups.iter().map(|g| g.rows.len()).sum();
+        self.filter.update(cx, |bar, cx| {
+            bar.set_chips(chips, cx);
+            bar.set_matches(shown, everything, cx);
+        });
+        let sources: Vec<Source> = self
+            .gitops
+            .sources
             .iter()
-            .fold(Segmented::new("gitops-filter"), |seg, f| {
-                seg.option(f.label())
-            })
-            .selected(selected)
-            .on_select(move |ix, _, cx| {
-                let filter = SyncFilter::ALL.get(*ix).copied().unwrap_or_default();
-                screen.update(cx, |screen, cx| screen.set_filter(filter, cx));
-            })
+            .filter(|source| source.matches(&query))
+            .cloned()
+            .collect();
+        let words = query.words;
+        self.sources.update(cx, |table, cx| {
+            table.set_highlight(words, cx);
+            table.set_rows(sources, cx);
+        });
+        cx.notify();
     }
 
     fn matrix(&self, palette: &Palette, cx: &mut Context<Self>) -> Matrix {
-        let groups = visible_groups(&self.gitops.groups, self.filter);
+        let query = self.filter.read(cx).query().clone();
+        let groups = visible_groups(&self.gitops.groups, self.sync_filter(cx), &query);
         groups.iter().fold(
             Matrix::new("gitops-sync", "Object", self.columns.clone())
                 .min_widths(OBJECT_MIN, CLUSTER_MIN),
-            |matrix, group| self.group(matrix, group, palette, cx),
+            |matrix, group| self.group(matrix, group, &query, palette, cx),
         )
     }
 
@@ -127,13 +151,14 @@ impl GitOpsScreen {
         &self,
         matrix: Matrix,
         group: &VisibleGroup<'_>,
+        query: &TextFilter,
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> Matrix {
         let matrix = matrix.group(group.kind.plural(), group.count_label());
         group.rows.iter().fold(matrix, |matrix, row| {
             let cells = self.cells(row, palette, cx);
-            matrix.row(object_label(row, palette), cells)
+            matrix.row(object_label(row, query, palette), cells)
         })
     }
 
@@ -165,6 +190,7 @@ impl Render for GitOpsScreen {
             .flex()
             .flex_col()
             .pb(SPACE_8)
+            .child(self.filter.clone())
             .child(SectionHeader::new("Sources").count(SOURCES_NOTE))
             .child(ruled(self.sources.clone(), &palette))
             .child(
@@ -283,7 +309,8 @@ fn cell_content(cell: &SyncCell, palette: &Palette) -> AnyElement {
         .into_any_element()
 }
 
-fn object_label(row: &SyncRow, palette: &Palette) -> AnyElement {
+fn object_label(row: &SyncRow, query: &TextFilter, palette: &Palette) -> AnyElement {
+    let name = Highlighted::new(row.name.clone(), query.highlights(&row.name));
     div()
         .flex()
         .flex_col()
@@ -293,7 +320,7 @@ fn object_label(row: &SyncRow, palette: &Palette) -> AnyElement {
                 .font_family(FONT_MONO)
                 .text_size(TEXT_BODY)
                 .truncate()
-                .child(row.name.clone()),
+                .child(name),
         )
         .child(
             div()
@@ -325,6 +352,7 @@ fn source_columns() -> Vec<Column<Source>> {
         Column::text("Name", |s: &Source| {
             format!("{}/{}", s.namespace, s.name).into()
         })
+        .highlight()
         .mono()
         .fixed(SOURCE_NAME),
         Column::new("URL", |s: &Source, palette| {

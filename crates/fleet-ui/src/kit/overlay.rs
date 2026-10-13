@@ -358,6 +358,7 @@ impl Overlays {
                 let toast = &shown.toast;
                 let card = div()
                     .id(ElementId::NamedInteger("toast".into(), id))
+                    .occlude()
                     .w(TOAST_WIDTH)
                     .flex()
                     .gap(SPACE_4)

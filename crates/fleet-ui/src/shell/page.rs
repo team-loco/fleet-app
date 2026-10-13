@@ -9,7 +9,6 @@ use fleet_core::AddClusterStep;
 use super::Shell;
 use crate::kit::status_symbols;
 use crate::screens::add_cluster::empty_fleet;
-use crate::screens::gitops::GitOpsScreen;
 use crate::screens::workload::WorkloadScreen;
 use crate::theme::{
     ActiveTheme, FONT_MONO, ICON_BUTTON, PAGE_HEADER, Palette, RADIUS, RULE, SPACE_2, SPACE_4,
@@ -140,8 +139,6 @@ impl Shell {
         let controls = self
             .selected_cluster()
             .and_then(|_| self.pages.header_controls(self.state.page, cx));
-        let filter = (self.state.page == Page::GitOps)
-            .then(|| GitOpsScreen::filter_control(&self.gitops, cx));
         div()
             .flex()
             .items_center()
@@ -160,7 +157,6 @@ impl Shell {
             )
             .children(status)
             .child(div().flex_1())
-            .children(filter)
             .children(controls)
             .children(more)
     }

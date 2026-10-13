@@ -72,6 +72,11 @@ fn main() -> anyhow::Result<()> {
         .as_ref()
         .map(|store| store.settings().refresh)
         .unwrap_or_default();
+    let prefs_dir = if args.demo {
+        None
+    } else {
+        dir.as_ref().ok().cloned()
+    };
     let backend: Box<dyn Backend> = if args.demo {
         Box::new(DemoBackend)
     } else {
@@ -99,6 +104,7 @@ fn main() -> anyhow::Result<()> {
     gpui_platform::application()
         .with_assets(assets::Assets)
         .run(move |cx: &mut App| {
+            fleet_ui::prefs::init(prefs_dir.as_deref(), cx);
             let launched = launch(cx, forced, settings, update_rx, command_tx, screen, &preset);
             if let Err(error) = launched {
                 failed.replace(Some(error));

@@ -7,8 +7,8 @@ use gpui::{
 
 use crate::kit::status_symbols;
 use crate::kit::{
-    Button, Column, ConfirmDialog, Level, LogLine, LogView, PageTitle, StatusGlyph, Table,
-    TableEvent, confirm,
+    Button, Column, ConfirmDialog, FilterBar, FilterEvent, Level, LogLine, LogView, PageTitle,
+    StatusGlyph, Table, TableEvent, confirm,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, Palette, ROW_TABLE_MAX, ROW_TABLE_MIN, RULE, SPACE_3, SPACE_5, SPACE_7,
@@ -26,7 +26,7 @@ const LIST_MAX_HEIGHT: Pixels = px(300.);
 
 const TITLE: &str = "Builds";
 const CANCEL: &str = "Cancel build";
-const NO_BUILDS: &str = "No builds in the last day.";
+const NO_BUILDS: &str = "No builds match.";
 
 pub struct BuildsScreen {
     builds: Builds,
@@ -34,13 +34,15 @@ pub struct BuildsScreen {
     shown_log: Vec<BuildLogLine>,
     table: Entity<Table<Build>>,
     log: Entity<LogView>,
-    _subscription: Subscription,
+    filter: Entity<FilterBar>,
+    _subscriptions: [Subscription; 2],
 }
 
 impl EventEmitter<Command> for BuildsScreen {}
 
 impl BuildsScreen {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let filter = cx.new(|cx| FilterBar::new("loco-build-filter", window, cx));
         let table = cx.new(|cx| {
             Table::new("loco-builds", build_columns(), cx)
                 .row_height(ROW_TABLE_MAX)
@@ -55,27 +57,54 @@ impl BuildsScreen {
             let picked = table.read(cx).row(ix).map(|build| build.resource.clone());
             this.select(picked, cx);
         });
+        let filtered = cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
+            this.refresh(cx);
+        });
         Self {
             builds: Builds::default(),
             selected: None,
             shown_log: Vec::new(),
             table,
             log,
-            _subscription: subscription,
+            filter,
+            _subscriptions: [subscription, filtered],
         }
+    }
+
+    pub fn filter_bar(&self) -> &Entity<FilterBar> {
+        &self.filter
     }
 
     pub fn set_builds(&mut self, builds: Builds, cx: &mut Context<Self>) {
         self.builds = builds;
-        let rows = self.builds.builds.clone();
-        self.table.update(cx, |table, cx| table.set_rows(rows, cx));
+        self.refresh(cx);
+    }
+
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        let query = self.filter.read(cx).query().clone();
+        let rows: Vec<Build> = self
+            .builds
+            .builds
+            .iter()
+            .filter(|build| build.matches(&query))
+            .cloned()
+            .collect();
+        let shown = rows.len();
+        let total = self.builds.builds.len();
+        self.filter
+            .update(cx, |bar, cx| bar.set_matches(shown, total, cx));
+        let words = query.words;
+        self.table.update(cx, |table, cx| {
+            table.set_highlight(words, cx);
+            table.set_rows(rows, cx);
+        });
         let still_there = self.current().is_some();
         let selected = if still_there {
             self.selected.clone()
         } else {
-            self.builds
-                .builds
-                .first()
+            self.table
+                .read(cx)
+                .row(0)
                 .map(|build| build.resource.clone())
         };
         self.select(selected, cx);
@@ -83,7 +112,12 @@ impl BuildsScreen {
 
     fn select(&mut self, selected: Option<ResourceRef>, cx: &mut Context<Self>) {
         self.selected = selected;
-        let row = self.current_index();
+        let row = self.selected.as_ref().and_then(|selected| {
+            let table = self.table.read(cx);
+            (0..)
+                .map_while(|ix| table.row(ix))
+                .position(|build| &build.resource == selected)
+        });
         self.table.update(cx, |table, cx| table.select(row, cx));
         let lines = self
             .current()
@@ -194,6 +228,7 @@ impl Render for BuildsScreen {
             .flex_col()
             .size_full()
             .child(PageTitle::new(TITLE).detail(self.builds.subtitle()))
+            .child(self.filter.clone())
             .child(
                 div()
                     .flex_none()
@@ -244,9 +279,12 @@ fn build_columns() -> Vec<Column<Build>> {
             StatusGlyph::new(build.phase.status()).into_any_element()
         })
         .fixed(GLYPH),
-        Column::new("Build", |build: &Build, palette| {
-            text(build.id.clone(), palette.fg2)
-        })
+        Column::colored_text(
+            "Build",
+            |build: &Build| build.id.clone().into(),
+            |_, p| p.fg2,
+        )
+        .highlight()
         .mono()
         .fixed(BUILD_ID),
         Column::new("Service", |build: &Build, _| {

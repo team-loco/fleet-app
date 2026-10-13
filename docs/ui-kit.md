@@ -129,10 +129,36 @@ select.read(cx).selected_index()
 select.update(cx, |s, cx| s.set_selected(ix, cx));   // e.g. when the edited object changes
 ```
 
-Own popover (same look and keyboard as the action menu); arrow keys, Enter, Esc. `.compact()` draws
+Own popover (same look and keyboard as the action menu); arrow keys, Enter, Esc. Every kit popover
+surface (`popover::surface`) occludes what is under it, so hover and clicks never reach rows beneath an
+open menu, select or switcher. Options carry `{select}-option-{ix}` debug selectors. `.compact()` draws
 the trigger as a plain 22px button without the chevron (page header filters such as `All clusters`).
 `select.update(cx, |s, cx| { s.set_options(options, cx); s.set_selected(ix, cx) })` changes it from code
 (no `Changed` event).
+
+### FilterBar
+
+The one filter row every list page uses, always the first row above the list and always in this
+order: an optional scope picker (namespace, or cluster on Changes), the text filter, status chips
+with counts, Clear, and `n of m` on the right while the list is narrowed. `/` focuses the current
+page's bar (the shell routes it; ignored while typing in a field or terminal), Esc in the field
+clears it. The text is parsed into `fleet_core::filter::TextFilter`: plain words must all match,
+`ns:<part>` matches the namespace, `l:key=value` / `label:key` match labels, as in the palette.
+
+```rust
+let filter = cx.new(|cx| FilterBar::new("pod-filter", window, cx).scope(namespace_select.clone()));
+cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| this.refresh(cx)).detach();
+// in refresh: read the query and chip, filter rows in fleet-core, then report back
+let (query, chip) = { let bar = filter.read(cx); (bar.query().clone(), bar.chip()) };
+filter.update(cx, |bar, cx| {
+    bar.set_chips(counts.map(|(f, n)| chip_label(f.label(), n)).collect(), cx);
+    bar.set_matches(shown, total, cx);
+});
+table.update(cx, |t, cx| t.set_highlight(query.words.clone(), cx));
+```
+
+Screens expose `filter_bar()` so the shell can focus it. `StatusFilter` (All / Needs attention)
+covers lists whose only chip is "has a problem".
 
 ## ActionMenu (⋯ / Actions)
 
@@ -158,6 +184,8 @@ menu.update(cx, |m, cx| m.set_items(items, cx));
 ```
 
 `ActionMenu::new(id, cx).plain()` draws the ⋯ trigger without a border (for rows in the side panels).
+`ActionMenu::context(id, cx)` has no trigger: `menu.show_at(position, items, window, cx)` opens it at a
+window point (the Table uses it for row menus).
 
 ## Modal
 
@@ -225,7 +253,20 @@ pods.update(cx, |t, cx| t.set_rows(new_rows, cx));
 ```
 
 Column options: `.fixed(px)`, `.flex(weight, min)`, `.end()`, `.center()`, `.mono()` (Plex Mono 12;
-rows are otherwise Sans 12.5), `.sortable(cmp)` / `.sort_by_key(key)`. Table options:
+rows are otherwise Sans 12.5), `.sortable(cmp)` / `.sort_by_key(key)`, `.highlight()` (text columns
+draw the filter's matches in `acc`, see `set_highlight`), `.fit_by(text, extra)` (what a custom cell
+measures to when its border is double-clicked). `Column::status_text(title, status, text)` is a glyph
+plus text cell.
+
+Every header border is a resize handle (col-resize cursor, `{table}-resize-{ix}`): drag to resize down
+to `theme::COLUMN_MIN` (or the flex minimum), double-click to fit the column to its widest text (custom
+cells without `fit_by` go back to their design width). Widths are stored per scope and table id in
+`fleet_ui::prefs` (`view.json` in the Fleet data dir, memory only in demo and tests); call
+`table.set_scope(cluster.as_str(), cx)` on cluster pages, fleet pages use `prefs::FLEET_SCOPE`.
+
+Row actions: `.row_actions(|row| Vec<MenuItem>)` / `set_row_actions(..)` adds a ⋯ button on the hovered
+row (`{table}-row-{ix}-more`) and a right-click menu (`{table}-row-menu-item-{ix}`), both with that
+row's items. `hovered_row()` reads the hovered row. Table options:
 `.row_height(px)` (default `ROW_TABLE` 26), `.headerless()`, `.sorted_by(col, dir)`,
 `.column_gap(px)` (default `SPACE_6`), `.inset(px)` (leading row and header padding, default `SPACE_8`),
 `.mono_header()` (Plex Mono 10.5 header titles, e.g. short cluster lanes),

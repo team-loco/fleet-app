@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use crate::Status;
+use crate::filter::TextFilter;
 use crate::overview::{join_clauses, named, plural, verb};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -50,6 +51,19 @@ pub struct Node {
 }
 
 impl Node {
+    pub fn matches(&self, query: &TextFilter) -> bool {
+        let mut fields = vec![
+            self.name.as_str(),
+            self.state.as_str(),
+            self.instance_type.as_str(),
+            self.zone.as_str(),
+            self.version.as_str(),
+            self.internal_ip.as_str(),
+        ];
+        fields.extend(self.labels.iter().map(String::as_str));
+        query.matches(None, &fields)
+    }
+
     pub fn is_ready(&self) -> bool {
         self.conditions
             .iter()
@@ -216,6 +230,15 @@ pub(crate) mod tests {
             taints: Vec::new(),
             labels: Vec::new(),
         }
+    }
+
+    #[test]
+    fn node_filter_matches_name_instance_and_zone() {
+        let n = node("ip-10-4-31-12", "m6i.xlarge", true, true);
+        assert!(n.matches(&TextFilter::parse("31-12")));
+        assert!(n.matches(&TextFilter::parse("M6I")));
+        assert!(!n.matches(&TextFilter::parse("c7g")));
+        assert!(!n.matches(&TextFilter::parse("ns:default")));
     }
 
     #[test]

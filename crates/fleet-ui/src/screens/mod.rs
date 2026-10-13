@@ -18,6 +18,8 @@ pub mod workload;
 use fleet_core::{ClusterDetail, ClusterSummary, Command, Counts, Page, ResourceKind, ResourceRef};
 use gpui::{AnyElement, App, AppContext, Context, Entity, IntoElement, Subscription, Window};
 
+use crate::kit::FilterBar;
+
 pub use events::EventsScreen;
 pub use namespaces::NamespacesScreen;
 pub use nodes::NodesScreen;
@@ -49,7 +51,7 @@ impl ClusterPages {
     ) -> Self {
         let overview = cx.new(OverviewScreen::new);
         let nodes = cx.new(|cx| NodesScreen::new(window, cx));
-        let namespaces = cx.new(NamespacesScreen::new);
+        let namespaces = cx.new(|cx| NamespacesScreen::new(window, cx));
         let events = cx.new(|cx| EventsScreen::new(window, cx));
         let resources = cx.new(|cx| ResourcesScreen::new(window, cx));
         let subscriptions = vec![
@@ -89,8 +91,10 @@ impl ClusterPages {
             }),
             Page::Namespaces => self
                 .namespaces
-                .update(cx, |screen, cx| screen.set(detail, cx)),
-            Page::Events => self.events.update(cx, |screen, cx| screen.set(detail, cx)),
+                .update(cx, |screen, cx| screen.set(&cluster.id, detail, cx)),
+            Page::Events => self
+                .events
+                .update(cx, |screen, cx| screen.set(&cluster.id, detail, cx)),
             other => {
                 if let Some(kind) = ResourceKind::for_page(other) {
                     self.resources.update(cx, |screen, cx| {
@@ -134,6 +138,19 @@ impl ClusterPages {
             }
         };
         Some(element)
+    }
+
+    pub fn filter_bar(&self, page: Page, cx: &App) -> Option<Entity<FilterBar>> {
+        let bar = match page {
+            Page::Nodes => self.nodes.read(cx).filter_bar(),
+            Page::Namespaces => self.namespaces.read(cx).filter_bar(),
+            Page::Events => self.events.read(cx).filter_bar(),
+            other => {
+                ResourceKind::for_page(other)?;
+                self.resources.read(cx).filter_bar()
+            }
+        };
+        Some(bar.clone())
     }
 
     pub fn header_controls(&self, page: Page, cx: &App) -> Option<AnyElement> {

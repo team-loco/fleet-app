@@ -243,6 +243,7 @@ fn installs() -> Vec<FluxInstall> {
 
 #[cfg(test)]
 mod tests {
+    use fleet_core::filter::TextFilter;
     use fleet_core::gitops::{SyncFilter, visible_groups};
 
     use super::*;
@@ -260,7 +261,11 @@ mod tests {
     #[test]
     fn out_of_sync_matches_the_design() {
         let gitops = gitops();
-        let visible = visible_groups(&gitops.groups, SyncFilter::OutOfSync);
+        let visible = visible_groups(
+            &gitops.groups,
+            SyncFilter::OutOfSync,
+            &TextFilter::default(),
+        );
         let names: Vec<Vec<&str>> = visible
             .iter()
             .map(|g| g.rows.iter().map(|r| r.name.as_str()).collect())

@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::filter::{StatusFilter, TextFilter};
 use crate::overview::{named, plural, verb};
 use crate::{Page, Status};
 
@@ -117,21 +118,26 @@ pub struct Resource {
 }
 
 impl Resource {
-    pub fn matches(&self, namespace: Option<&str>, query: &str) -> bool {
+    pub fn matches(&self, namespace: Option<&str>, query: &TextFilter) -> bool {
         let in_namespace = namespace.is_none_or(|ns| ns == self.namespace);
-        let query = query.trim().to_lowercase();
-        let text_match = query.is_empty()
-            || self.name.to_lowercase().contains(&query)
-            || self.namespace.to_lowercase().contains(&query);
-        in_namespace && text_match
+        let fields = [self.name.as_str(), self.namespace.as_str()];
+        in_namespace && query.matches(Some(&self.namespace), &fields)
     }
 }
 
-pub fn filter_resources(rows: &[Resource], namespace: Option<&str>, query: &str) -> Vec<Resource> {
+pub fn filter_resources(
+    rows: &[Resource],
+    namespace: Option<&str>,
+    query: &TextFilter,
+) -> Vec<Resource> {
     rows.iter()
         .filter(|row| row.matches(namespace, query))
         .cloned()
         .collect()
+}
+
+pub fn filter_counts(rows: &[Resource]) -> Vec<(StatusFilter, usize)> {
+    StatusFilter::counts(rows.iter().map(|row| row.status))
 }
 
 pub fn sentence(kind: ResourceKind, rows: &[Resource]) -> String {
@@ -202,21 +208,35 @@ pub(crate) mod tests {
         ];
         let names = |found: Vec<Resource>| found.into_iter().map(|r| r.name).collect::<Vec<_>>();
         assert_eq!(
-            names(filter_resources(&rows, Some("payments"), "")),
+            names(filter_resources(
+                &rows,
+                Some("payments"),
+                &TextFilter::default()
+            )),
             ["checkout-api", "payments-worker"]
         );
         assert_eq!(
-            names(filter_resources(&rows, None, " WEB ")),
+            names(filter_resources(&rows, None, &TextFilter::parse(" WEB "))),
             ["web-frontend"]
         );
         assert_eq!(
-            names(filter_resources(&rows, None, "pay")),
+            names(filter_resources(&rows, None, &TextFilter::parse("pay"))),
             ["checkout-api", "payments-worker"]
         );
         assert_eq!(
-            names(filter_resources(&rows, Some("web"), "checkout")),
+            names(filter_resources(
+                &rows,
+                Some("web"),
+                &TextFilter::parse("checkout")
+            )),
             [""; 0]
         );
+        assert_eq!(
+            names(filter_resources(&rows, None, &TextFilter::parse("ns:web"))),
+            ["web-frontend"]
+        );
+        let counts: Vec<usize> = filter_counts(&rows).into_iter().map(|(_, n)| n).collect();
+        assert_eq!(counts, [3, 1]);
     }
 
     fn with_cells(mut row: Resource, cells: &[&str]) -> Resource {

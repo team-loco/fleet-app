@@ -13,6 +13,7 @@ use crate::theme::{
     TERMINAL_CURSOR_WIDTH, TEXT_MONO,
 };
 
+pub const TERMINAL_CONTEXT: &str = "Terminal";
 const ESC: char = '\u{1b}';
 const BACKSPACE: char = '\u{8}';
 const BELL: char = '\u{7}';
@@ -346,6 +347,7 @@ impl Render for Terminal {
         .min_h_0();
         div()
             .id(ElementId::NamedInteger(self.id.clone(), 0))
+            .key_context(TERMINAL_CONTEXT)
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
             .on_click(cx.listener(|this, _, window, cx| window.focus(&this.focus, cx)))

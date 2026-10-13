@@ -8,7 +8,10 @@ use gpui::{
 
 use super::LocoEvent;
 use crate::kit::status_symbols;
-use crate::kit::{Column, PageTitle, SectionHeader, Segmented, StatusGlyph, Table, TableEvent};
+use crate::kit::{
+    Column, FilterBar, FilterEvent, PageTitle, SectionHeader, StatusGlyph, Table, TableEvent,
+    chip_label,
+};
 use crate::theme::{
     ActiveTheme, FONT_MONO, Palette, ROW_TABLE, RULE, SPACE_2, SPACE_8, TEXT_SMALL,
 };
@@ -29,16 +32,17 @@ const MISSING: &str = "—";
 
 pub struct RoutesScreen {
     routes: Routes,
-    filter: RouteFilter,
+    filter: Entity<FilterBar>,
     listeners: Entity<Table<Listener>>,
     table: Entity<Table<Route>>,
-    _subscription: Subscription,
+    _subscriptions: [Subscription; 2],
 }
 
 impl EventEmitter<LocoEvent> for RoutesScreen {}
 
 impl RoutesScreen {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let filter = cx.new(|cx| FilterBar::new("loco-route-filter", window, cx));
         let listeners = cx.new(|cx| {
             Table::new("loco-listeners", listener_columns(), cx)
                 .row_height(ROW_TABLE)
@@ -60,12 +64,15 @@ impl RoutesScreen {
                 cx.emit(LocoEvent::ShowApplication(app));
             }
         });
+        let filtered = cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
+            this.refresh(cx);
+        });
         Self {
             routes: Routes::default(),
-            filter: RouteFilter::All,
+            filter,
             listeners,
             table,
-            _subscription: subscription,
+            _subscriptions: [subscription, filtered],
         }
     }
 
@@ -77,32 +84,38 @@ impl RoutesScreen {
         self.refresh(cx);
     }
 
-    fn set_filter(&mut self, filter: RouteFilter, cx: &mut Context<Self>) {
-        self.filter = filter;
-        self.refresh(cx);
+    pub fn filter_bar(&self) -> &Entity<FilterBar> {
+        &self.filter
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let rows = self.routes.ranked(self.filter);
-        self.table.update(cx, |table, cx| table.set_rows(rows, cx));
+        let (query, chip) = {
+            let bar = self.filter.read(cx);
+            (bar.query().clone(), bar.chip())
+        };
+        let chips = self
+            .routes
+            .filter_counts(&query)
+            .into_iter()
+            .map(|(filter, n)| chip_label(filter.label(), n))
+            .collect();
+        let filter = RouteFilter::ALL.get(chip).copied().unwrap_or_default();
+        let rows = self.routes.ranked(filter, &query);
+        let shown = rows.len();
+        let total = self.routes.routes.len();
+        self.filter.update(cx, |bar, cx| {
+            bar.set_chips(chips, cx);
+            bar.set_matches(shown, total, cx);
+        });
+        let words = query.words;
+        self.table.update(cx, |table, cx| {
+            table.set_highlight(words, cx);
+            table.set_rows(rows, cx);
+        });
         cx.notify();
     }
 
-    fn routes_header(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-        let selected = RouteFilter::ALL
-            .iter()
-            .position(|f| *f == self.filter)
-            .unwrap_or_default();
-        let filter = RouteFilter::ALL
-            .iter()
-            .fold(Segmented::new("loco-route-filter"), |seg, f| {
-                seg.option(f.label())
-            })
-            .selected(selected)
-            .on_select(cx.listener(|this, ix: &usize, _, cx| {
-                let filter = RouteFilter::ALL.get(*ix).copied().unwrap_or_default();
-                this.set_filter(filter, cx);
-            }));
+    fn routes_header(&self, palette: &Palette) -> impl IntoElement {
         let problems = self.routes.problems();
         let count = div()
             .flex()
@@ -119,21 +132,20 @@ impl RoutesScreen {
                         Status::Warn.glyph()
                     ))))
             }));
-        SectionHeader::new("HTTPRoutes")
-            .annotation(count)
-            .end(filter)
+        SectionHeader::new("HTTPRoutes").annotation(count)
     }
 }
 
 impl Render for RoutesScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
-        let header = self.routes_header(&palette, cx);
+        let header = self.routes_header(&palette);
         div()
             .flex()
             .flex_col()
             .size_full()
             .child(PageTitle::new(TITLE).detail(self.routes.subtitle()))
+            .child(self.filter.clone())
             .child(
                 div()
                     .id("loco-routes-page")
@@ -219,11 +231,10 @@ fn route_columns() -> Vec<Column<Route>> {
             StatusGlyph::new(r.status).into_any_element()
         })
         .fixed(GLYPH),
-        Column::new("Host", |r: &Route, palette| {
-            text(r.host_label().to_owned(), palette.fg)
-        })
-        .mono()
-        .fixed(ROUTE_HOST),
+        Column::text("Host", |r: &Route| r.host_label().to_owned().into())
+            .highlight()
+            .mono()
+            .fixed(ROUTE_HOST),
         Column::new("Backend", |r: &Route, palette| {
             small(r.backend.clone(), palette.fg2)
         })

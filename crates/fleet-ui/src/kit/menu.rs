@@ -2,8 +2,8 @@ use std::rc::Rc;
 
 use gpui::{
     App, Context, ElementId, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent,
-    MouseButton, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
-    div, prelude::FluentBuilder, relative,
+    MouseButton, ParentElement, Pixels, Point, Render, SharedString, StatefulInteractiveElement,
+    Styled, Window, div, prelude::FluentBuilder, relative,
 };
 
 use super::button::{Button, IconButton};
@@ -66,6 +66,7 @@ impl MenuItem {
 }
 
 enum Trigger {
+    Hidden,
     More,
     Label {
         label: SharedString,
@@ -78,6 +79,7 @@ pub struct ActionMenu {
     trigger: Trigger,
     bordered: bool,
     items: Vec<MenuItem>,
+    anchor: Option<Point<Pixels>>,
     open: bool,
     highlighted: Option<usize>,
     generation: u64,
@@ -93,6 +95,7 @@ impl ActionMenu {
             trigger: Trigger::More,
             bordered: true,
             items: Vec::new(),
+            anchor: None,
             open: false,
             highlighted: None,
             generation: 0,
@@ -112,6 +115,24 @@ impl ActionMenu {
             shortcut,
         };
         self
+    }
+
+    pub fn context(id: impl Into<SharedString>, cx: &mut Context<Self>) -> Self {
+        let mut menu = Self::new(id, cx);
+        menu.trigger = Trigger::Hidden;
+        menu
+    }
+
+    pub fn show_at(
+        &mut self,
+        position: Point<Pixels>,
+        items: Vec<MenuItem>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.items = items;
+        self.anchor = Some(position);
+        self.show(window, cx);
     }
 
     pub fn plain(mut self) -> Self {
@@ -272,6 +293,7 @@ impl ActionMenu {
             this.toggle(window, cx);
         });
         match &self.trigger {
+            Trigger::Hidden => div().into_any_element(),
             Trigger::More => IconButton::glyph(id, MORE, MORE_TOOLTIP)
                 .when(self.bordered, IconButton::bordered)
                 .selected(self.open)
@@ -308,10 +330,8 @@ impl Render for ActionMenu {
                 .enumerate()
                 .map(|(ix, item)| self.render_item(ix, item, cx).into_any_element())
                 .collect();
-            let surface = popover::surface(&palette)
-                .id("menu")
+            let surface = popover::surface("menu", &palette)
                 .w(MENU_WIDTH)
-                .occlude()
                 .track_focus(&self.focus)
                 .on_key_down(cx.listener(Self::key_down))
                 .on_mouse_down_out(cx.listener(|this, _, window, cx| {
@@ -320,7 +340,11 @@ impl Render for ActionMenu {
                 }))
                 .children(items);
             let key = ElementId::NamedInteger(self.id.clone(), self.generation);
-            popover::below_right(CONTROL, popover::appear(surface, key))
+            let shown = popover::appear(surface, key);
+            match self.anchor {
+                Some(position) => popover::at(position, shown).into_any_element(),
+                None => popover::below_right(CONTROL, shown).into_any_element(),
+            }
         });
         div()
             .id(ElementId::NamedInteger(self.id.clone(), 0))

@@ -20,7 +20,8 @@ Every tool is pinned in `mise.toml`. `mise run <task>`:
 - `shot -- <screen> [dark|light]` renders a demo screen headlessly to `target/shots/<screen>-<appearance>.png`
   (1440×900 @2x; `FLEET_FEATURES=loco` for Loco screens). No window opens.
 - UI interaction tests live in `apps/fleet-shots/tests/ui.rs`: `fleet_shots::Ui::open(Screen::…)` builds the
-  shell on demo data headlessly, then `press("cmd-k")`, `type_text(..)`, `click("<debug selector>")`,
+  shell on demo data headlessly, then `press("cmd-k")`, `type_text(..)`, `click("<debug selector>")` (also `double_click`,
+  `right_click`, `hover`, `drag(selector, offset)`),
   `state()` and `save_png(..)`. Kit buttons, menu items (`<menu>-item-<ix>`) and table rows
   (`<table>-row-<ix>`) carry debug selectors named after their element ids.
 - `e2e:up` / `e2e:down` create and remove the kind + Flux scenario clusters
