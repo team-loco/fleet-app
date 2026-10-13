@@ -22,3 +22,5 @@ Settled; change only with a new entry that says why.
 11. **Demo mode**: the design's sample data is a real backend (`fleet-demo`); parity screenshots use it.
 12. **License**: Apache-2.0.
 13. **PRs**: one unit per PR, merged immediately by the orchestrator.
+14. **No hotbar**: v2 has no hotbar, so Cluster settings drops v1's Pin column and `Show in hotbar`
+    toggle. The clusters panel lists every cluster.

@@ -25,10 +25,13 @@ const ICONS: &[(&str, &[u8])] = &[
     (CHECK, include_bytes!("../assets/icons/check.svg")),
 ];
 
+pub(crate) const PLEX_SANS_SEMIBOLD: &[u8] =
+    include_bytes!("../assets/fonts/IBMPlexSans-SemiBold.ttf");
+
 const FONTS: &[&[u8]] = &[
     include_bytes!("../assets/fonts/IBMPlexSans-Regular.ttf"),
     include_bytes!("../assets/fonts/IBMPlexSans-Medium.ttf"),
-    include_bytes!("../assets/fonts/IBMPlexSans-SemiBold.ttf"),
+    PLEX_SANS_SEMIBOLD,
     include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf"),
     include_bytes!("../assets/fonts/IBMPlexMono-Medium.ttf"),
 ];

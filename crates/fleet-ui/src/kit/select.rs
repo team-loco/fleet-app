@@ -7,8 +7,8 @@ use gpui::{
 use super::popover::{self, Dismissal, Step};
 use crate::assets::CHEVRON_DOWN;
 use crate::theme::{
-    ActiveTheme, CONTROL, FONT_MONO, ICON, MENU_MAX_HEIGHT, MENU_WIDTH, RADIUS, ROW_TABLE, RULE,
-    SPACE_4, SPACE_5, TEXT_CONTROL, TEXT_SMALL,
+    ActiveTheme, CONTROL, CONTROL_COMPACT, FONT_MONO, ICON, MENU_MAX_HEIGHT, MENU_WIDTH, Palette,
+    RADIUS, ROW_TABLE, RULE, SPACE_4, SPACE_5, TEXT_CONTROL, TEXT_SMALL,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,6 +22,7 @@ pub struct Select {
     selected: usize,
     width: Pixels,
     mono: bool,
+    compact: bool,
     open: bool,
     highlighted: Option<usize>,
     generation: u64,
@@ -44,6 +45,7 @@ impl Select {
             selected: 0,
             width: MENU_WIDTH,
             mono: false,
+            compact: false,
             open: false,
             highlighted: None,
             generation: 0,
@@ -65,6 +67,11 @@ impl Select {
 
     pub fn mono(mut self) -> Self {
         self.mono = true;
+        self
+    }
+
+    pub fn compact(mut self) -> Self {
+        self.compact = true;
         self
     }
 
@@ -145,42 +152,64 @@ impl Focusable for Select {
     }
 }
 
-impl Render for Select {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = *cx.palette();
+impl Select {
+    fn height(&self) -> Pixels {
+        if self.compact {
+            CONTROL_COMPACT
+        } else {
+            CONTROL
+        }
+    }
+
+    fn trigger(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
         let label = self.selected_label().cloned().unwrap_or_default();
         let hover = palette.hover;
-        let trigger = div()
+        let height = self.height();
+        let chevron = (!self.compact).then(|| {
+            svg()
+                .path(CHEVRON_DOWN)
+                .size(ICON)
+                .flex_none()
+                .text_color(palette.mute)
+        });
+        div()
             .id(ElementId::Name(self.id.clone()))
             .flex()
             .items_center()
             .gap(SPACE_4)
-            .h(CONTROL)
+            .h(height)
             .px(SPACE_4)
             .rounded(RADIUS)
             .border(RULE)
             .border_color(palette.line2)
             .text_size(if self.mono { TEXT_SMALL } else { TEXT_CONTROL })
-            .text_color(palette.fg)
+            .text_color(if self.compact {
+                palette.fg2
+            } else {
+                palette.fg
+            })
+            .whitespace_nowrap()
             .cursor_pointer()
             .when(self.open, |trigger| trigger.bg(palette.sel))
             .when(!self.open, |trigger| {
                 trigger.hover(move |style| style.bg(hover))
             })
             .child(div().truncate().child(label))
-            .child(
-                svg()
-                    .path(CHEVRON_DOWN)
-                    .size(ICON)
-                    .flex_none()
-                    .text_color(palette.mute),
-            )
+            .children(chevron)
             .on_click(cx.listener(|this, _, window, cx| {
                 if this.dismissal.take_suppressed() {
                     return;
                 }
                 this.toggle(window, cx);
-            }));
+            }))
+    }
+}
+
+impl Render for Select {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = *cx.palette();
+        let height = self.height();
+        let trigger = self.trigger(&palette, cx).into_any_element();
         let popover = self.open.then(|| {
             let rows: Vec<_> = self
                 .options
@@ -228,7 +257,7 @@ impl Render for Select {
                 }))
                 .children(rows);
             let key = ElementId::NamedInteger(self.id.clone(), self.generation);
-            popover::below_left(CONTROL, popover::appear(surface, key))
+            popover::below_left(height, popover::appear(surface, key))
         });
         div()
             .id(ElementId::NamedInteger(self.id.clone(), 0))

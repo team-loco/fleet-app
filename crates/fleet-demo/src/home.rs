@@ -8,6 +8,9 @@ const HOUR: u64 = 60 * MINUTE;
 const DAY: u64 = 24 * HOUR;
 const HEAD: &str = "a41e07c";
 const HELD_AT: &str = "7c2d9e0";
+const ADDED_CPU: u8 = 27;
+const ADDED_MEMORY: u8 = 38;
+const ADDED_KUSTOMIZATIONS: u32 = 8;
 
 struct MetricsSeed {
     pods: Counts,
@@ -64,6 +67,19 @@ pub fn metrics(cluster: &str) -> Option<ClusterMetrics> {
             held: seed.held,
         },
     })
+}
+
+pub fn added_metrics(pods: u32) -> ClusterMetrics {
+    ClusterMetrics {
+        pods: Counts::total(pods),
+        cpu_percent: Some(ADDED_CPU),
+        memory_percent: Some(ADDED_MEMORY),
+        flux: Counts::total(ADDED_KUSTOMIZATIONS),
+        revision: Revision {
+            sha: HEAD.into(),
+            held: false,
+        },
+    }
 }
 
 pub fn fleet_home() -> FleetHome {

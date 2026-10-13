@@ -19,9 +19,9 @@ pub const COMMAND_PREFIX: &str = ">";
 const FLEET: &str = "Fleet";
 const CLUSTER_KIND: &str = "cluster";
 const PAGE_KIND: &str = "page";
-const LOGS_KEY: &str = "⌘L";
-const COMPARE_KEY: &str = "⌘⇧D";
-const OWNER_KEY: &str = "⌘⇧G";
+pub const LOGS_KEY: &str = "⌘L";
+pub const COMPARE_KEY: &str = "⌘⇧D";
+pub const OWNER_KEY: &str = "⌘⇧G";
 pub const STOP_FORWARD: &str = "Stop port-forward";
 
 const GLOBAL_COMMANDS: &[(&str, &str, Command)] = &[
@@ -168,8 +168,14 @@ pub fn search(snapshot: &Snapshot, current: Option<&ClusterId>, input: &str) -> 
         .iter()
         .filter(|c| query.in_cluster(&c.name))
         .collect();
+    if query.commands_only {
+        return Results {
+            hits: command_mode_hits(snapshot, &query),
+            clusters: clusters.len(),
+        };
+    }
     let mut hits = Vec::new();
-    let browsing = !query.commands_only && !query.filters_resources();
+    let browsing = !query.filters_resources();
     let unscoped = query.cluster.is_none();
     if browsing {
         hits.extend(cluster_hits(&clusters, &query.text));
@@ -177,15 +183,11 @@ pub fn search(snapshot: &Snapshot, current: Option<&ClusterId>, input: &str) -> 
     if browsing && unscoped {
         hits.extend(page_hits(snapshot, current, &query.text));
     }
-    let resources = if query.commands_only {
-        Vec::new()
-    } else {
-        resource_hits(snapshot, &query)
-    };
+    let resources = resource_hits(snapshot, &query);
     let contextual = contextual_commands(snapshot, &resources);
     hits.extend(resources.into_iter().map(|(hit, _)| hit));
     hits.extend(contextual);
-    if query.commands_only || (browsing && unscoped) {
+    if browsing && unscoped {
         hits.extend(global_commands(snapshot, &query.text));
     }
     Results {
@@ -269,6 +271,18 @@ fn resource_hits<'a>(snapshot: &'a Snapshot, query: &Query) -> Vec<(Hit, &'a Res
     if query.text.trim().is_empty() && !query.filters_resources() && query.cluster.is_none() {
         return Vec::new();
     }
+    ranked_resources(snapshot, query, &query.text)
+        .into_iter()
+        .take(MAX_RESOURCES)
+        .map(|(highlights, summary)| (resource_hit(snapshot, summary, highlights), summary))
+        .collect()
+}
+
+fn ranked_resources<'a>(
+    snapshot: &'a Snapshot,
+    query: &Query,
+    text: &str,
+) -> Vec<(Vec<Range<usize>>, &'a ResourceSummary)> {
     let cluster_order = |id: &ClusterId| {
         snapshot
             .clusters
@@ -286,7 +300,7 @@ fn resource_hits<'a>(snapshot: &'a Snapshot, query: &Query) -> Vec<(Hit, &'a Res
             query.in_cluster(cluster_name) && query.keeps(summary)
         })
         .filter_map(|summary| {
-            let (score, highlights) = matched(&summary.resource.name, &query.text)?;
+            let (score, highlights) = matched(&summary.resource.name, text)?;
             Some((score, highlights, summary))
         })
         .collect();
@@ -302,8 +316,7 @@ fn resource_hits<'a>(snapshot: &'a Snapshot, query: &Query) -> Vec<(Hit, &'a Res
     });
     scored
         .into_iter()
-        .take(MAX_RESOURCES)
-        .map(|(_, highlights, summary)| (resource_hit(snapshot, summary, highlights), summary))
+        .map(|(_, highlights, summary)| (highlights, summary))
         .collect()
 }
 
@@ -345,56 +358,152 @@ fn command_hit(label: String, shortcut: Option<&'static str>, command: Command) 
     }
 }
 
+fn is_workload(summary: &ResourceSummary) -> bool {
+    kind_info(&summary.resource.kind).is_some_and(|info| info.has_pods)
+}
+
 fn contextual_commands(snapshot: &Snapshot, resources: &[(Hit, &ResourceSummary)]) -> Vec<Hit> {
-    let mut commands = Vec::new();
-    let workload = resources
+    let workload = resources.iter().find(|(_, summary)| is_workload(summary));
+    let mut commands = workload
+        .map(|(hit, summary)| workload_commands(snapshot, hit, summary))
+        .unwrap_or_default();
+    let service = resources
         .iter()
-        .find(|(_, summary)| kind_info(&summary.resource.kind).is_some_and(|info| info.has_pods));
-    if let Some((hit, summary)) = workload {
-        let resource = &summary.resource;
-        let target = format!("{}/{}", hit.kind, resource.name);
+        .find_map(|(hit, summary)| service_command(hit, summary));
+    commands.extend(service);
+    commands
+}
+
+pub fn resource_commands(snapshot: &Snapshot, resource: &ResourceRef) -> Vec<Hit> {
+    snapshot
+        .resources
+        .iter()
+        .find(|s| &s.resource == resource)
+        .map(|summary| summary_commands(snapshot, summary))
+        .unwrap_or_default()
+}
+
+fn summary_commands(snapshot: &Snapshot, summary: &ResourceSummary) -> Vec<Hit> {
+    let hit = resource_hit(snapshot, summary, Vec::new());
+    let mut commands = if is_workload(summary) {
+        workload_commands(snapshot, &hit, summary)
+    } else {
+        Vec::new()
+    };
+    commands.extend(service_command(&hit, summary));
+    commands
+}
+
+fn workload_commands(snapshot: &Snapshot, hit: &Hit, summary: &ResourceSummary) -> Vec<Hit> {
+    let resource = &summary.resource;
+    let target = format!("{}/{}", hit.kind, resource.name);
+    let mut commands = vec![command_hit(
+        format!("Logs: follow all {} pods on {}", resource.name, hit.cluster),
+        Some(LOGS_KEY),
+        Command::FollowLogs(resource.clone()),
+    )];
+    if elsewhere(snapshot, resource) {
         commands.push(command_hit(
-            format!("Logs: follow all {} pods on {}", resource.name, hit.cluster),
-            Some(LOGS_KEY),
-            Command::FollowLogs(resource.clone()),
+            format!("Compare {target} across clusters"),
+            Some(COMPARE_KEY),
+            Command::Compare(resource.clone()),
         ));
-        if elsewhere(snapshot, resource) {
-            commands.push(command_hit(
-                format!("Compare {target} across clusters"),
-                Some(COMPARE_KEY),
-                Command::Compare(resource.clone()),
-            ));
-        }
-        if let Some(owner) = &summary.owner {
-            commands.push(command_hit(
-                format!("Show Flux owner of {target}"),
-                Some(OWNER_KEY),
-                Command::OpenResource(owner.clone()),
-            ));
-        }
     }
-    let service = resources.iter().find_map(|(hit, summary)| {
-        let is_service = kind_info(&summary.resource.kind).is_some_and(|info| info.short == "svc");
-        let port = summary.ports.first().copied().filter(|_| is_service)?;
-        Some((hit, summary, port))
-    });
-    if let Some((hit, summary, remote)) = service {
-        let local = local_port(remote);
-        let resource = &summary.resource;
+    if let Some(owner) = &summary.owner {
         commands.push(command_hit(
-            format!(
-                "Port-forward {}/{} {local} → {remote}",
-                hit.kind, resource.name
-            ),
-            None,
-            Command::PortForward {
-                service: resource.clone(),
-                local,
-                remote,
-            },
+            format!("Show Flux owner of {target}"),
+            Some(OWNER_KEY),
+            Command::OpenResource(owner.clone()),
         ));
     }
     commands
+}
+
+fn service_command(hit: &Hit, summary: &ResourceSummary) -> Option<Hit> {
+    let is_service = kind_info(&summary.resource.kind).is_some_and(|info| info.short == "svc");
+    let remote = summary.ports.first().copied().filter(|_| is_service)?;
+    let local = local_port(remote);
+    let resource = &summary.resource;
+    Some(command_hit(
+        format!(
+            "Port-forward {}/{} {local} → {remote}",
+            hit.kind, resource.name
+        ),
+        None,
+        Command::PortForward {
+            service: resource.clone(),
+            local,
+            remote,
+        },
+    ))
+}
+
+fn command_mode_hits(snapshot: &Snapshot, query: &Query) -> Vec<Hit> {
+    let words: Vec<&str> = query.text.split_whitespace().collect();
+    let mut targets: Vec<&ResourceSummary> = Vec::new();
+    let named = words
+        .iter()
+        .flat_map(|word| ranked_resources(snapshot, query, word));
+    for (_, summary) in named {
+        if !targets.iter().any(|t| t.resource == summary.resource) {
+            targets.push(summary);
+        }
+    }
+    if targets.is_empty() && !words.is_empty() {
+        let all = ranked_resources(snapshot, query, "");
+        targets = all.into_iter().map(|(_, summary)| summary).collect();
+    }
+    let contextual = targets
+        .into_iter()
+        .flat_map(|summary| summary_commands(snapshot, summary));
+    let global = global_commands(snapshot, "");
+    let mut scored: Vec<(i64, Hit)> = Vec::new();
+    for mut hit in global.into_iter().chain(contextual) {
+        if scored.iter().any(|(_, kept)| kept.name == hit.name) {
+            continue;
+        }
+        let Some((score, highlights)) = matched_words(&hit.name, &words) else {
+            continue;
+        };
+        hit.highlights = highlights;
+        scored.push((score, hit));
+    }
+    scored.sort_by_key(|(score, _)| Reverse(*score));
+    scored
+        .into_iter()
+        .take(MAX_RESOURCES)
+        .map(|(_, hit)| hit)
+        .collect()
+}
+
+fn starts_word(text: &str, at: usize) -> bool {
+    text.get(..at)
+        .and_then(|before| before.chars().next_back())
+        .is_none_or(|c| !c.is_alphanumeric())
+}
+
+fn matched_words(text: &str, words: &[&str]) -> Option<(i64, Vec<Range<usize>>)> {
+    let mut total = 0;
+    let mut ranges: Vec<Range<usize>> = Vec::new();
+    for word in words {
+        let (score, found) = matched(text, word)?;
+        let start = found.first().map_or(0, |range| range.start);
+        if !starts_word(text, start) {
+            return None;
+        }
+        total += score;
+        ranges.extend(found);
+    }
+    ranges.sort_by_key(|range| range.start);
+    let mut merged: Vec<Range<usize>> = Vec::new();
+    for range in ranges {
+        match merged.last_mut() {
+            Some(last) if range.start <= last.end => last.end = last.end.max(range.end),
+            Some(_) => merged.push(range),
+            None => merged.push(range),
+        }
+    }
+    Some((total, merged))
 }
 
 fn elsewhere(snapshot: &Snapshot, resource: &ResourceRef) -> bool {
@@ -578,6 +687,54 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    fn command_names(input: &str) -> Vec<String> {
+        search(&snapshot(), None, input)
+            .hits
+            .into_iter()
+            .map(|hit| hit.name)
+            .collect()
+    }
+
+    #[test]
+    fn command_mode_finds_resource_commands_by_verb() {
+        assert_eq!(
+            command_names(">compare"),
+            ["Compare deploy/cart across clusters"]
+        );
+        assert_eq!(
+            command_names(">cart compare"),
+            ["Compare deploy/cart across clusters"]
+        );
+        assert_eq!(
+            command_names(">owner cart"),
+            ["Show Flux owner of deploy/cart"]
+        );
+        assert_eq!(
+            command_names(">"),
+            ["Toggle clusters panel", "Toggle resources panel"]
+        );
+    }
+
+    #[test]
+    fn command_mode_highlights_every_word() {
+        let results = search(&snapshot(), None, ">cart compare");
+        let highlights = results.hits.first().map(|hit| hit.highlights.clone());
+        assert_eq!(highlights, Some(vec![0..7, 15..19]));
+    }
+
+    #[test]
+    fn resource_commands_follow_the_open_resource() {
+        let snapshot = snapshot();
+        let deploy = resource("a", "Deployment", "shop", "cart");
+        let keys: Vec<_> = resource_commands(&snapshot, &deploy)
+            .into_iter()
+            .map(|hit| hit.shortcut)
+            .collect();
+        assert_eq!(keys, [Some(LOGS_KEY), Some(COMPARE_KEY), Some(OWNER_KEY)]);
+        let missing = resource("a", "Deployment", "shop", "gone");
+        assert_eq!(resource_commands(&snapshot, &missing), Vec::new());
     }
 
     #[test]

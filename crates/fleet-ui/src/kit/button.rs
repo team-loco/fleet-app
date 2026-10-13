@@ -341,7 +341,9 @@ impl RenderOnce for IconButton {
                 button.hover(move |style| style.bg(hover))
             })
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .tooltip(Tooltip::text(self.tooltip))
+            .when(!self.selected, |button| {
+                button.tooltip(Tooltip::text(self.tooltip))
+            })
             .when_some(self.on_click, |button, handler| {
                 button.on_click(move |event, window, cx| handler(event, window, cx))
             })

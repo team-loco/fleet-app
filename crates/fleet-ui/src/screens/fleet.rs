@@ -2,9 +2,10 @@ use fleet_core::changes::{ChangesLog, Commit, Lane, outcome_label};
 use fleet_core::home::{Problem, Severity, group_problems, problem_counts};
 use fleet_core::{ClusterId, ClusterSummary, Command, Counts, FleetHome, Page, Snapshot, Status};
 use gpui::{
-    AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla, IntoElement,
-    ParentElement, Pixels, Render, SharedString, Styled, Subscription, Window, div,
-    prelude::FluentBuilder, px, relative,
+    AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla,
+    InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder, px,
+    relative,
 };
 
 use crate::kit::{
@@ -151,12 +152,19 @@ impl FleetScreen {
         cx.notify();
     }
 
-    fn clusters_section(&self) -> impl IntoElement {
+    fn clusters_section(&self, cx: &Context<Self>) -> impl IntoElement {
+        let min_width = self.cluster_table.read(cx).min_width();
         div()
             .flex()
             .flex_col()
             .child(SectionHeader::new("Clusters").count(self.clusters.len().to_string()))
-            .child(self.cluster_table.clone())
+            .child(
+                div()
+                    .id("fleet-clusters-scroll")
+                    .overflow_x_scroll()
+                    .restrict_scroll_to_axis()
+                    .child(div().min_w(min_width).child(self.cluster_table.clone())),
+            )
     }
 
     fn problems_section(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
@@ -218,11 +226,12 @@ impl Render for FleetScreen {
         if self.problems_only {
             return div().flex().flex_col().child(problems);
         }
+        let clusters = self.clusters_section(cx).into_any_element();
         let changes = self.changes_section(&palette, cx);
         div()
             .flex()
             .flex_col()
-            .child(self.clusters_section())
+            .child(clusters)
             .child(problems)
             .child(changes)
     }

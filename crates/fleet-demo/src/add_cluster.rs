@@ -237,7 +237,7 @@ fn summary(cluster: &NewCluster) -> ClusterSummary {
         nodes: analytics.then_some(ANALYTICS_NODES),
         problems: Counts::default(),
         nav: if analytics { nav } else { BTreeMap::new() },
-        metrics: None,
+        metrics: analytics.then(|| crate::home::added_metrics(ANALYTICS_PODS)),
     }
 }
 
@@ -313,6 +313,12 @@ mod tests {
         let add = Command::AddClusters(vec![analytics()]);
         assert!(adding.handle(&add, &mut fleet, &tx));
         assert_eq!(fleet.clusters.len(), 1);
+        let pods = fleet
+            .clusters
+            .first()
+            .and_then(|c| c.metrics.as_ref())
+            .and_then(|m| m.pods.total);
+        assert_eq!(pods, Some(ANALYTICS_PODS));
         assert!(matches!(rx.recv_blocking(), Ok(Update::Snapshot(s)) if s.clusters.len() == 1));
         let remaining: usize = adding.files().iter().map(|f| f.contexts.len()).sum();
         assert_eq!(remaining, 2);

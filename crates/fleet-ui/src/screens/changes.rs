@@ -51,7 +51,9 @@ impl ChangesScreen {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let path = cx.new(|cx| TextFieldState::new(window, cx).placeholder(PATH_PLACEHOLDER));
         let clusters = cx.new(|cx| {
-            Select::new("changes-cluster", vec![ALL_CLUSTERS.into()], cx).width(CLUSTER_MENU)
+            Select::new("changes-cluster", vec![ALL_CLUSTERS.into()], cx)
+                .width(CLUSTER_MENU)
+                .compact()
         });
         let commits = cx.new(|cx| {
             Table::new("changes-commits", commit_columns(&[]), cx)
@@ -179,7 +181,7 @@ impl ChangesScreen {
                         TextField::new(&self.path)
                             .prefix(PATH_PREFIX)
                             .width(PATH_FIELD)
-                            .small(),
+                            .compact(),
                     ),
             )
             .child(self.clusters.clone())

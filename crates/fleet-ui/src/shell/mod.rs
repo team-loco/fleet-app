@@ -5,6 +5,7 @@ mod status_bar;
 
 use std::collections::BTreeMap;
 
+use fleet_core::palette::{COMPARE_KEY, LOGS_KEY, OWNER_KEY, resource_commands};
 use fleet_core::resource::short_kind;
 use fleet_core::{AddClusterStep, AppState, ClusterId, Command, Receiver, Sender, Status, Update};
 use gpui::{
@@ -12,7 +13,10 @@ use gpui::{
     IntoElement, MouseButton, ParentElement, Render, Styled, Subscription, Task, Window, div,
 };
 
-use crate::actions::{ToggleClustersPanel, ToggleCommandPalette, ToggleResourcesPanel};
+use crate::actions::{
+    CompareAcrossClusters, FollowLogs, ShowFluxOwner, ToggleClustersPanel, ToggleCommandPalette,
+    ToggleResourcesPanel,
+};
 use crate::kit::{ActionMenu, Toast, toast};
 use crate::screens::add_cluster::{AddClusterDialog, AddClusterEvent};
 use crate::screens::changes::ChangesScreen;
@@ -353,6 +357,19 @@ impl Shell {
         cx.notify();
     }
 
+    fn run_shortcut(&mut self, key: &str, cx: &mut Context<Self>) {
+        let Some(resource) = self.state.resource.as_ref() else {
+            return;
+        };
+        let command = resource_commands(&self.state.snapshot, resource)
+            .into_iter()
+            .find(|hit| hit.shortcut == Some(key))
+            .map(|hit| hit.command);
+        if let Some(command) = command {
+            self.dispatch(command, cx);
+        }
+    }
+
     fn sync_page(&self, cx: &mut Context<Self>) {
         let page = self.state.page;
         self.fleet.update(cx, |fleet, cx| fleet.set_page(page, cx));
@@ -439,6 +456,15 @@ impl Render for Shell {
             }))
             .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| {
                 this.toggle_palette(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FollowLogs, _, cx| {
+                this.run_shortcut(LOGS_KEY, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CompareAcrossClusters, _, cx| {
+                this.run_shortcut(COMPARE_KEY, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ShowFluxOwner, _, cx| {
+                this.run_shortcut(OWNER_KEY, cx);
             }))
             .size_full()
             .flex()

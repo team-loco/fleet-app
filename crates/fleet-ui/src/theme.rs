@@ -19,6 +19,7 @@ pub const TEXT_HEADING: Pixels = px(16.);
 pub const TEXT_SUBHEADING: Pixels = px(15.);
 pub const TEXT_FIGURE: Pixels = px(26.);
 pub const LINE_PROSE: f32 = 1.5;
+pub const LABEL_TRACKING: f32 = 0.07;
 
 pub const RADIUS: Pixels = px(3.);
 pub const RADIUS_MENU: Pixels = px(4.);
@@ -63,6 +64,7 @@ pub const SPACE_8: Pixels = px(16.);
 
 pub const CONTROL: Pixels = px(24.);
 pub const CONTROL_SMALL: Pixels = px(20.);
+pub const CONTROL_COMPACT: Pixels = px(22.);
 pub const SEGMENT: Pixels = px(22.);
 pub const MORE_BUTTON: Pixels = px(28.);
 pub const SEARCH_WIDTH: Pixels = px(180.);
@@ -105,6 +107,7 @@ pub const CODE_LINE: Pixels = px(20.);
 pub const GUTTER_NUMBER: Pixels = px(40.);
 pub const GUTTER_SIGN: Pixels = px(16.);
 pub const DIFF_HEADER: Pixels = px(28.);
+pub const DIFF_NOTE_MIN: Pixels = px(160.);
 pub const TERMINAL_CURSOR_WIDTH: Pixels = px(7.);
 pub const TERMINAL_CURSOR_HEIGHT: Pixels = px(15.);
 

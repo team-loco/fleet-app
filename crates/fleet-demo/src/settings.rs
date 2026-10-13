@@ -64,9 +64,9 @@ pub fn catalog() -> ClusterCatalog {
         Seed {
             name: "staging",
             kubeconfig: "~/.kube/config",
-            context: "arn:aws:eks:us-east-2:[ACCOUNT]:cluster/staging",
-            server: "https://[ID].gr7.us-east-2.eks.amazonaws.com",
-            auth: Auth::Exec(AWS.into()),
+            context: "gke_[PROJECT]_us-central1_staging",
+            server: "https://[IP]",
+            auth: Auth::Exec(GKE.into()),
             auth_expired: false,
             prometheus: true,
             labels: &["env=staging"],

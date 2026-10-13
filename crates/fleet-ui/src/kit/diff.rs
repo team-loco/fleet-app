@@ -1,11 +1,12 @@
 use gpui::{
-    App, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, RenderOnce,
+    App, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce,
     SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
 };
 
 use crate::theme::{
-    ActiveTheme, CODE_LINE, DIFF_HEADER, FONT_MONO, FONT_SANS, GUTTER_NUMBER, GUTTER_SIGN, Palette,
-    RADIUS, RULE, SPACE_2, SPACE_4, SPACE_5, SPACE_7, SPACE_8, TEXT_MONO, TEXT_SMALL,
+    ActiveTheme, CODE_LINE, DIFF_HEADER, DIFF_NOTE_MIN, FONT_MONO, FONT_SANS, GUTTER_NUMBER,
+    GUTTER_SIGN, Palette, RADIUS, RULE, SPACE_2, SPACE_4, SPACE_5, SPACE_7, SPACE_8, TEXT_MONO,
+    TEXT_SMALL,
 };
 
 const ADDED: &str = "+";
@@ -234,8 +235,8 @@ fn render_line(line: &DiffLine, palette: &Palette) -> impl IntoElement {
     let number = line.number().map(|n| SharedString::from(n.to_string()));
     div()
         .flex()
-        .h(CODE_LINE)
-        .items_center()
+        .min_h(CODE_LINE)
+        .line_height(CODE_LINE)
         .whitespace_nowrap()
         .when_some(bg, Styled::bg)
         .child(
@@ -255,10 +256,21 @@ fn render_line(line: &DiffLine, palette: &Palette) -> impl IntoElement {
                 .text_color(sign_color)
                 .child(sign),
         )
-        .child(div().text_color(text_color).child(line.text.clone()))
+        .child(
+            div()
+                .flex_none()
+                .text_color(text_color)
+                .child(line.text.clone()),
+        )
         .when_some(line.note.clone(), |row, note| {
             row.child(
                 div()
+                    .flex_grow(1.)
+                    .flex_basis(Pixels::ZERO)
+                    .w(DIFF_NOTE_MIN)
+                    .min_w(DIFF_NOTE_MIN)
+                    .pr(SPACE_4)
+                    .whitespace_normal()
                     .ml(SPACE_8)
                     .font_family(FONT_SANS)
                     .text_size(TEXT_MONO)
@@ -307,9 +319,18 @@ fn render_file(ix: usize, file: &DiffFile, palette: &Palette) -> impl IntoElemen
         .child(
             div()
                 .id(ix)
+                .flex()
                 .overflow_x_scroll()
+                .restrict_scroll_to_axis()
                 .py(SPACE_2)
-                .child(div().flex().flex_col().min_w_full().children(lines)),
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_none()
+                        .min_w_full()
+                        .children(lines),
+                ),
         )
 }
 
