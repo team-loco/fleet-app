@@ -785,16 +785,8 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
                     dirty = true;
                 }
             }
-            changed = action_changes.recv() => {
-                if changed.is_ok() {
-                    dirty = true;
-                }
-            }
-            changed = gitops_changed.recv() => {
-                if changed.is_ok() {
-                    dirty = true;
-                }
-            }
+            changed = action_changes.recv() => dirty |= changed.is_ok(),
+            changed = gitops_changed.recv() => dirty |= changed.is_ok(),
             fetched = fetched_events.recv() => {
                 if let Ok(fetched) = fetched {
                     live.fetched(fetched);
