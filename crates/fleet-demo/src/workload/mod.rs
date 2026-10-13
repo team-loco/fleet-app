@@ -13,8 +13,6 @@ use fleet_core::{Command, ExecRequest, LogRequest, ResourceRef, Sink, Status, Wo
 
 use sim::{Action, Names};
 
-pub use data::target as sample_target;
-
 use data::checkout_api;
 
 const ACTION_DURATION: Duration = Duration::from_secs(2);
@@ -168,6 +166,7 @@ fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
 mod tests {
     use fleet_core::{ExecEvent, ExecTarget, LogLine, Source};
 
+    use super::data::target as sample_target;
     use super::*;
 
     fn pod(name: &str) -> ResourceRef {

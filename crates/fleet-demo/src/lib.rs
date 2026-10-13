@@ -27,7 +27,6 @@ use fleet_core::{
 };
 
 const PROD_US_EAST: &str = "prod-us-east";
-pub use workload::sample_target as sample_workload;
 
 pub struct DemoBackend;
 

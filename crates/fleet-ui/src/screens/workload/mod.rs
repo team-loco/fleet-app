@@ -12,9 +12,9 @@ use gpui::{
 };
 
 use crate::kit::{
-    ActionMenu, Column, ConfirmDialog, DockState, KeyValue, Link, LogView, MenuItem, PageHeader,
-    Rule, SectionHeader, SectionLabel, Segmented, StatusText, Table, TableEvent, Terminal,
-    TextFieldState, Toast, confirm, toast,
+    ActionMenu, CodeView, Column, ConfirmDialog, DockState, KeyValue, Link, LogView, MenuItem,
+    PageHeader, Rule, SectionHeader, SectionLabel, Segmented, StatusText, Table, TableEvent,
+    Terminal, TextFieldState, Toast, confirm, toast,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, LINE_PROSE, Palette, RADIUS, ROW_TABLE, RULE, SPACE_1, SPACE_2,
@@ -23,13 +23,14 @@ use crate::theme::{
 
 pub const KEY_CONTEXT: &str = "Workload";
 
-gpui::actions!(workload, [ToggleActions, ShowLogs, ShowTerminal]);
+gpui::actions!(workload, [ToggleActions, ShowLogs, ShowTerminal, ViewYaml]);
 
 pub fn key_bindings() -> Vec<KeyBinding> {
     vec![
         KeyBinding::new("cmd-.", ToggleActions, Some(KEY_CONTEXT)),
         KeyBinding::new("cmd-l", ShowLogs, Some(KEY_CONTEXT)),
         KeyBinding::new("cmd-t", ShowTerminal, Some(KEY_CONTEXT)),
+        KeyBinding::new("cmd-y", ViewYaml, Some(KEY_CONTEXT)),
     ]
 }
 
@@ -84,6 +85,12 @@ const LOGS_ITEM: &str = "Logs";
 const SHELL_ITEM: &str = "Shell into pod";
 const LOGS_KEYS: &str = "⌘L";
 const SHELL_KEYS: &str = "⌘T";
+const YAML_ITEM: &str = "View YAML";
+const YAML_KEYS: &str = "⌘Y";
+const YAML_LABEL: &str = "YAML";
+const YAML_NOTE: &str = "read-only";
+const YAML_LOADING: &str = "# Loading…";
+const YAML_INSPECTOR_WIDTH: Pixels = px(480.);
 
 pub struct WorkloadScreen {
     target: ResourceRef,
@@ -99,6 +106,8 @@ pub struct WorkloadScreen {
     filter: Entity<TextFieldState>,
     terminal: Entity<Terminal>,
     exec: Option<dock::ExecSession>,
+    yaml: Option<String>,
+    showing_yaml: bool,
     focus: FocusHandle,
     watch_task: Option<Task<()>>,
     log_task: Option<Task<()>>,
@@ -148,6 +157,8 @@ impl WorkloadScreen {
             filter,
             terminal,
             exec: None,
+            yaml: None,
+            showing_yaml: false,
             focus,
             watch_task: None,
             log_task: None,
@@ -157,6 +168,18 @@ impl WorkloadScreen {
 
     pub fn target(&self) -> &ResourceRef {
         &self.target
+    }
+
+    pub fn set_yaml(&mut self, yaml: Option<&str>, cx: &mut Context<Self>) {
+        if self.yaml.as_deref() != yaml {
+            self.yaml = yaml.map(str::to_owned);
+            cx.notify();
+        }
+    }
+
+    fn toggle_yaml(&mut self, cx: &mut Context<Self>) {
+        self.showing_yaml = !self.showing_yaml;
+        cx.notify();
     }
 
     pub fn watch(&mut self, cx: &mut Context<Self>) {
@@ -257,6 +280,13 @@ impl WorkloadScreen {
                 }
             })
             .shortcut(SHELL_KEYS),
+            MenuItem::new(YAML_ITEM, {
+                let this = this.clone();
+                move |_, cx| {
+                    this.update(cx, WorkloadScreen::toggle_yaml).ok();
+                }
+            })
+            .shortcut(YAML_KEYS),
             MenuItem::new(RESTART, restart_handler(this.clone(), workload)),
         ];
         if workload.kind.scalable() {
@@ -398,6 +428,44 @@ impl WorkloadScreen {
                     .justify_end()
                     .text_color(palette.mute)
                     .children(note),
+            )
+            .into_any_element()
+    }
+
+    fn yaml_inspector(&self, palette: &Palette) -> AnyElement {
+        let yaml = self.yaml.clone().unwrap_or_else(|| YAML_LOADING.to_owned());
+        let header = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .h(INSPECTOR_HEADER)
+            .px(SPACE_6)
+            .border_b(RULE)
+            .border_color(palette.line)
+            .child(div().flex_1().child(SectionLabel::new(YAML_LABEL)))
+            .child(
+                div()
+                    .text_size(TEXT_SMALL)
+                    .text_color(palette.mute)
+                    .child(YAML_NOTE),
+            );
+        div()
+            .id("workload-yaml")
+            .flex()
+            .flex_col()
+            .flex_none()
+            .w(YAML_INSPECTOR_WIDTH)
+            .h_full()
+            .overflow_y_scroll()
+            .border_l(RULE)
+            .border_color(palette.line)
+            .bg(palette.panel)
+            .child(header)
+            .child(
+                div()
+                    .px(SPACE_6)
+                    .py(SPACE_5)
+                    .child(CodeView::new("workload-yaml-code", yaml).yaml()),
             )
             .into_any_element()
     }
@@ -744,6 +812,7 @@ impl Render for WorkloadScreen {
                 this.menu.update(cx, |menu, cx| menu.toggle(window, cx));
             }))
             .on_action(cx.listener(|this, _: &ShowLogs, _, cx| this.show_logs(cx)))
+            .on_action(cx.listener(|this, _: &ViewYaml, _, cx| this.toggle_yaml(cx)))
             .on_action(cx.listener(|this, _: &ShowTerminal, window, cx| {
                 this.show_terminal(window, cx);
             }))
@@ -777,7 +846,11 @@ impl Render for WorkloadScreen {
             .child(self.header(&workload, cx))
             .child(self.pods_section(&workload))
             .child(Self::history(&workload, cx));
-        let inspector = self.inspector(&workload, cx);
+        let inspector = if self.showing_yaml {
+            self.yaml_inspector(&palette)
+        } else {
+            self.inspector(&workload, cx).into_any_element()
+        };
         let dock = self.render_dock(&workload, cx);
         root.child(div().flex().flex_1().min_h_0().child(main).child(inspector))
             .child(dock)

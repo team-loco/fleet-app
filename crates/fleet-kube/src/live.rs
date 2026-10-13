@@ -90,7 +90,7 @@ enum Fetched {
     PodUsage(ContextRef, Vec<PodUsage>),
     Prometheus(ContextRef, Option<Prometheus>),
     Flux(ContextRef, Vec<(ObjectKind, Subscription)>),
-    Yaml(ResourceRef, String),
+    Yaml(ResourceRef, inspect::Inspected),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -113,6 +113,11 @@ struct Connected {
     flux_task: Option<TaskGuard>,
 }
 
+struct Inspecting {
+    target: ResourceRef,
+    shown: Option<String>,
+}
+
 struct Live {
     manager: ClusterManager,
     store: ClusterStore,
@@ -129,7 +134,7 @@ struct Live {
     page_subscriptions: Vec<Subscription>,
     fetched: Sender<Fetched>,
     yaml: Option<(ResourceRef, String)>,
-    inspecting: Option<ResourceRef>,
+    inspecting: Option<Inspecting>,
     yaml_task: Option<TaskGuard>,
     workload_task: Option<TaskGuard>,
     #[cfg(feature = "loco")]
@@ -320,8 +325,12 @@ impl Live {
     }
 
     fn cluster_event(&mut self, event: &ClusterEvent) {
-        let ClusterEvent::Status { id, status } = event else {
-            return;
+        let (id, status) = match event {
+            ClusterEvent::Status { id, status } => (id, status),
+            ClusterEvent::Changed { id, .. } => {
+                self.refresh_yaml(id);
+                return;
+            }
         };
         let fetched = self.fetched.clone();
         let Some(cluster) = self.clusters.get_mut(id) else {
@@ -370,9 +379,12 @@ impl Live {
                     cluster.flux = FluxWatch::Resolved;
                 }
             }
-            Fetched::Yaml(target, yaml) => {
-                if self.inspecting.as_ref() == Some(&target) {
-                    self.yaml = Some((target, yaml));
+            Fetched::Yaml(target, inspected) => {
+                if let Some(inspecting) = self.inspecting.as_mut()
+                    && inspecting.target == target
+                {
+                    inspecting.shown = inspected.version;
+                    self.yaml = Some((target, inspected.yaml));
                 }
             }
         }
@@ -391,23 +403,46 @@ impl Live {
     fn inspect(&mut self, target: &ResourceRef) {
         self.yaml = None;
         self.yaml_task = None;
-        self.inspecting = Some(target.clone());
-        let Some(handle) = self
-            .clusters
-            .values()
-            .find(|cluster| cluster.id == target.cluster)
-            .map(|cluster| cluster.handle.clone())
-        else {
+        self.inspecting = Some(Inspecting {
+            target: target.clone(),
+            shown: None,
+        });
+        self.fetch_yaml();
+    }
+
+    fn refresh_yaml(&mut self, changed: &ContextRef) {
+        let Some(inspecting) = self.inspecting.as_ref() else {
+            return;
+        };
+        let Some(cluster) = self.clusters.get(changed) else {
+            return;
+        };
+        if cluster.id != inspecting.target.cluster {
+            return;
+        }
+        let cached = inspect::cached_version(&cluster.handle, &inspecting.target);
+        if inspect::stale(inspecting.shown.as_deref(), cached.as_deref()) {
+            self.fetch_yaml();
+        }
+    }
+
+    fn fetch_yaml(&mut self) {
+        let Some(target) = self.inspecting.as_ref().map(|i| i.target.clone()) else {
+            return;
+        };
+        let Some(handle) = self.handle(&target.cluster).cloned() else {
             return;
         };
         let fetched = self.fetched.clone();
-        let target = target.clone();
         self.yaml_task = Some(TaskGuard::spawn(async move {
-            let yaml = match inspect::yaml(&handle, &target).await {
-                Ok(yaml) => yaml,
-                Err(error) => format!("# {error}"),
+            let inspected = match inspect::yaml(&handle, &target).await {
+                Ok(inspected) => inspected,
+                Err(error) => inspect::Inspected {
+                    version: None,
+                    yaml: format!("# {error}"),
+                },
             };
-            let _ = fetched.send(Fetched::Yaml(target, yaml)).await;
+            let _ = fetched.send(Fetched::Yaml(target, inspected)).await;
         }));
     }
 

@@ -1,16 +1,29 @@
 use fleet_core::ResourceRef;
 use fleet_core::resources::ResourceKind;
 use fleet_flux::ObjectKind;
+use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
+use k8s_openapi::api::batch::v1::{CronJob, Job};
+use k8s_openapi::api::core::v1::{
+    ConfigMap, Namespace, Node, PersistentVolumeClaim, Pod, Secret, Service,
+};
+use k8s_openapi::api::networking::v1::Ingress;
+use kube::Resource;
+use kube::api::PartialObjectMeta;
 use serde_json::Value;
 
 use crate::error::{Error, Result};
+use crate::flux::custom_kind;
 use crate::manager::ClusterHandle;
 use crate::ops::{ObjectRef, strip_managed_fields};
+use crate::resources::Watched;
 
 const SECRET_KIND: &str = "Secret";
 const SECRET_FIELDS: [&str; 2] = ["data", "stringData"];
 pub const SECRET_MASK: &str = "••••••";
-const CORE_KINDS: [(&str, &str); 3] = [("Pod", "v1"), ("Node", "v1"), ("Namespace", "v1")];
+const POD_KIND: &str = "Pod";
+const NODE_KIND: &str = "Node";
+const NAMESPACE_KIND: &str = "Namespace";
+const CORE_KINDS: [(&str, &str); 3] = [(POD_KIND, "v1"), (NODE_KIND, "v1"), (NAMESPACE_KIND, "v1")];
 
 fn resource_api_version(kind: ResourceKind) -> &'static str {
     match kind {
@@ -84,14 +97,79 @@ pub fn render(object: &mut Value, kind: &str) -> Result<String> {
     Ok(serde_norway::to_string(object)?)
 }
 
-pub async fn yaml(handle: &ClusterHandle, target: &ResourceRef) -> Result<String> {
+pub struct Inspected {
+    pub version: Option<String>,
+    pub yaml: String,
+}
+
+pub async fn yaml(handle: &ClusterHandle, target: &ResourceRef) -> Result<Inspected> {
     let reference = object_ref(target).ok_or_else(|| Error::UnknownKind {
         api_version: String::new(),
         kind: target.kind.clone(),
     })?;
     let object = handle.get(&reference).await?;
+    let version = object.metadata.resource_version.clone();
     let mut value = serde_json::to_value(&object)?;
-    render(&mut value, &target.kind)
+    let yaml = render(&mut value, &target.kind)?;
+    Ok(Inspected { version, yaml })
+}
+
+fn same_object<K: Resource>(object: &K, target: &ResourceRef) -> bool {
+    let meta = object.meta();
+    meta.name.as_deref() == Some(target.name.as_str())
+        && meta.namespace.as_deref() == target.namespace.as_deref()
+}
+
+fn version_of<K>(handle: &ClusterHandle, target: &ResourceRef) -> Option<String>
+where
+    K: Watched,
+    K::DynamicType: Eq + std::hash::Hash + Clone,
+{
+    handle
+        .objects::<K>()
+        .into_iter()
+        .find(|object| same_object(object.as_ref(), target))
+        .and_then(|object| object.meta().resource_version.clone())
+}
+
+pub fn cached_version(handle: &ClusterHandle, target: &ResourceRef) -> Option<String> {
+    let flux = FLUX_KINDS
+        .into_iter()
+        .find(|kind| kind.as_str() == target.kind);
+    if let Some(kind) = flux {
+        return handle
+            .custom_objects(&custom_kind(kind))
+            .into_iter()
+            .find(|object| same_object(object.as_ref(), target))
+            .and_then(|object| object.metadata.resource_version.clone());
+    }
+    let builtin = ResourceKind::ALL
+        .into_iter()
+        .find(|kind| kind.name() == target.kind);
+    match builtin {
+        Some(ResourceKind::Deployment) => version_of::<Deployment>(handle, target),
+        Some(ResourceKind::StatefulSet) => version_of::<StatefulSet>(handle, target),
+        Some(ResourceKind::DaemonSet) => version_of::<DaemonSet>(handle, target),
+        Some(ResourceKind::Job) => version_of::<Job>(handle, target),
+        Some(ResourceKind::CronJob) => version_of::<CronJob>(handle, target),
+        Some(ResourceKind::Service) => version_of::<Service>(handle, target),
+        Some(ResourceKind::Ingress) => version_of::<Ingress>(handle, target),
+        Some(ResourceKind::ConfigMap) => version_of::<PartialObjectMeta<ConfigMap>>(handle, target),
+        Some(ResourceKind::Secret) => version_of::<PartialObjectMeta<Secret>>(handle, target),
+        Some(ResourceKind::PersistentVolumeClaim) => {
+            version_of::<PersistentVolumeClaim>(handle, target)
+        }
+        None => match target.kind.as_str() {
+            POD_KIND => version_of::<Pod>(handle, target),
+            NODE_KIND => version_of::<Node>(handle, target),
+            NAMESPACE_KIND => version_of::<Namespace>(handle, target),
+            _ => None,
+        },
+    }
+}
+
+pub fn stale(fetched: Option<&str>, cached: Option<&str>) -> bool {
+    cached.is_some() && cached != fetched
 }
 
 #[cfg(test)]
@@ -115,6 +193,14 @@ mod tests {
         assert!(text.contains("webhook-secret: ••••••"), "{text}");
         assert!(!text.contains("c2VjcmV0"));
         assert!(!text.contains("managedFields"));
+    }
+
+    #[test]
+    fn yaml_refreshes_only_when_the_watch_sees_a_new_version() {
+        assert!(stale(Some("41"), Some("42")));
+        assert!(stale(None, Some("42")));
+        assert!(!stale(Some("42"), Some("42")));
+        assert!(!stale(Some("42"), None));
     }
 
     #[test]
