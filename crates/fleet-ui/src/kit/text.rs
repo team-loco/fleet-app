@@ -1,9 +1,10 @@
+use std::ops::Range;
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, ClickEvent, ElementId, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, Pixels, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window,
-    div, prelude::FluentBuilder,
+    AnyElement, App, ClickEvent, ElementId, FontWeight, HighlightStyle, InteractiveElement,
+    IntoElement, ParentElement, Pixels, RenderOnce, SharedString, StatefulInteractiveElement,
+    Styled, StyledText, Window, div, prelude::FluentBuilder,
 };
 
 use crate::theme::{
@@ -266,5 +267,54 @@ impl RenderOnce for KeyValue {
                 )
         });
         div().flex().flex_col().gap(SPACE_3).children(rows)
+    }
+}
+
+#[derive(IntoElement)]
+pub struct Highlighted {
+    text: SharedString,
+    ranges: Vec<Range<usize>>,
+}
+
+impl Highlighted {
+    pub fn new(text: impl Into<SharedString>, ranges: Vec<Range<usize>>) -> Self {
+        Self {
+            text: text.into(),
+            ranges,
+        }
+    }
+}
+
+impl RenderOnce for Highlighted {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let style = HighlightStyle {
+            color: Some(cx.palette().acc),
+            ..HighlightStyle::default()
+        };
+        let ranges = valid_ranges(&self.text, self.ranges);
+        StyledText::new(self.text).with_highlights(ranges.into_iter().map(|range| (range, style)))
+    }
+}
+
+fn valid_ranges(text: &str, ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
+    ranges
+        .into_iter()
+        .filter(|range| {
+            range.start < range.end
+                && range.end <= text.len()
+                && text.is_char_boundary(range.start)
+                && text.is_char_boundary(range.end)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn highlight_ranges_outside_the_text_are_dropped() {
+        let ranges = valid_ranges("a → b", vec![0..1, 3..4, 2..5, 6..9, 4..4]);
+        assert_eq!(ranges, vec![0..1, 2..5]);
     }
 }

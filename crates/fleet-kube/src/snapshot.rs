@@ -202,6 +202,7 @@ pub fn summarize(id: ClusterId, name: String, handle: &ClusterHandle) -> Cluster
         nodes: synced_nodes.then(|| count(nodes.len())),
         problems,
         nav,
+        metrics: None,
         #[cfg(feature = "loco")]
         loco_agent_synced: None,
     }

@@ -2,13 +2,15 @@ mod page;
 mod panels;
 mod status_bar;
 
-use fleet_core::{AppState, Command, Receiver, Sender, Update};
+use fleet_core::{AppState, Command, Receiver, Sender, Status, Update};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement,
     IntoElement, MouseButton, ParentElement, Render, Styled, Subscription, Task, Window, div,
 };
 
-use crate::actions::{ToggleClustersPanel, ToggleResourcesPanel};
+use crate::actions::{ToggleClustersPanel, ToggleCommandPalette, ToggleResourcesPanel};
+use crate::kit::{Toast, toast};
+use crate::screens::command::{CommandPalette, PaletteEvent};
 use crate::screens::fleet::FleetScreen;
 use crate::theme::{self, ActiveTheme, NAV_MIN_WIDTH, RULE, STRIP, TEXT_UI};
 
@@ -20,9 +22,11 @@ pub struct Shell {
     resources_generation: usize,
     focus: FocusHandle,
     fleet: Entity<FleetScreen>,
+    palette: Entity<CommandPalette>,
     _updates: Task<()>,
     _appearance: Subscription,
     _fleet_commands: Subscription,
+    _palette_events: Subscription,
 }
 
 impl Shell {
@@ -52,6 +56,15 @@ impl Shell {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         theme::follow_window(window, cx);
+        let palette = cx.new(|cx| CommandPalette::new(window, cx));
+        let palette_events = cx.subscribe_in(
+            &palette,
+            window,
+            |this, palette, PaletteEvent::Run(command), window, cx| {
+                palette.update(cx, |palette, cx| palette.close(window, cx));
+                this.dispatch(command.clone(), cx);
+            },
+        );
         Self {
             state: AppState::default(),
             commands,
@@ -60,9 +73,11 @@ impl Shell {
             resources_generation: 0,
             focus,
             fleet,
+            palette,
             _updates: listen,
             _appearance: appearance,
             _fleet_commands: fleet_commands,
+            _palette_events: palette_events,
         }
     }
 
@@ -76,7 +91,31 @@ impl Shell {
         self.fleet
             .update(cx, |fleet, cx| fleet.set_snapshot(snapshot, cx));
         self.sync_page(cx);
+        self.sync_palette(cx);
         cx.notify();
+    }
+
+    pub fn open_palette(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.sync_palette(cx);
+        self.palette
+            .update(cx, |palette, cx| palette.open(query, window, cx));
+    }
+
+    fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.palette.read(cx).is_open() {
+            self.palette
+                .update(cx, |palette, cx| palette.close(window, cx));
+        } else {
+            self.open_palette("", window, cx);
+        }
+    }
+
+    fn sync_palette(&self, cx: &mut Context<Self>) {
+        let snapshot = &self.state.snapshot;
+        let current = self.state.cluster.as_ref();
+        self.palette.update(cx, |palette, cx| {
+            palette.set_context(snapshot, current, cx);
+        });
     }
 
     fn dispatch(&mut self, command: Command, cx: &mut Context<Self>) {
@@ -86,12 +125,31 @@ impl Shell {
             Command::SelectCluster(_) => {}
             Command::SelectPage(_) => {}
             Command::OpenResource(_) => {}
+            Command::FollowLogs(_) => {}
+            Command::Compare(_) => {}
+            Command::PortForward {
+                ref service,
+                local,
+                remote,
+            } => {
+                let title = format!(
+                    "Forwarding localhost:{local} → svc/{}:{remote}",
+                    service.name
+                );
+                let detail = format!(
+                    "{} · {}",
+                    service.cluster,
+                    service.namespace.as_deref().unwrap_or_default()
+                );
+                toast(Toast::new(Status::Ok, title).detail(detail), cx);
+            }
         }
         self.state.apply(&command);
         self.sync_page(cx);
         if let Err(error) = self.commands.try_send(command) {
             tracing::warn!(%error, "backend stopped accepting commands");
         }
+        self.sync_palette(cx);
         cx.notify();
     }
 
@@ -147,6 +205,9 @@ impl Render for Shell {
             .on_action(cx.listener(|this, _: &ToggleResourcesPanel, _, cx| {
                 this.dispatch(Command::ToggleResourcesPanel, cx);
             }))
+            .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| {
+                this.toggle_palette(window, cx);
+            }))
             .size_full()
             .flex()
             .flex_col()
@@ -163,6 +224,7 @@ impl Render for Shell {
                     .child(self.page(cx)),
             )
             .child(self.status_bar(cx))
+            .child(self.palette.clone())
             .child(crate::kit::overlay_layer(cx))
     }
 }

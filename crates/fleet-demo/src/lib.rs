@@ -1,4 +1,5 @@
 mod home;
+mod resources;
 
 use std::collections::BTreeMap;
 use std::thread;
@@ -96,6 +97,7 @@ pub fn snapshot() -> Snapshot {
         ],
         fleet_nav,
         home: home::fleet_home(),
+        resources: resources::resources(),
     }
 }
 

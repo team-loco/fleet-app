@@ -10,7 +10,14 @@ pub use gpui_component::Root;
 pub use shell::Shell;
 
 pub mod actions {
-    gpui::actions!(fleet, [ToggleClustersPanel, ToggleResourcesPanel]);
+    gpui::actions!(
+        fleet,
+        [
+            ToggleClustersPanel,
+            ToggleResourcesPanel,
+            ToggleCommandPalette
+        ]
+    );
 }
 
 pub fn init(

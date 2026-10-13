@@ -9,7 +9,10 @@ use crate::theme::{
     TEXT_MONO, TEXT_SMALL,
 };
 
-pub use gpui_component::input::{InputEvent, InputState as TextFieldState};
+pub use gpui_component::input::{
+    Escape as TextFieldEscape, InputEvent, InputState as TextFieldState, MoveDown as TextFieldDown,
+    MoveUp as TextFieldUp,
+};
 
 #[derive(IntoElement)]
 pub struct TextField {
@@ -17,6 +20,7 @@ pub struct TextField {
     prefix: Option<SharedString>,
     width: Option<Pixels>,
     small: bool,
+    bare: Option<Pixels>,
 }
 
 impl TextField {
@@ -26,6 +30,14 @@ impl TextField {
             prefix: None,
             width: None,
             small: false,
+            bare: None,
+        }
+    }
+
+    pub fn bare(state: &Entity<InputState>, text_size: Pixels) -> Self {
+        Self {
+            bare: Some(text_size),
+            ..Self::new(state)
         }
     }
 
@@ -51,6 +63,15 @@ impl TextField {
 
 impl RenderOnce for TextField {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        if let Some(text_size) = self.bare {
+            return div()
+                .flex_1()
+                .min_w_0()
+                .font_family(FONT_MONO)
+                .text_size(text_size)
+                .child(Input::new(&self.state).appearance(false).px_0())
+                .into_any_element();
+        }
         let palette = *cx.palette();
         let focused = self
             .state
@@ -91,5 +112,6 @@ impl RenderOnce for TextField {
                     .min_w_0()
                     .child(Input::new(&self.state).appearance(false).h(height)),
             )
+            .into_any_element()
     }
 }

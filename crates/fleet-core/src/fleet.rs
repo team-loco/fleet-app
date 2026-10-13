@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::home::ClusterMetrics;
-use crate::{ClusterId, Counts, FleetHome, Page, Status};
+use crate::{ClusterId, Counts, FleetHome, Page, ResourceSummary, Status};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClusterSummary {
@@ -33,6 +33,7 @@ pub struct Snapshot {
     pub clusters: Vec<ClusterSummary>,
     pub fleet_nav: BTreeMap<Page, Counts>,
     pub home: FleetHome,
+    pub resources: Vec<ResourceSummary>,
 }
 
 impl Snapshot {
@@ -84,6 +85,7 @@ pub(crate) mod tests {
             ],
             fleet_nav: BTreeMap::new(),
             home: FleetHome::default(),
+            resources: Vec::new(),
         }
     }
 

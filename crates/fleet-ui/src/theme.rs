@@ -67,6 +67,16 @@ pub const SHADOW_OFFSET: Pixels = px(12.);
 pub const SHADOW_BLUR: Pixels = px(32.);
 pub const POPOVER_SLIDE: Pixels = px(4.);
 pub const TOOLTIP_MAX_WIDTH: Pixels = px(280.);
+pub const PALETTE_WIDTH: Pixels = px(680.);
+pub const PALETTE_TOP: Pixels = px(64.);
+pub const PALETTE_INPUT: Pixels = px(40.);
+pub const PALETTE_RESULTS: Pixels = px(560.);
+pub const PALETTE_KIND: Pixels = px(52.);
+pub const PALETTE_NAMESPACE: Pixels = px(92.);
+pub const PALETTE_CLUSTER: Pixels = px(104.);
+pub const PALETTE_STATUS: Pixels = px(132.);
+pub const PALETTE_SCALE_FROM: f32 = 0.98;
+pub const TEXT_PALETTE: Pixels = px(14.);
 
 pub const TOGGLE_WIDTH: Pixels = px(28.);
 pub const TOGGLE_HEIGHT: Pixels = px(16.);
@@ -99,6 +109,8 @@ pub const LEGEND_SWATCH: Pixels = px(10.);
 
 pub const COLLAPSE: Duration = Duration::from_millis(150);
 pub const POPOVER_IN: Duration = Duration::from_millis(120);
+pub const PALETTE_IN: Duration = Duration::from_millis(140);
+pub const PALETTE_OUT: Duration = Duration::from_millis(90);
 pub const FLASH: Duration = Duration::from_millis(900);
 pub const TOAST_TIMEOUT: Duration = Duration::from_secs(4);
 

@@ -8,7 +8,7 @@ use fleet_demo::DemoBackend;
 use fleet_kube::LiveBackend;
 use fleet_kube::discovery::DiscoverySources;
 use fleet_kube::settings::KubeSettings;
-use fleet_ui::actions::{ToggleClustersPanel, ToggleResourcesPanel};
+use fleet_ui::actions::{ToggleClustersPanel, ToggleCommandPalette, ToggleResourcesPanel};
 use fleet_ui::theme::{Appearance, TRAFFIC_LIGHT_X, TRAFFIC_LIGHT_Y};
 use fleet_ui::{Gallery, GalleryPage, Root, Shell, assets};
 use gpui::{
@@ -22,6 +22,7 @@ const WINDOW_HEIGHT: f32 = 900.;
 const MIN_WIDTH: f32 = 720.;
 const MIN_HEIGHT: f32 = 480.;
 const SAMPLE_CLUSTER: &str = "prod-us-east";
+const SAMPLE_QUERY: &str = "checkout";
 
 gpui::actions!(fleet, [Quit]);
 
@@ -45,6 +46,7 @@ enum Screen {
     Fleet,
     Cluster,
     Collapsed,
+    Command,
     Kit,
     KitOverlays,
     KitPanes,
@@ -61,6 +63,7 @@ impl Screen {
                 Command::ToggleClustersPanel,
                 Command::ToggleResourcesPanel,
             ],
+            Self::Command => vec![Command::SelectPage(Page::Overview)],
             Self::Kit => Vec::new(),
             Self::KitOverlays => Vec::new(),
             Self::KitPanes => Vec::new(),
@@ -126,6 +129,7 @@ fn launch(
     cx.bind_keys([
         KeyBinding::new("cmd-shift-b", ToggleClustersPanel, None),
         KeyBinding::new("cmd-b", ToggleResourcesPanel, None),
+        KeyBinding::new("cmd-k", ToggleCommandPalette, None),
         KeyBinding::new("cmd-q", Quit, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
@@ -160,6 +164,7 @@ fn launch(
             Screen::Fleet => shell_view(updates, commands, screen, window, cx),
             Screen::Cluster => shell_view(updates, commands, screen, window, cx),
             Screen::Collapsed => shell_view(updates, commands, screen, window, cx),
+            Screen::Command => shell_view(updates, commands, screen, window, cx),
         };
         cx.new(|cx| Root::new(view, window, cx))
     })
@@ -176,6 +181,9 @@ fn shell_view(
     cx: &mut App,
 ) -> gpui::AnyView {
     let initial = screen.commands();
-    cx.new(|cx| Shell::new(updates, commands, initial, window, cx))
-        .into()
+    let shell = cx.new(|cx| Shell::new(updates, commands, initial, window, cx));
+    if let Screen::Command = screen {
+        shell.update(cx, |shell, cx| shell.open_palette(SAMPLE_QUERY, window, cx));
+    }
+    shell.into()
 }

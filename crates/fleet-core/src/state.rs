@@ -1,13 +1,20 @@
-use crate::home::page_for_kind;
+use crate::resource::page_for_kind;
 use crate::{ClusterId, Page, ResourceRef, Snapshot};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     SelectCluster(Option<ClusterId>),
     SelectPage(Page),
-    OpenResource(ResourceRef),
     ToggleClustersPanel,
     ToggleResourcesPanel,
+    OpenResource(ResourceRef),
+    FollowLogs(ResourceRef),
+    Compare(ResourceRef),
+    PortForward {
+        service: ResourceRef,
+        local: u16,
+        remote: u16,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,6 +27,7 @@ pub struct AppState {
     pub snapshot: Snapshot,
     pub cluster: Option<ClusterId>,
     pub page: Page,
+    pub resource: Option<ResourceRef>,
     pub clusters_open: bool,
     pub resources_open: bool,
 }
@@ -30,6 +38,7 @@ impl Default for AppState {
             snapshot: Snapshot::default(),
             cluster: None,
             page: Page::Overview,
+            resource: None,
             clusters_open: true,
             resources_open: true,
         }
@@ -43,21 +52,21 @@ impl AppState {
                 if self.snapshot.cluster(id).is_some() {
                     self.cluster = Some(id.clone());
                     self.page = Page::ClusterOverview;
+                    self.resource = None;
                 }
             }
             Command::SelectCluster(None) => {
                 self.cluster = None;
                 self.page = Page::Overview;
+                self.resource = None;
             }
             Command::SelectPage(page) => self.select_page(*page),
-            Command::OpenResource(target) => {
-                if self.snapshot.cluster(&target.cluster).is_some() {
-                    self.cluster = Some(target.cluster.clone());
-                    self.page = page_for_kind(&target.kind);
-                }
-            }
             Command::ToggleClustersPanel => self.clusters_open = !self.clusters_open,
             Command::ToggleResourcesPanel => self.resources_open = !self.resources_open,
+            Command::OpenResource(resource) => self.open_resource(resource),
+            Command::FollowLogs(resource) => self.open_resource(resource),
+            Command::Compare(_) => {}
+            Command::PortForward { .. } => {}
         }
     }
 
@@ -80,9 +89,20 @@ impl AppState {
         if page.is_fleet() {
             self.cluster = None;
             self.page = page;
+            self.resource = None;
         } else if self.cluster.is_some() {
             self.page = page;
+            self.resource = None;
         }
+    }
+
+    fn open_resource(&mut self, resource: &ResourceRef) {
+        if self.snapshot.cluster(&resource.cluster).is_none() {
+            return;
+        }
+        self.cluster = Some(resource.cluster.clone());
+        self.page = page_for_kind(&resource.kind);
+        self.resource = Some(resource.clone());
     }
 }
 
@@ -132,23 +152,33 @@ mod tests {
     }
 
     #[test]
-    fn opening_a_resource_selects_its_cluster_and_kind_page() {
+    fn opening_a_resource_selects_its_cluster_and_list_page() {
         let mut state = loaded();
-        let target = ResourceRef {
-            cluster: ClusterId::new("a"),
-            kind: "Deployment".into(),
-            namespace: Some("payments".into()),
-            name: "checkout-api".into(),
+        let pod = ResourceRef {
+            cluster: ClusterId::new("b"),
+            kind: "Pod".into(),
+            namespace: Some("shop".into()),
+            name: "cart-7f9c".into(),
         };
-        state.apply(&Command::OpenResource(target.clone()));
-        assert_eq!(state.cluster, Some(ClusterId::new("a")));
-        assert_eq!(state.page, Page::Deployments);
-        let elsewhere = ResourceRef {
+        state.apply(&Command::OpenResource(pod.clone()));
+        assert_eq!(state.cluster, Some(ClusterId::new("b")));
+        assert_eq!(state.page, Page::Pods);
+        assert_eq!(state.resource, Some(pod));
+        state.apply(&Command::SelectPage(Page::Nodes));
+        assert_eq!(state.resource, None);
+    }
+
+    #[test]
+    fn opening_a_resource_on_an_unknown_cluster_is_ignored() {
+        let mut state = loaded();
+        let ghost = ResourceRef {
             cluster: ClusterId::new("nope"),
-            ..target
+            kind: "Pod".into(),
+            namespace: None,
+            name: "x".into(),
         };
-        state.apply(&Command::OpenResource(elsewhere));
-        assert_eq!(state.cluster, Some(ClusterId::new("a")));
+        state.apply(&Command::FollowLogs(ghost));
+        assert_eq!(state, loaded());
     }
 
     #[test]
