@@ -1,5 +1,6 @@
-use fleet_core::home::{Commit, Lane, Outcome, Problem, Severity, group_problems, problem_counts};
-use fleet_core::{ClusterSummary, Command, Counts, FleetHome, Page, Snapshot};
+use fleet_core::changes::{ChangesLog, Commit, Lane, outcome_label};
+use fleet_core::home::{Problem, Severity, group_problems, problem_counts};
+use fleet_core::{ClusterId, ClusterSummary, Command, Counts, FleetHome, Page, Snapshot, Status};
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla, IntoElement,
     ParentElement, Pixels, Render, SharedString, Styled, Subscription, Window, div,
@@ -43,6 +44,7 @@ const PERCENT_MAX: f32 = 100.;
 const MISSING: &str = "—";
 const NOT_TARGETED: &str = "–";
 const ALL_CHANGES: &str = "All changes →";
+const RECENT_COMMITS: usize = 3;
 
 #[derive(Clone)]
 enum ProblemRow {
@@ -55,6 +57,7 @@ enum ProblemRow {
 
 pub struct FleetScreen {
     home: FleetHome,
+    changes: ChangesLog,
     clusters: Vec<ClusterSummary>,
     lanes: Vec<Lane>,
     severity: Severity,
@@ -100,6 +103,7 @@ impl FleetScreen {
         ];
         Self {
             home: FleetHome::default(),
+            changes: ChangesLog::default(),
             clusters: Vec::new(),
             lanes: Vec::new(),
             severity: Severity::All,
@@ -117,13 +121,14 @@ impl FleetScreen {
         let clusters = self.clusters.clone();
         self.cluster_table
             .update(cx, |table, cx| table.set_rows(clusters, cx));
-        if self.lanes != self.home.changes.lanes {
-            self.lanes.clone_from(&self.home.changes.lanes);
+        self.changes.clone_from(&snapshot.changes);
+        if self.lanes != self.changes.lanes {
+            self.lanes.clone_from(&self.changes.lanes);
             let columns = commit_columns(&self.lanes);
             self.commit_table
                 .update(cx, |table, cx| table.set_columns(columns, cx));
         }
-        let commits = self.home.changes.commits.clone();
+        let commits = self.changes.recent(RECENT_COMMITS).to_vec();
         self.commit_table
             .update(cx, |table, cx| table.set_rows(commits, cx));
         self.refresh_problems(cx);
@@ -194,7 +199,7 @@ impl FleetScreen {
             .pb(SPACE_8)
             .child(
                 SectionHeader::new("Recent GitOps changes")
-                    .count(self.home.changes.source.clone())
+                    .count(self.changes.source_label())
                     .end(div().text_size(TEXT_CONTROL).child(all)),
             )
             .child(
@@ -491,17 +496,24 @@ fn small(value: impl Into<SharedString>, color: Hsla) -> AnyElement {
         .into_any_element()
 }
 
-fn outcome_label(outcome: Outcome) -> String {
-    match outcome.status() {
-        Some(status) => format!("{} {}", status.glyph(), outcome.label()),
-        None => NOT_TARGETED.to_owned(),
+fn outcome(commit: &Commit, cluster: &ClusterId) -> (Option<Status>, String) {
+    match commit.rollout_on(cluster) {
+        Some(rollout) => (
+            Some(rollout.status),
+            format!(
+                "{} {}",
+                rollout.status.glyph(),
+                outcome_label(rollout.status)
+            ),
+        ),
+        None => (None, NOT_TARGETED.to_owned()),
     }
 }
 
 fn commit_columns(lanes: &[Lane]) -> Vec<Column<Commit>> {
     let fixed = vec![
         Column::new("Commit", |c: &Commit, palette| {
-            text(c.sha.clone(), palette.acc)
+            text(c.short_sha().to_owned(), palette.acc)
         })
         .mono()
         .fixed(COMMIT_SHA),
@@ -520,11 +532,9 @@ fn commit_columns(lanes: &[Lane]) -> Vec<Column<Commit>> {
     let lane_columns = lanes.iter().map(|lane| {
         let cluster = lane.cluster.clone();
         Column::new(lane.label.clone(), move |c: &Commit, palette| {
-            let outcome = c.outcome(&cluster);
-            let color = outcome
-                .status()
-                .map_or(palette.mute, |status| palette.status(status));
-            small(outcome_label(outcome), color)
+            let (status, label) = outcome(c, &cluster);
+            let color = status.map_or(palette.mute, |status| palette.status(status));
+            small(label, color)
         })
         .mono()
         .fixed(COMMIT_LANE)
@@ -544,15 +554,37 @@ fn commit_table(lanes: &[Lane], cx: &mut Context<FleetScreen>) -> Entity<Table<C
 
 #[cfg(test)]
 mod tests {
-    use fleet_core::Status;
 
     use super::*;
 
     #[test]
-    fn outcome_labels_pair_glyph_and_word() {
-        assert_eq!(outcome_label(Outcome::Failing), "✕ failing");
-        assert_eq!(outcome_label(Outcome::Held), "‖ held");
-        assert_eq!(outcome_label(Outcome::NotTargeted), "–");
+    fn outcomes_pair_glyph_and_word_from_the_rollout() {
+        let commit = Commit {
+            sha: "a41e07c3f91d".into(),
+            message: String::new(),
+            author: String::new(),
+            age: std::time::Duration::ZERO,
+            when: String::new(),
+            target: fleet_core::changes::Target {
+                kind: fleet_core::changes::TargetKind::Kustomization,
+                name: "apps".into(),
+            },
+            rollout: vec![fleet_core::changes::Rollout {
+                cluster: ClusterId::new("east"),
+                status: Status::Suspended,
+                object: "apps".into(),
+                note: String::new(),
+            }],
+            views: Vec::new(),
+        };
+        assert_eq!(
+            outcome(&commit, &ClusterId::new("east")),
+            (Some(Status::Suspended), "‖ held".to_owned())
+        );
+        assert_eq!(
+            outcome(&commit, &ClusterId::new("west")),
+            (None, "–".to_owned())
+        );
     }
 
     #[test]
@@ -562,7 +594,7 @@ mod tests {
         let problem = Problem {
             status: Status::Warn,
             target: fleet_core::ResourceRef {
-                cluster: fleet_core::ClusterId::new("staging"),
+                cluster: ClusterId::new("staging"),
                 kind: "Pod".into(),
                 namespace: Some("search".into()),
                 name: "search-indexer-0".into(),

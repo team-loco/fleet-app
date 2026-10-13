@@ -646,10 +646,7 @@ impl Live {
         let mut snapshot = Snapshot {
             clusters,
             fleet_nav: BTreeMap::from([(Page::Problems, flagged), (Page::GitOps, flux)]),
-            home: FleetHome {
-                problems,
-                ..FleetHome::default()
-            },
+            home: FleetHome { problems },
             resources: Vec::new(),
             changes: ChangesLog::default(),
             details,
@@ -746,6 +743,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
         [settings.metrics_interval, settings.prometheus_interval].map(ticker);
     let (manager, cluster_events) = ClusterManager::new(runtime, settings.clone(), env.clone());
     let (actions, action_changes) = Actions::new(updates.clone());
+    let gitops = GitOpsState::new(settings.git_timeout);
     let mut live = Live {
         manager,
         store,
@@ -758,7 +756,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
         selected: None,
         page: Page::Overview,
         actions,
-        gitops: GitOpsState::default(),
+        gitops,
         page_subscriptions: Vec::new(),
         fetched,
         yaml: None,
@@ -787,16 +785,8 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
                     dirty = true;
                 }
             }
-            changed = action_changes.recv() => {
-                if changed.is_ok() {
-                    dirty = true;
-                }
-            }
-            changed = gitops_changed.recv() => {
-                if changed.is_ok() {
-                    dirty = true;
-                }
-            }
+            changed = action_changes.recv() => dirty |= changed.is_ok(),
+            changed = gitops_changed.recv() => dirty |= changed.is_ok(),
             fetched = fetched_events.recv() => {
                 if let Ok(fetched) = fetched {
                     live.fetched(fetched);
