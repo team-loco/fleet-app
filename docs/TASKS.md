@@ -16,7 +16,7 @@ Spec column points at `design/`.
 | F1 | ui-kit: status glyph, section label, rule, buttons, ⋯ action menu with descriptions, table on uniform_list, dock, collapsible panel animation, code/diff view | HANDOFF visual rules | claude | f1-ui-kit | doing |
 | F2 | fleet-kube: kubeconfig discovery + watch, login-shell env capture, cluster connect + checks, per-cluster watchers → core snapshots | AddCluster, AddClusterCheck | | | todo |
 | F3 | fleet-flux: CRD types (kopium, Flux 2.9.6), status summarizer, inventory, Helm storage decode, cross-cluster matrix | Kustomization, Flux | | | todo |
-| F4 | fleet-loco: CRD types from crds/loco, app/build/route/platform models | Loco* | | | todo |
+| F4 | fleet-loco: CRD types from crds/loco, app/build/route/platform models | Loco* | Codex | f4-fleet-loco | done |
 | F5 | e2e: kind clusters + Flux + scenario workloads (crashloop, missing secret key, failing HelmRelease, suspended, drift) | Fleet, Workload | codex | f5-e2e-scenarios | done (#1) |
 | F6 | folded into screen units: each S-unit owns its fleet-core model, fleet-demo data and fleet-ui screen | | | | dropped |
 

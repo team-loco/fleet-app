@@ -1,0 +1,13 @@
+{
+  "apiVersion": "infra.loco.io/v1alpha1", "kind": "Application",
+  "metadata": {"name": "resource-app", "namespace": "loco-system", "uid": "application-uid", "generation": 2, "annotations": {"loco.io/placement-revision": "14", "loco.io/placement-id": "placement"}},
+  "spec": {
+    "type": "SERVICE", "resourceId": "app", "workspaceId": "workspace", "deploymentId": "deployment", "environmentName": "production",
+    "serviceSpec": {
+      "deployment": {"image": "registry/app@sha256:abc", "port": 8080, "envSecretRef": {"name": "env-placement", "revision": 14}},
+      "resources": {"cpu": "500m", "memory": "512Mi", "replicas": {"min": 2, "max": 6}},
+      "routing": {"hostName": "app.onloco.app", "pathPrefix": "/", "idleTimeout": 30}
+    }
+  },
+  "status": {"phase": "Failed", "readyReplicas": 0, "desiredReplicas": 2, "observedPlacementRevision": 13, "conditions": [{"type": "Degraded", "status": "True", "reason": "CreateContainerConfigError", "message": "The image runs as root. Loco runs containers as a non-root user; use an image that sets a non-root USER.", "lastTransitionTime": "2026-10-12T21:00:00Z"}]}
+}
