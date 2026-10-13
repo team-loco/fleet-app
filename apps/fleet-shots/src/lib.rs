@@ -16,6 +16,10 @@ use gpui::{
 };
 use image::RgbaImage;
 
+mod fixture;
+
+pub use fixture::StateFixture;
+
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(10);
 const QUIET: Duration = Duration::from_millis(300);
 const POLL: Duration = Duration::from_millis(5);
@@ -39,7 +43,10 @@ fn setup(appearance: Appearance, cx: &mut App) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn demo() -> (Receiver<Update>, Sender<Command>) {
+fn demo(state: Option<StateFixture>) -> (Receiver<Update>, Sender<Command>) {
+    if let Some(state) = state {
+        return fixture::backend(state);
+    }
     let (update_tx, update_rx) = async_channel::unbounded();
     let (command_tx, command_rx) = async_channel::unbounded();
     let backend: Box<dyn Backend> = Box::new(DemoBackend);
@@ -50,10 +57,11 @@ fn demo() -> (Receiver<Update>, Sender<Command>) {
 fn view(
     screen: Screen,
     preset: &Preset,
+    state: Option<StateFixture>,
     window: &mut Window,
     cx: &mut App,
 ) -> (AnyView, Option<Entity<Shell>>) {
-    let (updates, commands) = demo();
+    let (updates, commands) = demo(state);
     let store = cx.new(|cx| Store::new(updates, commands, cx));
     let view = root_view(screen, preset, store, window, cx);
     let shell = view.clone().downcast::<Shell>().ok();
@@ -184,7 +192,12 @@ struct Headless {
 }
 
 impl Headless {
-    fn open(screen: Screen, preset: &Preset, appearance: Appearance) -> anyhow::Result<Self> {
+    fn open(
+        screen: Screen,
+        preset: &Preset,
+        appearance: Appearance,
+        state: Option<StateFixture>,
+    ) -> anyhow::Result<Self> {
         let mut cx = HeadlessAppContext::with_platform(
             text_system(),
             Arc::new(Assets),
@@ -193,7 +206,7 @@ impl Headless {
         cx.update(|cx| setup(appearance, cx))?;
         let mut shell = None;
         let window = cx.open_window(window_size(), |window, cx| {
-            let (view, built) = view(screen, preset, window, cx);
+            let (view, built) = view(screen, preset, state, window, cx);
             shell = built;
             cx.new(|cx| Root::new(view, window, cx))
         })?;
@@ -231,7 +244,16 @@ pub fn render(
     preset: &Preset,
     appearance: Appearance,
 ) -> anyhow::Result<RgbaImage> {
-    Headless::open(screen, preset, appearance)?.image()
+    Headless::open(screen, preset, appearance, None)?.image()
+}
+
+pub fn render_state(
+    screen: Screen,
+    preset: &Preset,
+    appearance: Appearance,
+    state: Option<StateFixture>,
+) -> anyhow::Result<RgbaImage> {
+    Headless::open(screen, preset, appearance, state)?.image()
 }
 
 pub fn save(image: &RgbaImage, path: &Path) -> anyhow::Result<()> {
@@ -250,6 +272,7 @@ pub struct Ui {
     screen: Screen,
     preset: Preset,
     appearance: Appearance,
+    state: Option<StateFixture>,
     steps: Vec<Step>,
 }
 
@@ -259,12 +282,25 @@ impl Ui {
     }
 
     pub fn with(screen: Screen, preset: Preset, appearance: Appearance) -> anyhow::Result<Self> {
+        Self::build(screen, preset, appearance, None)
+    }
+
+    pub fn with_state(screen: Screen, state: StateFixture) -> anyhow::Result<Self> {
+        Self::build(screen, Preset::default(), Appearance::Dark, Some(state))
+    }
+
+    fn build(
+        screen: Screen,
+        preset: Preset,
+        appearance: Appearance,
+        state: Option<StateFixture>,
+    ) -> anyhow::Result<Self> {
         let mut app =
             TestAppContext::build_with_text_system(TestDispatcher::new(SEED), None, text_system());
         app.update(|cx| setup(appearance, cx))?;
         let mut shell = None;
         let window = app.open_window(window_size(), |window, cx| {
-            let (view, built) = view(screen, &preset, window, cx);
+            let (view, built) = view(screen, &preset, state, window, cx);
             shell = built;
             Root::new(view, window, cx)
         });
@@ -283,6 +319,7 @@ impl Ui {
             screen,
             preset,
             appearance,
+            state,
             steps: Vec::new(),
         };
         ui.settle()?;
@@ -367,7 +404,7 @@ impl Ui {
     }
 
     pub fn save_png(&self, path: &Path) -> anyhow::Result<()> {
-        let mut headless = Headless::open(self.screen, &self.preset, self.appearance)?;
+        let mut headless = Headless::open(self.screen, &self.preset, self.appearance, self.state)?;
         for step in &self.steps {
             headless.run(step)?;
         }

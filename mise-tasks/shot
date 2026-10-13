@@ -2,11 +2,13 @@
 #MISE description="Render a demo screen to a PNG headlessly: mise run shot -- <screen> [dark|light]"
 #USAGE arg "<screen>" help="fleet, cluster, collapsed, switcher, command, changes, compare, cluster-settings, settings, gitops, overview, nodes, namespaces, events, resources, resource-inspector, kit, kit-overlays, kit-panes, add-cluster, add-cluster-check, workload, pods, pods-shell, kustomization, helmrelease or source; with FLEET_FEATURES=loco also loco-platform, loco-apps, loco-builds or loco-routes"
 #USAGE arg "[appearance]" default="dark" help="dark or light"
+#USAGE flag "--state <state>" help="loading, connecting, empty or error: render the screen in that page state"
 set -euo pipefail
 
 screen="${usage_screen:-${1:?screen}}"
 appearance="${usage_appearance:-${2:-dark}}"
 root="$(git rev-parse --show-toplevel)"
-out="$root/target/shots/$screen-$appearance.png"
+state="${usage_state:-}"
+out="$root/target/shots/$screen${state:+-$state}-$appearance.png"
 
-cargo run -p fleet-shots --quiet ${FLEET_FEATURES:+--features "$FLEET_FEATURES"} -- "$screen" "$appearance" --out "$out"
+cargo run -p fleet-shots --quiet ${FLEET_FEATURES:+--features "$FLEET_FEATURES"} -- "$screen" "$appearance" --out "$out" ${state:+--state "$state"}

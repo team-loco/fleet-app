@@ -66,6 +66,31 @@ pub enum WatchKind {
     Custom(CustomKind),
 }
 
+impl WatchKind {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Namespaces => "Namespace",
+            Self::Nodes => "Node",
+            Self::Pods => "Pod",
+            Self::Deployments => "Deployment",
+            Self::StatefulSets => "StatefulSet",
+            Self::DaemonSets => "DaemonSet",
+            Self::ReplicaSets => "ReplicaSet",
+            Self::Jobs => "Job",
+            Self::CronJobs => "CronJob",
+            Self::Services => "Service",
+            Self::Ingresses => "Ingress",
+            Self::ConfigMaps => "ConfigMap",
+            Self::Secrets => "Secret",
+            Self::ServiceAccounts => "ServiceAccount",
+            Self::NetworkPolicies => "NetworkPolicy",
+            Self::Events => "Event",
+            Self::PersistentVolumeClaims => "PersistentVolumeClaim",
+            Self::Custom(kind) => &kind.kind,
+        }
+    }
+}
+
 pub trait Watched: Resource + Clone + Debug + Send + Sync + 'static {
     const KIND: WatchKind;
 }

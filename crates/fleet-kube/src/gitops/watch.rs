@@ -1,8 +1,9 @@
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use fleet_core::Status;
 use fleet_core::gitops::Controller;
+use fleet_core::{Page, Status, WatchState};
 use fleet_flux::ObjectKind;
 use futures::future::join_all;
 use k8s_openapi::api::apps::v1::Deployment;
@@ -11,8 +12,10 @@ use kube::api::{DynamicObject, ListParams};
 use kube::{Api, Client};
 
 use crate::error::Error;
+use crate::failure::classify;
 use crate::flux::custom_kind;
-use crate::manager::{ClusterHandle, Subscription, lock};
+use crate::manager::{ClusterHandle, ConnectionStatus, Subscription, lock};
+use crate::resources::WatchKind;
 use crate::task::TaskGuard;
 
 pub const KINDS: [ObjectKind; 6] = [
@@ -36,10 +39,12 @@ const CONTROLLERS: [&str; 5] = [
 ];
 const CONNECT_RETRY: Duration = Duration::from_secs(3);
 const REFRESH: Duration = Duration::from_mins(5);
+const DISCOVERING: &str = "Discovering the Flux API";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FluxInfo {
     pub kinds: Vec<ObjectKind>,
+    pub unserved: BTreeMap<ObjectKind, WatchState>,
     pub version: Option<String>,
     pub controllers: Vec<Controller>,
 }
@@ -69,6 +74,37 @@ impl ClusterFlux {
 
     pub fn info(&self) -> FluxInfo {
         lock(&self.info).clone()
+    }
+
+    pub fn page_state(&self, page: Page) -> Option<WatchState> {
+        let kinds: Vec<ObjectKind> = KINDS
+            .into_iter()
+            .filter(|kind| super::convert::core_kind(*kind).is_some_and(|core| core.page() == page))
+            .collect();
+        if kinds.is_empty() {
+            return None;
+        }
+        let info = self.info();
+        let states = kinds.into_iter().map(|kind| self.kind_state(&info, kind));
+        Some(WatchState::combine(states))
+    }
+
+    fn kind_state(&self, info: &FluxInfo, kind: ObjectKind) -> WatchState {
+        let watched = WatchKind::Custom(custom_kind(kind));
+        let reachable = match self.handle.status() {
+            ConnectionStatus::Connected => true,
+            ConnectionStatus::Degraded(_) => true,
+            ConnectionStatus::Connecting => false,
+            ConnectionStatus::Offline(_) => false,
+            ConnectionStatus::AuthExpired(_) => false,
+        };
+        if !reachable || info.kinds.contains(&kind) {
+            return self.handle.watch_state(&watched);
+        }
+        info.unserved
+            .get(&kind)
+            .cloned()
+            .unwrap_or_else(|| WatchState::pending(DISCOVERING))
     }
 
     pub fn objects(&self, kind: ObjectKind) -> Vec<Arc<DynamicObject>> {
@@ -104,10 +140,20 @@ async fn detect(
             match outcome {
                 Ok(subscription) => {
                     subscriptions.push(subscription);
-                    lock(&info).kinds.push(kind);
+                    let mut info = lock(&info);
+                    info.kinds.push(kind);
+                    info.unserved.remove(&kind);
                 }
                 Err(Error::NotConnected) => waiting = true,
-                Err(error) => tracing::debug!(%error, kind = kind.as_str(), "Flux kind not served"),
+                Err(Error::UnknownKind { .. }) => {
+                    lock(&info).unserved.insert(kind, WatchState::Synced);
+                }
+                Err(error) => {
+                    let reason = classify(&error, handle.context()).detail;
+                    lock(&info)
+                        .unserved
+                        .insert(kind, WatchState::Failed(reason));
+                }
             }
         }
         if let Some((version, controllers)) = installed {
@@ -211,6 +257,24 @@ mod tests {
             started.elapsed()
         );
         assert!(traffic.peak() >= KINDS.len(), "{}", traffic.peak());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_cluster_without_flux_has_empty_flux_pages_not_pending_ones() {
+        let (client, _) = crate::fake::client(ROUND_TRIP, |_, _| None);
+        let (_manager, handle) = crate::fake::handle(&client);
+        let (changed, passes) = async_channel::unbounded();
+        let flux = ClusterFlux::start(handle, changed);
+        assert!(matches!(
+            flux.page_state(Page::Sources),
+            Some(WatchState::Pending(_))
+        ));
+        assert!(passes.recv().await.is_ok());
+        assert_eq!(flux.handle.status(), ConnectionStatus::Connected);
+        for page in [Page::Kustomizations, Page::HelmReleases, Page::Sources] {
+            assert_eq!(flux.page_state(page), Some(WatchState::Synced), "{page:?}");
+        }
+        assert_eq!(flux.page_state(Page::GitOps), None);
     }
 
     fn deployment(name: &str, replicas: i32, ready: i32) -> Deployment {

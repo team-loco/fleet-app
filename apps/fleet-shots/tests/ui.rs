@@ -728,6 +728,24 @@ fn the_terminal_tab_waits_for_an_open_shell_click() -> anyhow::Result<()> {
 }
 
 #[test]
+fn flux_pages_list_their_objects_and_open_one_on_double_click() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    for page in [Page::Kustomizations, Page::HelmReleases, Page::Sources] {
+        let selector: &'static str = format!("nav-{}", page.label().to_lowercase()).leak();
+        ui.click(selector)?;
+        assert_eq!(ui.state().page, page);
+        assert!(
+            ui.bounds("flux-list-row-0").is_some(),
+            "{page:?} shows no Flux objects"
+        );
+    }
+    ui.double_click("flux-list-row-0")?;
+    let opened = ui.state().flux_object;
+    assert_eq!(opened.map(|key| key.kind.page()), Some(Page::Sources));
+    Ok(())
+}
+
+#[test]
 fn keys_typed_in_an_open_shell_reach_it_including_tab_arrows_and_control_c() -> anyhow::Result<()> {
     for (screen, open, close) in [
         (
@@ -803,5 +821,36 @@ fn lists_start_in_the_default_namespace_and_remember_the_pick_per_cluster_and_ki
     assert!(ui.bounds(BEYOND_ONE_NAMESPACE).is_none());
     open_deployments(&mut ui, SAMPLE)?;
     assert!(ui.bounds(BEYOND_ONE_NAMESPACE).is_some());
+    Ok(())
+}
+
+#[test]
+fn every_page_state_renders_and_retry_or_refresh_reloads() -> anyhow::Result<()> {
+    use fleet_shots::StateFixture;
+    let states = [
+        (StateFixture::Loading, "loading-skeleton", None),
+        (StateFixture::Connecting, "connection-progress", None),
+        (
+            StateFixture::Empty,
+            "empty-state",
+            Some("page-empty-action"),
+        ),
+        (StateFixture::Error, "error-state", Some("page-retry")),
+    ];
+    for (state, selector, action) in states {
+        let mut ui = Ui::with_state(Screen::Resources, state)?;
+        assert!(
+            ui.bounds(selector).is_some(),
+            "{state:?} shows no {selector}"
+        );
+        if let Some(action) = action {
+            ui.click(action)?;
+            assert!(
+                ui.bounds(selector).is_none(),
+                "{state:?} stayed after {action}"
+            );
+            assert!(ui.bounds("resources-Deployment-row-0").is_some());
+        }
+    }
     Ok(())
 }

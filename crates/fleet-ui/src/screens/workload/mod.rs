@@ -3,10 +3,11 @@ mod dock;
 pub(crate) use dock::kit_line;
 
 use fleet_core::palette::COMPARE_KEY;
+use fleet_core::watch::WATCH_SYNC_TIMEOUT;
 use fleet_core::workload::{ContainerSpec, EnvVar, Pod, Revision, short_image, short_pod_name};
 use fleet_core::{Command, ResourceRef, Seen, Sink, Status, Workload};
 use gpui::{
-    AnyElement, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
+    AnyElement, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Task, WeakEntity, Window, div,
     prelude::FluentBuilder, px, relative,
@@ -14,9 +15,10 @@ use gpui::{
 
 use crate::kit::status_symbols;
 use crate::kit::{
-    ActionMenu, CodeView, Column, ConfirmDialog, DockState, InspectorPane, KeyValue, Link, LogView,
-    MenuItem, PageHeader, Rule, SectionHeader, SectionLabel, Segmented, StatusText, Table,
-    TableEvent, Terminal, TextFieldState, Toast, Width, confirm, min_row_width, slide_in, toast,
+    ActionMenu, Button, CodeView, Column, ConfirmDialog, DockState, ErrorState, InspectorPane,
+    KeyValue, Link, LogView, MenuItem, PageHeader, Rule, SectionHeader, SectionLabel, Segmented,
+    Skeleton, StatusText, Table, TableEvent, Terminal, TextFieldState, Toast, Width, confirm,
+    min_row_width, slide_in, toast,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, LINE_PROSE, Palette, RADIUS, ROW_TABLE, RULE, SPACE_1, SPACE_2,
@@ -36,7 +38,7 @@ const CURRENT: &str = "current";
 const ACTIONS: &str = "Actions";
 const ACTIONS_KEYS: &str = "⌘.";
 const PLAIN_GLYPH: &str = "·";
-const LOADING: &str = "Loading…";
+const RETRY: &str = "Retry";
 const MANAGED_BY: &str = "managed by";
 const META_SEPARATOR: &str = " · ";
 
@@ -83,7 +85,6 @@ const COMPARE_ITEM: &str = "Compare across clusters";
 const YAML_KEYS: &str = "⌘Y";
 const YAML_LABEL: &str = "YAML";
 const YAML_NOTE: &str = "read-only";
-const YAML_LOADING: &str = "# Loading…";
 const YAML_INSPECTOR_WIDTH: Pixels = px(480.);
 
 pub struct WorkloadScreen {
@@ -103,6 +104,7 @@ pub struct WorkloadScreen {
     showing_yaml: bool,
     focus: FocusHandle,
     watch_task: Option<Task<()>>,
+    deadline: Option<Task<()>>,
     log_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -170,6 +172,7 @@ impl WorkloadScreen {
             showing_yaml: false,
             focus,
             watch_task: None,
+            deadline: None,
             log_task: None,
             _subscriptions: subscriptions,
         }
@@ -192,6 +195,14 @@ impl WorkloadScreen {
     }
 
     pub fn watch(&mut self, cx: &mut Context<Self>) {
+        self.unavailable = false;
+        self.deadline = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(WATCH_SYNC_TIMEOUT).await;
+            let _ = this.update(cx, |screen, cx| {
+                screen.unavailable = screen.workload.is_none();
+                cx.notify();
+            });
+        }));
         let (sink, updates) = Sink::channel();
         cx.emit(Command::WatchWorkload {
             target: self.target.clone(),
@@ -454,7 +465,12 @@ impl WorkloadScreen {
     }
 
     fn yaml_inspector(&self, palette: &Palette) -> AnyElement {
-        let yaml = self.yaml.clone().unwrap_or_else(|| YAML_LOADING.to_owned());
+        let yaml = match self.yaml.clone() {
+            Some(yaml) => CodeView::new("workload-yaml-code", yaml)
+                .yaml()
+                .into_any_element(),
+            None => Skeleton::rows().into_any_element(),
+        };
         let header = div()
             .flex()
             .flex_none()
@@ -482,12 +498,7 @@ impl WorkloadScreen {
             .border_color(palette.line)
             .bg(palette.panel)
             .child(header)
-            .child(
-                div()
-                    .px(SPACE_6)
-                    .py(SPACE_5)
-                    .child(CodeView::new("workload-yaml-code", yaml).yaml()),
-            )
+            .child(div().px(SPACE_6).py(SPACE_5).child(yaml))
             .into_any_element();
         InspectorPane::new(INSPECTOR_ID, content)
             .width(YAML_INSPECTOR_WIDTH)
@@ -867,19 +878,12 @@ impl Render for WorkloadScreen {
             .flex_col()
             .bg(palette.editor);
         let Some(workload) = self.workload.clone() else {
-            let note = if self.unavailable {
-                unavailable_note(&self.target)
-            } else {
-                LOADING.to_owned()
-            };
-            return root.child(
-                div()
-                    .px(SPACE_8)
-                    .pt(SPACE_8)
-                    .text_color(palette.mute)
-                    .font_weight(FontWeight::NORMAL)
-                    .child(note),
-            );
+            if !self.unavailable {
+                return root.child(Skeleton::blocks());
+            }
+            let retry = Button::new("workload-retry", RETRY)
+                .on_click(cx.listener(|this, _, _, cx| this.watch(cx)));
+            return root.child(ErrorState::new(&unavailable_note(&self.target), retry));
         };
         let main = div()
             .id("workload-main")

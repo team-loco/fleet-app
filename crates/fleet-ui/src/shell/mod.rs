@@ -1,4 +1,5 @@
 mod keys;
+mod load;
 mod page;
 mod sidebar;
 mod status_bar;
@@ -52,6 +53,7 @@ pub struct Shell {
     changes: Entity<ChangesScreen>,
     pages: ClusterPages,
     loaded: bool,
+    load: load::LoadClock,
     add_cluster: Option<(Entity<AddClusterDialog>, Subscription)>,
     switcher: Entity<ClusterSwitcher>,
     _switcher_events: Subscription,
@@ -158,6 +160,7 @@ impl Shell {
             changes,
             pages,
             loaded: false,
+            load: load::LoadClock::default(),
             add_cluster: None,
             switcher,
             _switcher_events: switcher_events,
@@ -263,6 +266,7 @@ impl Shell {
         self.pods
             .update(cx, |pods, cx| pods.set_snapshot(snapshot, cx));
         self.sync_page(cx);
+        self.track_load(cx);
         self.sync_palette(cx);
         cx.notify();
     }
@@ -335,7 +339,6 @@ impl Shell {
 
     fn sync_pages(&self, cx: &mut Context<Self>) {
         let cluster = self.selected_cluster();
-        let detail = cluster.and_then(|c| self.state.snapshot.detail(&c.id));
         let confirm_destructive = cluster
             .and_then(|c| self.state.snapshot.catalog.get(&c.id))
             .is_none_or(|settings| settings.preferences.confirm_destructive);
@@ -343,7 +346,7 @@ impl Shell {
         self.pages.sync(
             self.state.page,
             cluster,
-            detail,
+            &self.state.snapshot,
             confirm_destructive,
             &preferences,
             cx,
@@ -462,6 +465,7 @@ impl Shell {
             self.pages.reveal(target, cx);
         }
         self.sync_page(cx);
+        self.track_load(cx);
         self.send(command);
         self.sync_palette(cx);
         self.record_visit();

@@ -125,6 +125,10 @@ impl GitOpsState {
         }
     }
 
+    pub fn page_state(&self, cluster: &ClusterId, page: Page) -> Option<fleet_core::WatchState> {
+        self.clusters.get(cluster)?.page_state(page)
+    }
+
     pub fn health(&self, cluster: &ClusterId, now: Timestamp) -> Option<Vec<FluxHealth>> {
         let flux = self.clusters.get(cluster)?;
         if !flux.info().detected() {

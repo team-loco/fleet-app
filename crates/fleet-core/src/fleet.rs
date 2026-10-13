@@ -4,7 +4,7 @@ use crate::home::{ClusterMetrics, problems_badge};
 use crate::{
     CLUSTER_NAV, ChangesLog, ClusterCatalog, ClusterDetail, ClusterId, Comparison, Counts,
     FLEET_NAV, FleetHome, FluxObject, Forward, GitOps, NavSection, Page, ResourceKind, ResourceRef,
-    ResourceSummary, Status,
+    ResourceSummary, Status, WatchState,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,6 +36,7 @@ pub struct Snapshot {
     pub resources: Vec<ResourceSummary>,
     pub changes: ChangesLog,
     pub details: BTreeMap<ClusterId, ClusterDetail>,
+    pub pages: BTreeMap<ClusterId, BTreeMap<Page, WatchState>>,
     pub gitops: GitOps,
     pub flux: Vec<FluxObject>,
     #[cfg(feature = "loco")]
@@ -76,6 +77,34 @@ impl Snapshot {
         self.details.get(id)
     }
 
+    pub fn page_state(&self, id: &ClusterId, page: Page) -> Option<&WatchState> {
+        self.pages.get(id)?.get(&page)
+    }
+
+    pub fn page_rows(&self, id: &ClusterId, page: Page) -> Option<usize> {
+        let detail = self.detail(id);
+        match page {
+            Page::Nodes => detail.map(|detail| detail.nodes.len()),
+            Page::Namespaces => detail.map(|detail| detail.namespaces.len()),
+            Page::Events => detail.map(|detail| detail.events.len()),
+            Page::Pods => Some(self.pods.iter().filter(|pod| &pod.cluster == id).count()),
+            Page::Kustomizations => Some(self.flux_rows(id, page)),
+            Page::HelmReleases => Some(self.flux_rows(id, page)),
+            Page::Sources => Some(self.flux_rows(id, page)),
+            other => {
+                let kind = ResourceKind::for_page(other)?;
+                detail.map(|detail| detail.resources(kind).len())
+            }
+        }
+    }
+
+    fn flux_rows(&self, id: &ClusterId, page: Page) -> usize {
+        self.flux
+            .iter()
+            .filter(|object| &object.key.cluster == id && object.key.kind.page() == page)
+            .count()
+    }
+
     pub fn comparison(&self, resource: &ResourceRef) -> Option<&Comparison> {
         self.comparisons.iter().find(|c| c.matches(resource))
     }
@@ -110,6 +139,7 @@ impl Snapshot {
     pub fn remove_cluster(&mut self, id: &ClusterId) {
         self.clusters.retain(|c| &c.id != id);
         self.details.remove(id);
+        self.pages.remove(id);
         self.home.problems.retain(|p| &p.target.cluster != id);
         self.resources.retain(|r| &r.resource.cluster != id);
         self.flux.retain(|o| &o.key.cluster != id);
@@ -155,6 +185,7 @@ pub(crate) mod tests {
             resources: Vec::new(),
             changes: ChangesLog::default(),
             details: BTreeMap::new(),
+            pages: BTreeMap::new(),
             gitops: GitOps::default(),
             flux: Vec::new(),
             #[cfg(feature = "loco")]
@@ -213,6 +244,27 @@ pub(crate) mod tests {
             snapshot.fleet_nav.get(&Page::Problems),
             Some(&Counts::default().with_warn(1))
         );
+    }
+
+    #[test]
+    fn page_rows_tell_an_empty_list_from_a_missing_detail() {
+        let mut snapshot = sample();
+        let id = ClusterId::new("a");
+        assert_eq!(snapshot.page_rows(&id, Page::Deployments), None);
+        assert_eq!(snapshot.page_rows(&id, Page::HelmReleases), Some(0));
+        assert_eq!(snapshot.page_rows(&id, Page::ClusterOverview), None);
+        snapshot
+            .details
+            .insert(id.clone(), ClusterDetail::default());
+        assert_eq!(snapshot.page_rows(&id, Page::Deployments), Some(0));
+        let states = BTreeMap::from([(Page::Deployments, WatchState::Synced)]);
+        snapshot.pages.insert(id.clone(), states);
+        assert_eq!(
+            snapshot.page_state(&id, Page::Deployments),
+            Some(&WatchState::Synced)
+        );
+        snapshot.remove_cluster(&id);
+        assert_eq!(snapshot.page_state(&id, Page::Deployments), None);
     }
 
     #[test]

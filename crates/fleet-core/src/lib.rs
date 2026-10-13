@@ -29,6 +29,7 @@ pub mod status;
 pub mod stream;
 pub mod switcher;
 pub mod time;
+pub mod watch;
 pub mod workload;
 
 pub use action::{Forward, Notice};
@@ -55,6 +56,7 @@ pub use status::{Counts, Status};
 pub use stream::{
     ExecEvent, ExecRequest, ExecTarget, LogLevel, LogLine, LogRequest, Sink, Source, TermSize,
 };
+pub use watch::WatchState;
 pub use workload::{Workload, WorkloadKind};
 
 pub trait Backend: Send + 'static {
