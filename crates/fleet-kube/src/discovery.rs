@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 pub use fleet_core::ContextRef;
 use kube::config::Kubeconfig;
 
+use crate::error::kubeconfig_reason;
 use crate::provider::{AuthKind, Provider, detect_auth, detect_provider};
 
 const KUBECONFIG_VAR: &str = "KUBECONFIG";
@@ -164,7 +165,7 @@ pub(crate) fn looks_like_kubeconfig(config: &Kubeconfig) -> bool {
 }
 
 fn parse_file(file: &Path) -> Result<Vec<KubeContext>, String> {
-    let config = Kubeconfig::read_from(file).map_err(|err| err.to_string())?;
+    let config = Kubeconfig::read_from(file).map_err(|err| kubeconfig_reason(&err))?;
     if !looks_like_kubeconfig(&config) {
         return Ok(Vec::new());
     }

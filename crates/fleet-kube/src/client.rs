@@ -4,7 +4,7 @@ use std::time::Duration;
 use kube::config::{AuthInfo, ExecInteractiveMode, KubeConfigOptions, Kubeconfig};
 
 use crate::discovery::KubeContext;
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, kubeconfig_reason};
 use crate::shell_env::ShellEnv;
 
 const ENV_NAME_KEY: &str = "name";
@@ -43,7 +43,7 @@ pub async fn load_config(context: &KubeContext, env: &ShellEnv) -> Result<kube::
     let file = context.id.file.clone();
     let kubeconfig = Kubeconfig::read_from(&file).map_err(|source| Error::Kubeconfig {
         path: file.clone(),
-        source,
+        reason: kubeconfig_reason(&source),
     })?;
     let options = KubeConfigOptions {
         context: Some(context.id.context.clone()),
@@ -52,7 +52,10 @@ pub async fn load_config(context: &KubeContext, env: &ShellEnv) -> Result<kube::
     };
     let mut config = kube::Config::from_custom_kubeconfig(kubeconfig, &options)
         .await
-        .map_err(|source| Error::Kubeconfig { path: file, source })?;
+        .map_err(|source| Error::Kubeconfig {
+            path: file,
+            reason: kubeconfig_reason(&source),
+        })?;
     prepare_auth(&mut config.auth_info, env);
     Ok(config)
 }

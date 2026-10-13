@@ -2,12 +2,8 @@ use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("kubeconfig {path}: {source}")]
-    Kubeconfig {
-        path: PathBuf,
-        #[source]
-        source: kube::config::KubeconfigError,
-    },
+    #[error("kubeconfig {path}: {reason}")]
+    Kubeconfig { path: PathBuf, reason: String },
     #[error(transparent)]
     Kube(#[from] kube::Error),
     #[error("watching kubeconfig files: {0}")]
@@ -59,3 +55,29 @@ pub enum Error {
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+pub fn kubeconfig_reason(error: &kube::config::KubeconfigError) -> String {
+    let text = error.to_string();
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kubeconfig_errors_never_quote_the_file() {
+        let yaml = "apiVersion: v1\nkind: Config\nusers:\n- name: u\n  user:\n    token: planted-kube-token\n    client-key-data: [oops\ncontexts: []\n";
+        let Err(error) = kube::config::Kubeconfig::from_yaml(yaml) else {
+            panic!("malformed kubeconfig parsed");
+        };
+        assert!(error.to_string().contains("planted-kube-token"));
+        let reason = kubeconfig_reason(&error);
+        assert!(reason.contains("line 7"), "{reason}");
+        assert!(!reason.contains("planted-kube-token"), "{reason}");
+    }
+}

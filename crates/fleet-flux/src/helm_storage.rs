@@ -5,9 +5,10 @@ use chrono::{DateTime, Utc};
 use flate2::read::GzDecoder;
 use k8s_openapi::api::core::v1::Secret;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use similar::TextDiff;
 use thiserror::Error;
+
+use crate::redact;
 
 pub const SECRET_TYPE: &str = "helm.sh/release.v1";
 const SECRET_PREFIX: &str = "sh.helm.release.v1.";
@@ -26,7 +27,6 @@ pub struct Release {
     pub first_deployed: Option<DateTime<Utc>>,
     pub last_deployed: Option<DateTime<Utc>>,
     pub description: String,
-    pub values: Value,
     pub manifest: String,
 }
 
@@ -57,13 +57,7 @@ struct StoredRelease {
     version: i64,
     info: StoredInfo,
     chart: StoredChart,
-    #[serde(default = "empty_values")]
-    config: Value,
     manifest: String,
-}
-
-fn empty_values() -> Value {
-    serde_json::json!({})
 }
 
 #[derive(Deserialize)]
@@ -138,7 +132,6 @@ pub fn decode_secret(secret: &Secret) -> Result<Release, StorageError> {
         first_deployed: stored.info.first_deployed,
         last_deployed: stored.info.last_deployed,
         description: stored.info.description,
-        values: stored.config,
         manifest: stored.manifest,
     })
 }
@@ -170,7 +163,11 @@ pub fn revision_history<'a>(
 }
 
 pub fn manifest_diff(older: &Release, newer: &Release) -> String {
-    let diff = TextDiff::from_lines(&older.manifest, &newer.manifest);
+    if older.manifest == newer.manifest {
+        return String::new();
+    }
+    let (old_text, new_text) = redact::manifests(&older.manifest, &newer.manifest);
+    let diff = TextDiff::from_lines(&old_text, &new_text);
     let old_label = format!("{}/v{}", older.name, older.version);
     let new_label = format!("{}/v{}", newer.name, newer.version);
     diff.unified_diff()

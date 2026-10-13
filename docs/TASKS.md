@@ -60,3 +60,4 @@ Spec column points at `design/`.
 | id | unit | owner | branch | status |
 |---|---|---|---|---|
 | C77 | Palette open in new window; split follow-up in #77 | codex | c77-windows-split | done |
+| SEC1 | redact Secret data in YAML views and Helm diffs; strip credentials from URLs, git errors, auth and kubeconfig errors | claude | secret-redaction | done |

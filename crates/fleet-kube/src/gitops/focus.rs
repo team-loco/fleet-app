@@ -3,9 +3,9 @@ use std::time::Duration;
 
 use fleet_core::flux::{HelmRevision, HistoryEntry};
 use fleet_core::{FluxKey, FluxKind, Status};
-use fleet_flux::ObjectKind;
 use fleet_flux::helm_storage::{Release, manifest_diff, revision_history};
 use fleet_flux::revision::short;
+use fleet_flux::{ObjectKind, redact};
 use jiff::Timestamp;
 use k8s_openapi::api::core::v1::{Event, Secret};
 use kube::Api;
@@ -179,12 +179,13 @@ pub fn stored_events(events: &[Event]) -> Vec<StoredEvent> {
                 at,
                 status,
                 revision,
-                message: event
-                    .message
-                    .as_deref()
-                    .and_then(|message| message.lines().next())
-                    .unwrap_or_default()
-                    .to_owned(),
+                message: redact::credentials(
+                    event
+                        .message
+                        .as_deref()
+                        .and_then(|message| message.lines().next())
+                        .unwrap_or_default(),
+                ),
                 count: event
                     .count
                     .and_then(|count| u32::try_from(count).ok())
@@ -319,7 +320,6 @@ mod tests {
             first_deployed: None,
             last_deployed: None,
             description: format!("rev {version}"),
-            values: json!({}),
             manifest: manifest.to_owned(),
         }
     }
