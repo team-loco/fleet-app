@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::home::ClusterMetrics;
+use crate::home::{ClusterMetrics, problems_badge};
 use crate::{
     ChangesLog, ClusterCatalog, ClusterDetail, ClusterId, Comparison, Counts, FleetHome,
     FluxObject, Forward, GitOps, Page, ResourceRef, ResourceSummary, Status,
@@ -69,6 +69,21 @@ impl Snapshot {
     pub fn status(&self) -> Status {
         Status::worst(self.clusters.iter().map(|c| c.status))
     }
+
+    pub fn remove_cluster(&mut self, id: &ClusterId) {
+        self.clusters.retain(|c| &c.id != id);
+        self.details.remove(id);
+        self.home.problems.retain(|p| &p.target.cluster != id);
+        self.resources.retain(|r| &r.resource.cluster != id);
+        self.flux.retain(|o| &o.key.cluster != id);
+        #[cfg(feature = "loco")]
+        self.loco.remove(id);
+        self.catalog.clusters.retain(|c| &c.cluster != id);
+        self.pods.retain(|p| &p.cluster != id);
+        self.forwards.retain(|f| &f.target.cluster != id);
+        let badge = problems_badge(&self.home.problems);
+        self.fleet_nav.insert(Page::Problems, badge);
+    }
 }
 
 #[cfg(test)]
@@ -123,6 +138,44 @@ pub(crate) mod tests {
             Counts::default().with_err(2).with_warn(3).with_sus(1)
         );
         assert_eq!(snapshot.status(), Status::Err);
+    }
+
+    fn problem(cluster: &str, status: Status) -> crate::home::Problem {
+        crate::home::Problem {
+            status,
+            target: ResourceRef {
+                cluster: ClusterId::new(cluster),
+                kind: "Pod".into(),
+                namespace: Some("ns".into()),
+                name: "p".into(),
+            },
+            message: String::new(),
+            age: std::time::Duration::ZERO,
+        }
+    }
+
+    #[test]
+    fn removing_a_cluster_drops_its_problems_and_badge_counts() {
+        let mut snapshot = sample();
+        snapshot.home.problems = vec![
+            problem("a", Status::Err),
+            problem("a", Status::Warn),
+            problem("b", Status::Warn),
+        ];
+        snapshot
+            .fleet_nav
+            .insert(Page::Problems, problems_badge(&snapshot.home.problems));
+        snapshot
+            .details
+            .insert(ClusterId::new("a"), ClusterDetail::default());
+        snapshot.remove_cluster(&ClusterId::new("a"));
+        assert!(snapshot.cluster(&ClusterId::new("a")).is_none());
+        assert!(snapshot.detail(&ClusterId::new("a")).is_none());
+        assert_eq!(snapshot.home.problems, vec![problem("b", Status::Warn)]);
+        assert_eq!(
+            snapshot.fleet_nav.get(&Page::Problems),
+            Some(&Counts::default().with_warn(1))
+        );
     }
 
     #[test]

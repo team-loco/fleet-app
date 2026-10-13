@@ -90,6 +90,9 @@ impl Workloads {
 
     fn watch(&self, target: &ResourceRef, sink: &Sink<Workload>) {
         let mut shared = self.lock();
+        if !shared.workloads.iter().any(|w| &w.target == target) {
+            return;
+        }
         shared.watchers.push((target.clone(), sink.clone()));
         shared.publish(target);
     }
@@ -183,6 +186,18 @@ mod tests {
         assert_eq!(started.map(|w| w.status()), Some(Status::Progress));
         let done = rx.recv_blocking().ok();
         assert_eq!(done.map(|w| w.status()), Some(Status::Ok));
+    }
+
+    #[test]
+    fn watching_an_unknown_workload_closes_the_sink() {
+        let workloads = Workloads::new();
+        let (sink, rx) = Sink::channel();
+        let target = ResourceRef {
+            name: "missing".into(),
+            ..sample_target()
+        };
+        workloads.handle(&Command::WatchWorkload { target, sink });
+        assert!(rx.recv_blocking().is_err());
     }
 
     #[test]

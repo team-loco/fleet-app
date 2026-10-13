@@ -285,6 +285,7 @@ impl Shell {
             Command::SelectCluster(_) => {}
             Command::SelectPage(_) => {}
             Command::OpenResource(_) => {}
+            Command::InspectResource(_) => {}
             Command::FollowLogs(_) => {}
             Command::Compare(_) => {}
             #[cfg(feature = "loco")]

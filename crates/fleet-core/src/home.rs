@@ -86,6 +86,13 @@ pub fn problem_counts<'a>(problems: impl IntoIterator<Item = &'a Problem>) -> Co
         })
 }
 
+pub fn problems_badge(problems: &[Problem]) -> Counts {
+    let counts = problem_counts(problems);
+    Counts::default()
+        .with_err(counts.err)
+        .with_warn(counts.warn)
+}
+
 pub fn group_problems(problems: &[Problem], severity: Severity) -> Vec<ProblemGroup<'_>> {
     let mut groups: Vec<ProblemGroup<'_>> = Vec::new();
     let kept = problems.iter().filter(|p| severity.keeps(p.status));
@@ -176,6 +183,14 @@ mod tests {
         assert_eq!(
             counts,
             Counts::default().with_err(2).with_warn(1).with_sus(1)
+        );
+    }
+
+    #[test]
+    fn badge_counts_errors_and_warnings_only() {
+        assert_eq!(
+            problems_badge(&sample()),
+            Counts::default().with_err(2).with_warn(1)
         );
     }
 

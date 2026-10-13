@@ -9,7 +9,7 @@ use gpui::{
 };
 
 use super::PodsScreen;
-use crate::kit::{Button, Dock, DockTab, Terminal, TerminalEvent, TextField};
+use crate::kit::{Button, Dock, DockTab, LogView, Terminal, TerminalEvent, TextField};
 use crate::screens::workload::kit_line;
 use crate::theme::SPACE_3;
 
@@ -90,13 +90,15 @@ impl PodsScreen {
         });
         if self.log.as_ref().map(|s| &s.key) != log_key.as_ref() {
             self.log = None;
+            self.logs.update(cx, LogView::clear);
             if let Some(key) = log_key {
                 self.open_log(key, cx);
             }
         }
         let shell_key = target.map(|(pod, container)| ShellKey { pod, container });
-        if self.shell.as_ref().map(|s| &s.key) != shell_key.as_ref() {
-            self.shell = None;
+        if self.shell.as_ref().map(|s| &s.key) != shell_key.as_ref() && self.shell.take().is_some()
+        {
+            self.terminal = cx.new(|cx| Terminal::new(TERMINAL_ID, cx));
         }
         let (active, open) = {
             let dock = self.dock.read(cx);
@@ -114,10 +116,7 @@ impl PodsScreen {
     fn open_log(&mut self, key: LogKey, cx: &mut Context<Self>) {
         let (sink, lines) = Sink::channel();
         let follow = !key.previous;
-        self.logs.update(cx, |logs, cx| {
-            logs.clear(cx);
-            logs.set_follow(follow, cx);
-        });
+        self.logs.update(cx, |logs, cx| logs.set_follow(follow, cx));
         cx.emit(Command::StreamLogs(LogRequest {
             pod: key.pod.clone(),
             container: key.container.clone(),

@@ -13,6 +13,7 @@ pub enum Command {
     ToggleClustersPanel,
     ToggleResourcesPanel,
     OpenResource(ResourceRef),
+    InspectResource(ResourceRef),
     FollowLogs(ResourceRef),
     Compare(ResourceRef),
     PortForward {
@@ -118,6 +119,7 @@ impl AppState {
             Command::ToggleClustersPanel => self.clusters_open = !self.clusters_open,
             Command::ToggleResourcesPanel => self.resources_open = !self.resources_open,
             Command::OpenResource(resource) => self.open_resource(resource),
+            Command::InspectResource(_) => {}
             Command::FollowLogs(resource) => self.open_resource(resource),
             Command::Compare(resource) => self.compare(resource),
             Command::PortForward { .. } => {}
@@ -292,6 +294,18 @@ mod tests {
         assert_eq!(state.resource, Some(deployment("b")));
         state.apply(&Command::SelectPage(Page::Pods));
         assert_eq!(state.resource, None);
+    }
+
+    #[test]
+    fn inspecting_a_listed_workload_stays_on_the_list() {
+        let mut state = loaded();
+        state.apply(&Command::SelectCluster(Some(ClusterId::new("b"))));
+        state.apply(&Command::SelectPage(Page::Deployments));
+        let before = state.clone();
+        state.apply(&Command::InspectResource(deployment("b")));
+        assert_eq!(state, before);
+        state.apply(&Command::OpenResource(deployment("b")));
+        assert_eq!(state.resource, Some(deployment("b")));
     }
 
     #[test]

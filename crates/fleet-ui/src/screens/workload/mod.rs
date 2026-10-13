@@ -88,6 +88,7 @@ const SHELL_KEYS: &str = "⌘T";
 pub struct WorkloadScreen {
     target: ResourceRef,
     workload: Option<Workload>,
+    unavailable: bool,
     pods: Entity<Table<Pod>>,
     menu: Entity<ActionMenu>,
     pod: Option<String>,
@@ -136,6 +137,7 @@ impl WorkloadScreen {
         Self {
             target,
             workload: None,
+            unavailable: false,
             pods,
             menu,
             pod: None,
@@ -169,9 +171,13 @@ impl WorkloadScreen {
                     .update(cx, |screen, cx| screen.receive(workload, cx))
                     .is_err()
                 {
-                    break;
+                    return;
                 }
             }
+            let _ = this.update(cx, |screen, cx| {
+                screen.unavailable = screen.workload.is_none();
+                cx.notify();
+            });
         }));
     }
 
@@ -746,13 +752,18 @@ impl Render for WorkloadScreen {
             .flex_col()
             .bg(palette.editor);
         let Some(workload) = self.workload.clone() else {
+            let note = if self.unavailable {
+                unavailable_note(&self.target)
+            } else {
+                LOADING.to_owned()
+            };
             return root.child(
                 div()
                     .px(SPACE_8)
                     .pt(SPACE_8)
                     .text_color(palette.mute)
                     .font_weight(FontWeight::NORMAL)
-                    .child(LOADING),
+                    .child(note),
             );
         };
         let main = div()
@@ -773,9 +784,30 @@ impl Render for WorkloadScreen {
     }
 }
 
+fn unavailable_note(target: &ResourceRef) -> String {
+    format!(
+        "{} {target} is not available on {}.",
+        target.kind, target.cluster
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unavailable_note_names_the_workload_and_cluster() {
+        let target = ResourceRef {
+            cluster: fleet_core::ClusterId::new("qa-gke"),
+            kind: "Deployment".into(),
+            namespace: Some("payments".into()),
+            name: "checkout-api".into(),
+        };
+        assert_eq!(
+            unavailable_note(&target),
+            "Deployment payments/checkout-api is not available on qa-gke."
+        );
+    }
 
     #[test]
     fn replicas_parse_whole_numbers_only() {

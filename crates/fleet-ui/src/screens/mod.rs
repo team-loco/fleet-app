@@ -131,7 +131,10 @@ impl ClusterPages {
         Some(element)
     }
 
-    pub fn header_note(&self, page: Page, cx: &App) -> Option<(Status, String)> {
+    pub fn header_note(&self, page: Page, has_detail: bool, cx: &App) -> Option<(Status, String)> {
+        if !has_detail {
+            return None;
+        }
         match page {
             Page::Nodes => Some(self.nodes.read(cx).header_note()),
             Page::Namespaces => Some(self.namespaces.read(cx).header_note()),
