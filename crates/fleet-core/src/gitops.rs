@@ -425,8 +425,8 @@ mod tests {
         let mut a = cluster("a", Status::Ok, Counts::default());
         a.metrics = Some(ClusterMetrics {
             pods: Counts::total(1),
-            cpu_percent: 0,
-            memory_percent: 0,
+            cpu_percent: None,
+            memory_percent: None,
             flux: Counts::total(21).with_err(1).with_sus(1),
             revision: Revision {
                 sha: String::new(),

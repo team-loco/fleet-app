@@ -48,6 +48,8 @@ struct Args {
     appearance: Option<AppearanceArg>,
     #[arg(long, value_name = "DIR")]
     data_dir: Option<PathBuf>,
+    #[arg(long, value_name = "NAME", default_value = SAMPLE_CLUSTER)]
+    cluster: String,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -87,8 +89,8 @@ enum Screen {
 }
 
 impl Screen {
-    fn commands(self) -> Vec<Command> {
-        let sample = Command::SelectCluster(Some(ClusterId::new(SAMPLE_CLUSTER)));
+    fn commands(self, cluster: &ClusterId) -> Vec<Command> {
+        let sample = Command::SelectCluster(Some(cluster.clone()));
         match self {
             Self::Fleet => vec![Command::SelectPage(Page::Overview)],
             Self::Cluster => vec![sample],
@@ -106,13 +108,13 @@ impl Screen {
             Self::Resources => vec![sample, Command::SelectPage(Page::Deployments)],
             Self::Gitops => vec![Command::SelectPage(Page::GitOps)],
             Self::Compare => vec![Command::Compare(ResourceRef {
-                cluster: ClusterId::new(SAMPLE_CLUSTER),
+                cluster: cluster.clone(),
                 kind: "Deployment".into(),
                 namespace: Some(SAMPLE_NAMESPACE.into()),
                 name: SAMPLE_DEPLOYMENT.into(),
             })],
             Self::ClusterSettings => {
-                vec![Command::ShowClusterSettings(ClusterId::new(SAMPLE_CLUSTER))]
+                vec![Command::ShowClusterSettings(cluster.clone())]
             }
             Self::Kit => Vec::new(),
             Self::KitOverlays => Vec::new(),
@@ -189,12 +191,13 @@ fn main() -> anyhow::Result<()> {
 
     let forced = args.appearance.map(Appearance::from);
     let screen = args.screen;
+    let cluster = ClusterId::new(args.cluster);
     let failure = Rc::new(RefCell::new(None));
     let failed = failure.clone();
     gpui_platform::application()
         .with_assets(assets::Assets)
         .run(move |cx: &mut App| {
-            if let Err(error) = launch(cx, forced, update_rx, command_tx, screen) {
+            if let Err(error) = launch(cx, forced, update_rx, command_tx, screen, &cluster) {
                 failed.replace(Some(error));
                 cx.quit();
             }
@@ -226,6 +229,7 @@ fn launch(
     updates: async_channel::Receiver<fleet_core::Update>,
     commands: async_channel::Sender<Command>,
     screen: Screen,
+    cluster: &ClusterId,
 ) -> anyhow::Result<()> {
     fleet_ui::init(forced, cx)?;
     cx.bind_keys([
@@ -264,35 +268,35 @@ fn launch(
             Screen::KitPanes => cx
                 .new(|cx| Gallery::new(GalleryPage::Panes, window, cx))
                 .into(),
-            Screen::Fleet => shell_view(updates, commands, screen, window, cx),
-            Screen::Cluster => shell_view(updates, commands, screen, window, cx),
-            Screen::Collapsed => shell_view(updates, commands, screen, window, cx),
-            Screen::Command => shell_view(updates, commands, screen, window, cx),
-            Screen::Changes => shell_view(updates, commands, screen, window, cx),
-            Screen::Overview => shell_view(updates, commands, screen, window, cx),
-            Screen::Nodes => shell_view(updates, commands, screen, window, cx),
-            Screen::Namespaces => shell_view(updates, commands, screen, window, cx),
-            Screen::Events => shell_view(updates, commands, screen, window, cx),
-            Screen::Resources => shell_view(updates, commands, screen, window, cx),
-            Screen::AddCluster => shell_view(updates, commands, screen, window, cx),
-            Screen::AddClusterCheck => shell_view(updates, commands, screen, window, cx),
-            Screen::Gitops => shell_view(updates, commands, screen, window, cx),
-            Screen::Workload => shell_view(updates, commands, screen, window, cx),
-            Screen::Pods => shell_view(updates, commands, screen, window, cx),
-            Screen::PodsShell => shell_view(updates, commands, screen, window, cx),
-            Screen::Kustomization => shell_view(updates, commands, screen, window, cx),
-            Screen::Helmrelease => shell_view(updates, commands, screen, window, cx),
-            Screen::Source => shell_view(updates, commands, screen, window, cx),
+            Screen::Fleet => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Cluster => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Collapsed => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Command => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Changes => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Overview => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Nodes => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Namespaces => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Events => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Resources => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::AddCluster => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::AddClusterCheck => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Gitops => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Workload => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Pods => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::PodsShell => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Kustomization => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Helmrelease => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Source => shell_view(updates, commands, screen, cluster, window, cx),
             #[cfg(feature = "loco")]
-            Screen::LocoPlatform => shell_view(updates, commands, screen, window, cx),
+            Screen::LocoPlatform => shell_view(updates, commands, screen, cluster, window, cx),
             #[cfg(feature = "loco")]
-            Screen::LocoApps => shell_view(updates, commands, screen, window, cx),
+            Screen::LocoApps => shell_view(updates, commands, screen, cluster, window, cx),
             #[cfg(feature = "loco")]
-            Screen::LocoBuilds => shell_view(updates, commands, screen, window, cx),
-            Screen::Compare => shell_view(updates, commands, screen, window, cx),
-            Screen::ClusterSettings => shell_view(updates, commands, screen, window, cx),
+            Screen::LocoBuilds => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Compare => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::ClusterSettings => shell_view(updates, commands, screen, cluster, window, cx),
             #[cfg(feature = "loco")]
-            Screen::LocoRoutes => shell_view(updates, commands, screen, window, cx),
+            Screen::LocoRoutes => shell_view(updates, commands, screen, cluster, window, cx),
         };
         cx.new(|cx| Root::new(view, window, cx))
     })
@@ -305,10 +309,11 @@ fn shell_view(
     updates: async_channel::Receiver<fleet_core::Update>,
     commands: async_channel::Sender<Command>,
     screen: Screen,
+    cluster: &ClusterId,
     window: &mut gpui::Window,
     cx: &mut App,
 ) -> gpui::AnyView {
-    let initial = screen.commands();
+    let initial = screen.commands(cluster);
     let shell = cx.new(|cx| Shell::new(updates, commands, initial, window, cx));
     if let Screen::Command = screen {
         shell.update(cx, |shell, cx| shell.open_palette(SAMPLE_QUERY, window, cx));

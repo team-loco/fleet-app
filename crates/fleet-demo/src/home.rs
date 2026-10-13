@@ -57,8 +57,8 @@ pub fn metrics(cluster: &str) -> Option<ClusterMetrics> {
     };
     Some(ClusterMetrics {
         pods: seed.pods,
-        cpu_percent: seed.cpu,
-        memory_percent: seed.memory,
+        cpu_percent: Some(seed.cpu),
+        memory_percent: Some(seed.memory),
         flux: seed.flux,
         revision: Revision {
             sha: seed.revision.into(),

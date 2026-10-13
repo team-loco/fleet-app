@@ -5,6 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use fleet_core::add_cluster::home_relative;
+use fleet_core::home::problem_counts;
 use fleet_core::resource::page_for_kind;
 use fleet_core::settings::{Auth, ClusterSettings, Connection};
 use fleet_core::{
@@ -12,23 +13,34 @@ use fleet_core::{
     ContextChoice, Counts, FleetHome, GitOps, KubeconfigFile, NewCluster, Page, Preferences,
     Receiver, ResourceRef, Sender, Snapshot, Status, Update, Verdict,
 };
+use fleet_flux::ObjectKind;
+use jiff::Timestamp;
+use k8s_openapi::api::core::v1::Node;
 use tokio::time::MissedTickBehavior;
 
 use crate::actions::{Actions, cluster_of};
+use crate::assemble::{self, Extras, Prometheus, Selection};
 use crate::checks::{self, CheckResult, run_checks_streaming};
 use crate::discovery::{
     ContextRef, Discovery, DiscoveryEvent, DiscoverySources, KubeContext, discover,
 };
+use crate::flux::{WATCHED as FLUX_KINDS, custom_kind};
 use crate::gitops::GitOpsState;
+use crate::inspect;
 use crate::manager::{
-    COALESCE_INTERVAL, ClusterHandle, ClusterManager, ConnectionStatus, Subscription,
+    COALESCE_INTERVAL, ClusterEvent, ClusterHandle, ClusterManager, ConnectionStatus, Subscription,
 };
+use crate::metrics::{NodeUsage, PodUsage};
+use crate::probe::find_prometheus;
+use crate::problems::order;
 use crate::provider::AuthKind;
 use crate::resources::WatchKind;
 use crate::settings::KubeSettings;
 use crate::shell_env::{ShellEnv, capture, user_shell};
-use crate::snapshot::{page_kind, summarize};
+use crate::snapshot::page_kinds;
 use crate::store::{ClusterStore, SavedCluster, SavedPreferences};
+use crate::task::TaskGuard;
+use crate::usage::prometheus_utilization;
 use crate::watch::KubeconfigWatcher;
 
 const THREAD_NAME: &str = "fleet-kube";
@@ -72,10 +84,32 @@ impl Backend for LiveBackend {
     }
 }
 
+enum Fetched {
+    NodeUsage(ContextRef, Option<Vec<NodeUsage>>),
+    PodUsage(ContextRef, Vec<PodUsage>),
+    Prometheus(ContextRef, Option<Prometheus>),
+    Flux(ContextRef, Vec<(ObjectKind, Subscription)>),
+    Yaml(ResourceRef, String),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FluxWatch {
+    Unknown,
+    Pending,
+    Resolved,
+}
+
 struct Connected {
     id: ClusterId,
     handle: ClusterHandle,
     _baseline: Vec<Subscription>,
+    extras: Extras,
+    flux: FluxWatch,
+    flux_subscriptions: Vec<Subscription>,
+    usage_task: Option<TaskGuard>,
+    pod_usage_task: Option<TaskGuard>,
+    prometheus_task: Option<TaskGuard>,
+    flux_task: Option<TaskGuard>,
 }
 
 struct Live {
@@ -89,9 +123,20 @@ struct Live {
     clusters: BTreeMap<ContextRef, Connected>,
     selected: Option<ClusterId>,
     page: Page,
-    page_subscription: Option<Subscription>,
     actions: Actions,
     gitops: GitOpsState,
+    page_subscriptions: Vec<Subscription>,
+    fetched: Sender<Fetched>,
+    yaml: Option<(ResourceRef, String)>,
+    inspecting: Option<ResourceRef>,
+    yaml_task: Option<TaskGuard>,
+}
+
+fn reachable(status: &ConnectionStatus) -> bool {
+    matches!(
+        status,
+        ConnectionStatus::Connected | ConnectionStatus::Degraded(_)
+    )
 }
 
 impl Live {
@@ -138,6 +183,13 @@ impl Live {
                     id,
                     handle,
                     _baseline: baseline,
+                    extras: Extras::new(self.settings.usage_samples()),
+                    flux: FluxWatch::Unknown,
+                    flux_subscriptions: Vec::new(),
+                    usage_task: None,
+                    pod_usage_task: None,
+                    prometheus_task: None,
+                    flux_task: None,
                 },
             );
         }
@@ -154,13 +206,189 @@ impl Live {
             .map(|cluster| &cluster.handle)
     }
 
+    fn selected_key(&self) -> Option<ContextRef> {
+        let selected = self.selected.as_ref()?;
+        self.clusters
+            .iter()
+            .find(|(_, cluster)| &cluster.id == selected)
+            .map(|(key, _)| key.clone())
+    }
+
     fn resubscribe_page(&mut self) {
-        let kind = page_kind(self.page);
-        let subscription = self
+        let subscriptions = self
             .selected_handle()
-            .zip(kind)
-            .map(|(handle, kind)| handle.subscribe(kind));
-        self.page_subscription = subscription;
+            .map(|handle| {
+                page_kinds(self.page)
+                    .into_iter()
+                    .map(|kind| handle.subscribe(kind))
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.page_subscriptions = subscriptions;
+        self.poll_page();
+    }
+
+    fn poll_page(&mut self) {
+        match self.page {
+            Page::ClusterOverview => self.poll_prometheus(),
+            Page::Namespaces => self.poll_pod_usage(),
+            Page::Pods => self.poll_pod_usage(),
+            _ => {}
+        }
+    }
+
+    fn poll_usage(&mut self) {
+        let timeout = self.settings.check_timeout;
+        for (key, cluster) in &mut self.clusters {
+            if !reachable(&cluster.handle.status()) {
+                continue;
+            }
+            let handle = cluster.handle.clone();
+            let fetched = self.fetched.clone();
+            let key = key.clone();
+            cluster.usage_task = Some(TaskGuard::spawn(async move {
+                let usage = tokio::time::timeout(timeout, handle.node_usage()).await;
+                let usage = usage.ok().and_then(Result::ok);
+                let _ = fetched.send(Fetched::NodeUsage(key, usage)).await;
+            }));
+        }
+        if matches!(self.page, Page::Namespaces | Page::Pods) {
+            self.poll_pod_usage();
+        }
+    }
+
+    fn poll_pod_usage(&mut self) {
+        let timeout = self.settings.check_timeout;
+        let fetched = self.fetched.clone();
+        let Some(key) = self.selected_key() else {
+            return;
+        };
+        let Some(cluster) = self.clusters.get_mut(&key) else {
+            return;
+        };
+        let handle = cluster.handle.clone();
+        cluster.pod_usage_task = Some(TaskGuard::spawn(async move {
+            let usage = tokio::time::timeout(timeout, handle.pod_usage(None)).await;
+            let usage = usage.ok().and_then(Result::ok).unwrap_or_default();
+            let _ = fetched.send(Fetched::PodUsage(key, usage)).await;
+        }));
+    }
+
+    fn poll_prometheus(&mut self) {
+        let timeout = self.settings.check_timeout;
+        let fetched = self.fetched.clone();
+        let Some(key) = self.selected_key() else {
+            return;
+        };
+        let Some(cluster) = self.clusters.get_mut(&key) else {
+            return;
+        };
+        let Ok(client) = cluster.handle.client() else {
+            return;
+        };
+        let handle = cluster.handle.clone();
+        let known = cluster.extras.prometheus.as_ref().map(|p| p.target.clone());
+        cluster.prometheus_task = Some(TaskGuard::spawn(async move {
+            let target = match known {
+                Some(target) => Some(target),
+                None => find_prometheus(&client).await,
+            };
+            let found = match target {
+                Some(target) => {
+                    let ranges = prometheus_utilization(&handle, &target, Timestamp::now());
+                    let utilization = tokio::time::timeout(timeout, ranges).await;
+                    let utilization = utilization.ok().and_then(Result::ok).unwrap_or_default();
+                    Some(Prometheus {
+                        target,
+                        utilization,
+                    })
+                }
+                None => None,
+            };
+            let _ = fetched.send(Fetched::Prometheus(key, found)).await;
+        }));
+    }
+
+    fn cluster_event(&mut self, event: &ClusterEvent) {
+        let ClusterEvent::Status { id, status } = event else {
+            return;
+        };
+        let fetched = self.fetched.clone();
+        let Some(cluster) = self.clusters.get_mut(id) else {
+            return;
+        };
+        if !reachable(status) || cluster.flux != FluxWatch::Unknown {
+            return;
+        }
+        cluster.flux = FluxWatch::Pending;
+        let handle = cluster.handle.clone();
+        let key = id.clone();
+        cluster.flux_task = Some(TaskGuard::spawn(async move {
+            let mut subscriptions = Vec::new();
+            for kind in FLUX_KINDS {
+                if let Ok(subscription) = handle.subscribe_custom(custom_kind(kind)).await {
+                    subscriptions.push((kind, subscription));
+                }
+            }
+            let _ = fetched.send(Fetched::Flux(key, subscriptions)).await;
+        }));
+    }
+
+    fn fetched(&mut self, fetched: Fetched) {
+        match fetched {
+            Fetched::NodeUsage(key, usage) => {
+                if let Some(cluster) = self.clusters.get_mut(&key) {
+                    let nodes = cluster.handle.objects::<Node>();
+                    cluster.extras.record(&nodes, usage);
+                }
+            }
+            Fetched::PodUsage(key, usage) => {
+                if let Some(cluster) = self.clusters.get_mut(&key) {
+                    cluster.extras.pod_usage = usage;
+                }
+            }
+            Fetched::Prometheus(key, found) => {
+                if let Some(cluster) = self.clusters.get_mut(&key) {
+                    cluster.extras.prometheus = found;
+                }
+            }
+            Fetched::Flux(key, subscriptions) => {
+                if let Some(cluster) = self.clusters.get_mut(&key) {
+                    cluster.extras.flux = subscriptions.iter().map(|(kind, _)| *kind).collect();
+                    cluster.flux_subscriptions =
+                        subscriptions.into_iter().map(|(_, sub)| sub).collect();
+                    cluster.flux = FluxWatch::Resolved;
+                }
+            }
+            Fetched::Yaml(target, yaml) => {
+                if self.inspecting.as_ref() == Some(&target) {
+                    self.yaml = Some((target, yaml));
+                }
+            }
+        }
+    }
+
+    fn inspect(&mut self, target: &ResourceRef) {
+        self.yaml = None;
+        self.yaml_task = None;
+        self.inspecting = Some(target.clone());
+        let Some(handle) = self
+            .clusters
+            .values()
+            .find(|cluster| cluster.id == target.cluster)
+            .map(|cluster| cluster.handle.clone())
+        else {
+            return;
+        };
+        let fetched = self.fetched.clone();
+        let target = target.clone();
+        self.yaml_task = Some(TaskGuard::spawn(async move {
+            let yaml = match inspect::yaml(&handle, &target).await {
+                Ok(yaml) => yaml,
+                Err(error) => format!("# {error}"),
+            };
+            let _ = fetched.send(Fetched::Yaml(target, yaml)).await;
+        }));
     }
 
     fn apply(&mut self, command: &Command) -> bool {
@@ -321,23 +549,56 @@ impl Live {
     }
 
     fn open(&mut self, resource: &ResourceRef) {
+        let page = page_for_kind(&resource.kind);
+        let moved = self.selected.as_ref() != Some(&resource.cluster) || self.page != page;
         self.selected = Some(resource.cluster.clone());
-        self.page = page_for_kind(&resource.kind);
-        self.resubscribe_page();
+        self.page = page;
+        if moved {
+            self.resubscribe_page();
+        }
+        self.inspect(resource);
     }
 
     fn snapshot(&self) -> Snapshot {
-        let connected = self
-            .clusters
-            .values()
-            .map(|cluster| summarize(cluster.id.clone(), cluster.id.to_string(), &cluster.handle));
+        let now = Timestamp::now();
+        let mut connected = Vec::new();
+        let mut problems = Vec::new();
+        let mut details = BTreeMap::new();
+        let mut flux = Counts::default();
+        let mut pods = Vec::new();
+        for cluster in self.clusters.values() {
+            let selected = self.selected.as_ref() == Some(&cluster.id);
+            let selection = selected.then_some(Selection {
+                event_limit: self.settings.event_limit,
+                yaml: self.yaml.as_ref(),
+            });
+            let built = assemble::cluster(
+                &cluster.id,
+                &cluster.handle,
+                &cluster.extras,
+                selection.as_ref(),
+                now,
+            );
+            connected.push(built.summary);
+            pods.extend(built.pods);
+            problems.extend(built.problems);
+            flux = flux + built.flux;
+            if let Some(detail) = built.detail {
+                details.insert(cluster.id.clone(), detail);
+            }
+        }
+        order(&mut problems);
+        let flagged = Counts {
+            total: None,
+            ..problem_counts(&problems)
+        };
         let missing = self
             .store
             .clusters()
             .iter()
             .filter(|saved| !self.clusters.contains_key(&saved.context_ref()))
             .map(missing_summary);
-        let mut clusters: Vec<_> = connected.chain(missing).collect();
+        let mut clusters: Vec<_> = connected.into_iter().chain(missing).collect();
         clusters.sort_by(|a, b| a.name.cmp(&b.name));
         let settings: Vec<ClusterSettings> = self
             .clusters
@@ -345,17 +606,27 @@ impl Live {
             .map(|cluster| {
                 let status = cluster.handle.status();
                 let saved = self.store.get(&cluster.id).map(|c| &c.preferences);
-                cluster_settings(cluster.id.clone(), cluster.handle.context(), &status, saved)
+                let mut settings =
+                    cluster_settings(cluster.id.clone(), cluster.handle.context(), &status, saved);
+                settings.prometheus = cluster
+                    .extras
+                    .prometheus
+                    .as_ref()
+                    .map(|found| format!("{}:{}", found.target.label(), found.target.port));
+                settings
             })
             .collect();
         let sources: BTreeSet<&Path> = self.clusters.keys().map(|id| id.file.as_path()).collect();
         let mut snapshot = Snapshot {
             clusters,
-            fleet_nav: BTreeMap::new(),
-            home: FleetHome::default(),
+            fleet_nav: BTreeMap::from([(Page::Problems, flagged), (Page::GitOps, flux)]),
+            home: FleetHome {
+                problems,
+                ..FleetHome::default()
+            },
             resources: Vec::new(),
             changes: ChangesLog::default(),
-            details: BTreeMap::new(),
+            details,
             gitops: GitOps::default(),
             flux: Vec::new(),
             #[cfg(feature = "loco")]
@@ -365,7 +636,7 @@ impl Live {
                 sources: sources.len(),
                 clusters: settings,
             },
-            pods: Vec::new(),
+            pods,
             forwards: Vec::new(),
         };
         self.gitops.fill(&mut snapshot);
@@ -402,6 +673,31 @@ pub fn cluster_settings(
     }
 }
 
+fn watch_kubeconfigs(
+    sources: &DiscoverySources,
+    discovery: &Discovery,
+    settings: &KubeSettings,
+) -> (Option<KubeconfigWatcher>, Receiver<DiscoveryEvent>) {
+    let started = KubeconfigWatcher::start(
+        sources.clone(),
+        discovery.clone(),
+        settings.discovery_debounce,
+    );
+    match started {
+        Ok((watcher, events)) => (Some(watcher), events),
+        Err(error) => {
+            tracing::warn!(%error, "kubeconfig files are not watched");
+            (None, async_channel::unbounded().1)
+        }
+    }
+}
+
+fn ticker(period: Duration) -> tokio::time::Interval {
+    let mut interval = tokio::time::interval(period);
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    interval
+}
+
 async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<Command>) {
     let LiveBackend {
         settings,
@@ -413,19 +709,11 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
     let discovery = tokio::task::spawn_blocking(move || discover(&scan_sources))
         .await
         .unwrap_or_default();
-    let started = KubeconfigWatcher::start(
-        sources.clone(),
-        discovery.clone(),
-        settings.discovery_debounce,
-    );
-    let (_watcher, discovery_events) = match started {
-        Ok((watcher, events)) => (Some(watcher), events),
-        Err(error) => {
-            tracing::warn!(%error, "kubeconfig files are not watched");
-            (None, async_channel::unbounded().1)
-        }
-    };
+    let (_watcher, discovery_events) = watch_kubeconfigs(&sources, &discovery, &settings);
     let runtime = tokio::runtime::Handle::current();
+    let (fetched, fetched_events) = async_channel::unbounded();
+    let mut usage_tick = ticker(settings.metrics_interval);
+    let mut prometheus_tick = ticker(settings.prometheus_interval);
     let (manager, cluster_events) = ClusterManager::new(runtime, settings.clone(), env.clone());
     let (actions, action_changes) = Actions::new(updates.clone());
     let mut live = Live {
@@ -439,15 +727,18 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
         clusters: BTreeMap::new(),
         selected: None,
         page: Page::Overview,
-        page_subscription: None,
         actions,
         gitops: GitOpsState::default(),
+        page_subscriptions: Vec::new(),
+        fetched,
+        yaml: None,
+        inspecting: None,
+        yaml_task: None,
     };
     let gitops_changed = live.gitops.changed();
     live.reconcile();
     let mut dirty = true;
-    let mut publish = tokio::time::interval(COALESCE_INTERVAL);
-    publish.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut publish = ticker(COALESCE_INTERVAL);
     loop {
         tokio::select! {
             event = discovery_events.recv(), if !discovery_events.is_closed() => {
@@ -458,7 +749,8 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
                 }
             }
             event = cluster_events.recv() => {
-                if event.is_ok() {
+                if let Ok(event) = event {
+                    live.cluster_event(&event);
                     dirty = true;
                 }
             }
@@ -472,11 +764,22 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
                     dirty = true;
                 }
             }
-            command = commands.recv() => {
-                let Ok(command) = command else { return };
-                if live.apply(&command) {
+            fetched = fetched_events.recv() => {
+                if let Ok(fetched) = fetched {
+                    live.fetched(fetched);
                     dirty = true;
                 }
+            }
+            _ = usage_tick.tick() => live.poll_usage(),
+            _ = prometheus_tick.tick() => {
+                if live.page == Page::ClusterOverview {
+                    live.poll_prometheus();
+                }
+            }
+            command = commands.recv() => {
+                let Ok(command) = command else { return };
+                live.apply(&command);
+                dirty = true;
             }
             _ = publish.tick() => {
                 if dirty {
