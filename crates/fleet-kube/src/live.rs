@@ -14,7 +14,6 @@ use fleet_core::{
     ContextChoice, Counts, FleetHome, GitOps, KubeconfigFile, NewCluster, Notice, Page,
     Preferences, Receiver, ResourceRef, Sender, Snapshot, Status, Update, Verdict, Workload,
 };
-use fleet_flux::ObjectKind;
 use jiff::Timestamp;
 use k8s_openapi::api::core::v1::Node;
 use tokio::time::MissedTickBehavior;
@@ -25,7 +24,6 @@ use crate::checks::{self, CheckResult, run_checks_streaming};
 use crate::discovery::{
     ContextRef, Discovery, DiscoveryEvent, DiscoverySources, KubeContext, discover,
 };
-use crate::flux::{WATCHED as FLUX_KINDS, custom_kind};
 use crate::gitops::GitOpsState;
 use crate::inspect;
 use crate::manager::{
@@ -93,15 +91,7 @@ enum Fetched {
     NodeUsage(ContextRef, Option<Vec<NodeUsage>>),
     PodUsage(ContextRef, Vec<PodUsage>),
     Prometheus(ContextRef, Option<Prometheus>),
-    Flux(ContextRef, Vec<(ObjectKind, Subscription)>),
     Yaml(ResourceRef, inspect::Inspected),
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum FluxWatch {
-    Unknown,
-    Pending,
-    Resolved,
 }
 
 struct Connected {
@@ -109,12 +99,9 @@ struct Connected {
     handle: ClusterHandle,
     _baseline: Vec<Subscription>,
     extras: Extras,
-    flux: FluxWatch,
-    flux_subscriptions: Vec<Subscription>,
     usage_task: Option<TaskGuard>,
     pod_usage_task: Option<TaskGuard>,
     prometheus_task: Option<TaskGuard>,
-    flux_task: Option<TaskGuard>,
 }
 
 struct Inspecting {
@@ -201,12 +188,9 @@ impl Live {
                     handle,
                     _baseline: baseline,
                     extras: Extras::new(self.settings.usage_samples()),
-                    flux: FluxWatch::Unknown,
-                    flux_subscriptions: Vec::new(),
                     usage_task: None,
                     pod_usage_task: None,
                     prometheus_task: None,
-                    flux_task: None,
                 },
             );
         }
@@ -333,32 +317,9 @@ impl Live {
     }
 
     fn cluster_event(&mut self, event: &ClusterEvent) {
-        let (id, status) = match event {
-            ClusterEvent::Status { id, status } => (id, status),
-            ClusterEvent::Changed { id, .. } => {
-                self.refresh_yaml(id);
-                return;
-            }
-        };
-        let fetched = self.fetched.clone();
-        let Some(cluster) = self.clusters.get_mut(id) else {
-            return;
-        };
-        if !reachable(status) || cluster.flux != FluxWatch::Unknown {
-            return;
+        if let ClusterEvent::Changed { id, .. } = event {
+            self.refresh_yaml(id);
         }
-        cluster.flux = FluxWatch::Pending;
-        let handle = cluster.handle.clone();
-        let key = id.clone();
-        cluster.flux_task = Some(TaskGuard::spawn(async move {
-            let mut subscriptions = Vec::new();
-            for kind in FLUX_KINDS {
-                if let Ok(subscription) = handle.subscribe_custom(custom_kind(kind)).await {
-                    subscriptions.push((kind, subscription));
-                }
-            }
-            let _ = fetched.send(Fetched::Flux(key, subscriptions)).await;
-        }));
     }
 
     fn fetched(&mut self, fetched: Fetched) {
@@ -377,14 +338,6 @@ impl Live {
             Fetched::Prometheus(key, found) => {
                 if let Some(cluster) = self.clusters.get_mut(&key) {
                     cluster.extras.prometheus = found;
-                }
-            }
-            Fetched::Flux(key, subscriptions) => {
-                if let Some(cluster) = self.clusters.get_mut(&key) {
-                    cluster.extras.flux = subscriptions.iter().map(|(kind, _)| *kind).collect();
-                    cluster.flux_subscriptions =
-                        subscriptions.into_iter().map(|(_, sub)| sub).collect();
-                    cluster.flux = FluxWatch::Resolved;
                 }
             }
             Fetched::Yaml(target, inspected) => {
@@ -696,10 +649,12 @@ impl Live {
                 event_limit: self.settings.event_limit,
                 yaml: self.yaml.as_ref(),
             });
+            let health = self.gitops.health(&cluster.id, now);
             let built = assemble::cluster(
                 &cluster.id,
                 &cluster.handle,
                 &cluster.extras,
+                health.as_deref(),
                 selection.as_ref(),
                 now,
             );

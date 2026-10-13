@@ -17,6 +17,7 @@ use fleet_core::{
 use fleet_flux::ObjectKind;
 use jiff::Timestamp;
 
+use crate::flux::{FluxHealth, WATCHED};
 use crate::manager::{ClusterHandle, ConnectionStatus, lock};
 use changes::{Consumer, Repo, changes_log, repo_key, wanted_revision};
 use convert::{Inputs, Parsed, core_status, flux_object, parse, summary};
@@ -112,18 +113,19 @@ impl GitOpsState {
             .map(|flux| Focus::start(key.clone(), &flux.handle, self.changed_tx.clone()));
     }
 
+    pub fn health(&self, cluster: &ClusterId, now: Timestamp) -> Option<Vec<FluxHealth>> {
+        let flux = self.clusters.get(cluster)?;
+        if !flux.info().detected() {
+            return None;
+        }
+        Some(cluster_health(&parsed_objects(flux), now))
+    }
+
     fn data(&self) -> Vec<ClusterData> {
         self.clusters
             .iter()
             .map(|(id, flux)| {
-                let objects = KINDS
-                    .iter()
-                    .flat_map(|kind| {
-                        flux.objects(*kind)
-                            .into_iter()
-                            .filter_map(move |object| parse(&object, *kind))
-                    })
-                    .collect();
+                let objects = parsed_objects(flux);
                 let online = !matches!(
                     flux.handle.status(),
                     ConnectionStatus::Offline(_) | ConnectionStatus::AuthExpired(_)
@@ -229,6 +231,25 @@ impl GitOpsState {
     }
 }
 
+fn parsed_objects(flux: &ClusterFlux) -> Vec<Parsed> {
+    KINDS
+        .iter()
+        .flat_map(|kind| {
+            flux.objects(*kind)
+                .into_iter()
+                .filter_map(move |object| parse(&object, *kind))
+        })
+        .collect()
+}
+
+fn cluster_health(objects: &[Parsed], now: Timestamp) -> Vec<FluxHealth> {
+    objects
+        .iter()
+        .filter(|parsed| WATCHED.contains(&parsed.kind()))
+        .map(|parsed| convert::health(parsed, objects, now))
+        .collect()
+}
+
 fn flux_key(resource: &ResourceRef) -> Option<FluxKey> {
     let kind = FluxKind::from_label(&resource.kind)?;
     let namespace = resource.namespace.clone()?;
@@ -299,6 +320,28 @@ mod tests {
             ))
         );
         assert_eq!(flux_key(&resource("Deployment")), None);
+    }
+
+    #[test]
+    fn health_reads_the_source_like_the_object_page() {
+        let mut failing = git_repository();
+        failing["status"]["conditions"][0]["status"] = "False".into();
+        failing["status"]["conditions"][0]["reason"] = "GitOperationFailed".into();
+        let objects = [
+            parsed(&kustomization("apps", "True", "3e0ff8ae123b")),
+            parsed(&failing),
+        ];
+        let health = cluster_health(&objects, Timestamp::UNIX_EPOCH);
+        let summarized: Vec<(&str, Status, &str)> = health
+            .iter()
+            .map(|h| (h.name.as_str(), h.status, h.sentence.as_str()))
+            .collect();
+        let page = summary(&objects[0], &objects);
+        assert_eq!(
+            summarized,
+            [("apps", core_status(page.status), page.sentence.as_str())]
+        );
+        assert_eq!(health[0].status, Status::Warn);
     }
 
     #[test]

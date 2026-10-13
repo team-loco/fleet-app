@@ -10,8 +10,8 @@ use kube::api::{DynamicObject, ListParams};
 use kube::{Api, Client};
 
 use crate::error::Error;
+use crate::flux::custom_kind;
 use crate::manager::{ClusterHandle, Subscription, lock};
-use crate::resources::CustomKind;
 use crate::task::TaskGuard;
 
 pub const KINDS: [ObjectKind; 6] = [
@@ -73,11 +73,6 @@ impl ClusterFlux {
     pub fn objects(&self, kind: ObjectKind) -> Vec<Arc<DynamicObject>> {
         self.handle.custom_objects(&custom_kind(kind))
     }
-}
-
-pub fn custom_kind(kind: ObjectKind) -> CustomKind {
-    let (group, version) = kind.api_version().split_once('/').unwrap_or_default();
-    CustomKind::new(group, version, kind.as_str())
 }
 
 async fn detect(
@@ -218,13 +213,5 @@ mod tests {
                 ("image-automation".to_owned(), None),
             ]
         );
-    }
-
-    #[test]
-    fn custom_kinds_split_the_api_version() {
-        let kind = custom_kind(ObjectKind::HelmRelease);
-        assert_eq!(kind.group, "helm.toolkit.fluxcd.io");
-        assert_eq!(kind.version, "v2");
-        assert_eq!(kind.kind, "HelmRelease");
     }
 }

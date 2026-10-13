@@ -13,7 +13,7 @@ use kube::api::ListParams;
 use serde_json::Value;
 
 use super::convert::{elapsed, release_status};
-use super::watch::custom_kind;
+use crate::flux::custom_kind;
 use crate::manager::{ClusterHandle, Subscription, lock};
 use crate::resources::WatchKind;
 use crate::task::TaskGuard;
