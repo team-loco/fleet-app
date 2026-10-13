@@ -34,6 +34,15 @@ pub enum LocoCommand {
     CancelBuild(ResourceRef),
 }
 
+impl LocoCommand {
+    pub fn target(&self) -> &ResourceRef {
+        match self {
+            Self::RestartApplication(application) => application,
+            Self::CancelBuild(build) => build,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Workspace {
     pub namespace: String,

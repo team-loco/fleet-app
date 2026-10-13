@@ -1,0 +1,10 @@
+[
+  {
+    "metadata": {"name": "eg", "namespace": "loco-system", "generation": 1},
+    "spec": {"listeners": [
+      {"name": "https-apps-0", "hostname": "*.onloco.app", "port": 443, "protocol": "HTTPS", "tls": {"certificateRefs": [{"name": "loco-core-tls"}]}},
+      {"name": "http-apps-0", "hostname": "*.onloco.app", "port": 80, "protocol": "HTTP"}
+    ]},
+    "status": {"listeners": [{"name": "https-apps-0", "attachedRoutes": 2, "conditions": []}]}
+  }
+]

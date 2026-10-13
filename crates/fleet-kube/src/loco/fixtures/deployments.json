@@ -1,0 +1,26 @@
+[
+  {
+    "metadata": {"name": "resource-web", "namespace": "ws-0192c3f1", "generation": 1,
+      "labels": {"app": "resource-web", "app.kubernetes.io/managed-by": "loco-controller"},
+      "annotations": {"loco.io/application-name": "resource-web", "loco.io/application-namespace": "loco-system"}},
+    "spec": {"replicas": 2, "selector": {"matchLabels": {"app": "resource-web"}}, "template": {"spec": {"containers": [{"name": "app", "image": "registry/web@sha256:def"}]}}},
+    "status": {"observedGeneration": 1, "readyReplicas": 2, "updatedReplicas": 2, "replicas": 2}
+  },
+  {
+    "metadata": {"name": "resource-api", "namespace": "ws-0192c3e7", "generation": 2,
+      "labels": {"app": "resource-api", "app.kubernetes.io/managed-by": "loco-controller"},
+      "annotations": {"loco.io/application-name": "resource-api", "loco.io/application-namespace": "loco-system"}},
+    "spec": {"replicas": 2, "selector": {"matchLabels": {"app": "resource-api"}}, "template": {"spec": {"containers": [{"name": "app", "image": "registry/api@sha256:abc"}]}}},
+    "status": {"observedGeneration": 2, "readyReplicas": 0, "updatedReplicas": 2, "replicas": 2}
+  },
+  {
+    "metadata": {"name": "loco-core-agent", "namespace": "loco-system", "generation": 4},
+    "spec": {"replicas": 1, "selector": {"matchLabels": {"app": "loco-core-agent"}}, "template": {"spec": {"containers": [{"name": "agent", "image": "ghcr.io/loco/agent:sha-8c1f2e7"}]}}},
+    "status": {"observedGeneration": 4, "readyReplicas": 1, "updatedReplicas": 1, "replicas": 1}
+  },
+  {
+    "metadata": {"name": "loco-controller", "namespace": "loco-system", "generation": 1},
+    "spec": {"replicas": 1, "selector": {"matchLabels": {"app": "loco-controller"}}, "template": {"spec": {"containers": [{"name": "manager", "image": "ghcr.io/loco/controller:sha-8c1f2e7"}]}}},
+    "status": {"observedGeneration": 1, "readyReplicas": 0, "updatedReplicas": 1, "replicas": 1}
+  }
+]

@@ -1,0 +1,7 @@
+[
+  {
+    "metadata": {"name": "build-b1", "namespace": "loco-builds", "uid": "job-b1-uid",
+      "ownerReferences": [{"apiVersion": "infra.loco.io/v1alpha1", "kind": "Build", "name": "build-b1", "uid": "build-b1-uid", "controller": true}]},
+    "spec": {"ttlSecondsAfterFinished": 86400, "template": {"spec": {"containers": [{"name": "push", "image": "builder"}]}}}
+  }
+]

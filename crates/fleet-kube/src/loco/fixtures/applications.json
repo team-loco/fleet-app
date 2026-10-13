@@ -1,0 +1,31 @@
+[
+  {
+    "apiVersion": "infra.loco.io/v1alpha1", "kind": "Application",
+    "metadata": {"name": "resource-api", "namespace": "loco-system", "uid": "api-uid", "generation": 3, "annotations": {"loco.io/placement-revision": "14"}},
+    "spec": {
+      "type": "SERVICE", "resourceId": "api", "workspaceId": "0192c3e7", "deploymentId": "0192f4b2", "environmentName": "production", "region": "nyc1",
+      "serviceSpec": {
+        "deployment": {"image": "registry/api@sha256:abc", "port": 8080},
+        "resources": {"cpu": "500m", "memory": "512Mi", "replicas": {"min": 2, "max": 6}, "scalers": {"enabled": true, "cpuTarget": 70}},
+        "routing": {"hostName": "api.onloco.app", "pathPrefix": "/", "idleTimeout": 30}
+      }
+    },
+    "status": {
+      "phase": "Failed", "readyReplicas": 0, "desiredReplicas": 2, "observedPlacementRevision": 13, "startedAt": "2026-10-12T21:04:00Z",
+      "conditions": [{"type": "Degraded", "status": "True", "reason": "CreateContainerConfigError", "message": "The image runs as root.", "lastTransitionTime": "2026-10-12T21:00:00Z"}]
+    }
+  },
+  {
+    "apiVersion": "infra.loco.io/v1alpha1", "kind": "Application",
+    "metadata": {"name": "resource-web", "namespace": "loco-system", "uid": "web-uid", "generation": 1, "annotations": {"loco.io/placement-revision": "9"}},
+    "spec": {
+      "type": "SERVICE", "resourceId": "web", "workspaceId": "0192c3f1", "deploymentId": "0192e8c0", "environmentName": "production",
+      "serviceSpec": {
+        "deployment": {"image": "registry/web@sha256:def", "port": 8080, "healthCheck": {"path": "/healthz", "interval": 10, "timeout": 3, "failThreshold": 3}},
+        "resources": {"cpu": "250m", "memory": "256Mi", "replicas": {"min": 2, "max": 2}},
+        "routing": {"hostName": "web.onloco.app", "pathPrefix": "/", "idleTimeout": 30}
+      }
+    },
+    "status": {"phase": "Ready", "readyReplicas": 2, "desiredReplicas": 2, "observedPlacementRevision": 9}
+  }
+]

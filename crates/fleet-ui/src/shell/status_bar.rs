@@ -15,7 +15,7 @@ use crate::theme::{
 const SEPARATOR: &str = " · ";
 const FLUX: &str = "flux";
 #[cfg(feature = "loco")]
-const LOCO_SYNC_UNKNOWN: &str = "loco agent · sync not observable in-cluster";
+const LOCO_SYNC_UNKNOWN: &str = "sync not observable in-cluster";
 
 impl Shell {
     pub(super) fn status_bar(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -115,7 +115,13 @@ impl Shell {
                     fleet_core::time::age(heartbeat)
                 ),
             ),
-            None => (Status::Offline, LOCO_SYNC_UNKNOWN.to_owned()),
+            None => match agent.ready.zip(agent.readiness()) {
+                Some(((ready, desired), status)) => (
+                    status,
+                    format!("loco agent {ready}/{desired} ready · {LOCO_SYNC_UNKNOWN}"),
+                ),
+                None => (Status::Offline, format!("loco agent · {LOCO_SYNC_UNKNOWN}")),
+            },
         };
         let element = div()
             .flex()
