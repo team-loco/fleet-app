@@ -72,6 +72,13 @@ impl Page {
         }
     }
 
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::ClusterOverview => "Cluster overview",
+            other => other.label(),
+        }
+    }
+
     pub const fn is_fleet(self) -> bool {
         matches!(
             self,
@@ -150,6 +157,13 @@ mod tests {
         assert!(fleet_pages.copied().all(Page::is_fleet));
         let cluster_pages = CLUSTER_NAV.iter().flat_map(|s| s.pages.iter());
         assert!(!cluster_pages.copied().any(Page::is_fleet));
+    }
+
+    #[test]
+    fn cluster_overview_title_differs_from_its_nav_label() {
+        assert_eq!(Page::ClusterOverview.label(), "Overview");
+        assert_eq!(Page::ClusterOverview.title(), "Cluster overview");
+        assert_eq!(Page::Nodes.title(), "Nodes");
     }
 
     #[cfg(feature = "loco")]

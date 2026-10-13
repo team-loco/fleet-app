@@ -6,8 +6,8 @@ use gpui::{
 
 use super::status::StatusText;
 use crate::theme::{
-    ActiveTheme, FONT_MONO, LINE_PROSE, PAGE_HEADER, RULE, SPACE_4, SPACE_5, SPACE_7, SPACE_8,
-    TEXT_BODY, TEXT_HEADING, TEXT_MONO, TEXT_SMALL, TEXT_TITLE, TEXT_UI,
+    ActiveTheme, FONT_MONO, LINE_PROSE, PAGE_HEADER, RULE, SPACE_3, SPACE_4, SPACE_5, SPACE_6,
+    SPACE_7, SPACE_8, TEXT_BODY, TEXT_HEADING, TEXT_MONO, TEXT_SMALL, TEXT_TITLE, TEXT_UI,
 };
 
 #[derive(IntoElement)]
@@ -112,6 +112,74 @@ impl RenderOnce for PageHeader {
                         .child(meta),
                 )
             })
+    }
+}
+
+#[derive(IntoElement)]
+pub struct Lede {
+    sentence: SharedString,
+    meta: Option<SharedString>,
+    end: Option<AnyElement>,
+}
+
+impl Lede {
+    pub fn new(sentence: impl Into<SharedString>) -> Self {
+        Self {
+            sentence: sentence.into(),
+            meta: None,
+            end: None,
+        }
+    }
+
+    pub fn meta(mut self, meta: impl Into<SharedString>) -> Self {
+        self.meta = Some(meta.into());
+        self
+    }
+
+    pub fn end(mut self, end: impl IntoElement) -> Self {
+        self.end = Some(end.into_any_element());
+        self
+    }
+}
+
+impl RenderOnce for Lede {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let palette = cx.palette();
+        let text = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w_0()
+            .gap(SPACE_3)
+            .child(
+                div()
+                    .text_size(TEXT_UI)
+                    .line_height(relative(LINE_PROSE))
+                    .text_color(palette.fg2)
+                    .child(self.sentence),
+            )
+            .when_some(self.meta, |text, meta| {
+                text.child(
+                    div()
+                        .font_family(FONT_MONO)
+                        .text_size(TEXT_MONO)
+                        .text_color(palette.mute)
+                        .truncate()
+                        .child(meta),
+                )
+            });
+        div()
+            .flex()
+            .flex_none()
+            .items_start()
+            .gap(SPACE_6)
+            .px(SPACE_8)
+            .pt(SPACE_7)
+            .pb(SPACE_7)
+            .border_b(RULE)
+            .border_color(palette.line)
+            .child(text)
+            .children(self.end)
     }
 }
 

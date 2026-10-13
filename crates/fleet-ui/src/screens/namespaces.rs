@@ -1,28 +1,28 @@
-use fleet_core::cluster::Namespace;
-use fleet_core::overview::number;
+use fleet_core::cluster::{CPU_UNIT, MEMORY_UNIT, Namespace, namespace_sentence};
+use fleet_core::overview::fixed;
 use fleet_core::time::age;
-use fleet_core::{ClusterDetail, Status};
+use fleet_core::{ClusterDetail, Counts, Status};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
     Render, Styled, Window, div, px,
 };
 
 use super::ScreenEvent;
-use crate::kit::{Column, SectionHeader, StatusGlyph, Table};
-use crate::theme::{ActiveTheme, FONT_MONO, SPACE_4};
+use crate::kit::{Column, Lede, StatusGlyph, Table};
+use crate::theme::{ActiveTheme, FONT_MONO, Palette, SPACE_4};
 
 const NAME_WEIGHT: f32 = 1.4;
 const NAME_MIN: Pixels = px(200.);
-const STATUS_WIDTH: Pixels = px(72.);
+const PROBLEMS_WEIGHT: f32 = 1.;
+const PROBLEMS_MIN: Pixels = px(96.);
 const PODS_WIDTH: Pixels = px(52.);
-const PROBLEMS_WIDTH: Pixels = px(96.);
-const CPU_WIDTH: Pixels = px(64.);
+const CPU_WIDTH: Pixels = px(84.);
 const MEMORY_WIDTH: Pixels = px(84.);
 const AGE_WIDTH: Pixels = px(44.);
-const MEMORY_UNIT: &str = "GiB";
 
 pub struct NamespacesScreen {
     namespaces: Vec<Namespace>,
+    sentence: String,
     table: Entity<Table<Namespace>>,
 }
 
@@ -37,6 +37,7 @@ impl NamespacesScreen {
         });
         Self {
             namespaces: Vec::new(),
+            sentence: String::new(),
             table,
         }
     }
@@ -46,31 +47,28 @@ impl NamespacesScreen {
             return;
         }
         self.namespaces.clone_from(&detail.namespaces);
+        self.sentence = namespace_sentence(&self.namespaces);
         let rows = self.namespaces.clone();
         self.table.update(cx, |table, cx| table.set_rows(rows, cx));
         cx.notify();
     }
 
-    pub fn header_note(&self) -> (Status, String) {
-        let flagged = self
-            .namespaces
-            .iter()
-            .filter(|n| n.status != Status::Ok)
-            .count();
-        let worst = Status::worst(self.namespaces.iter().map(|n| n.status));
-        (worst, format!("{flagged} with problems"))
+    pub fn header_note(&self) -> (Counts, String) {
+        let counts = Counts::of(self.namespaces.iter().map(|n| n.status));
+        let text = format!("{} with problems", counts.flagged());
+        (counts, text)
     }
 }
 
 impl Render for NamespacesScreen {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let pods: u32 = self.namespaces.iter().map(|n| n.pods).sum();
-        let count = format!("{} · {pods} pods", self.namespaces.len());
+        let meta = format!("{} namespaces · {pods} pods", self.namespaces.len());
         div()
             .size_full()
             .flex()
             .flex_col()
-            .child(SectionHeader::new("Namespaces").count(count))
+            .child(Lede::new(self.sentence.clone()).meta(meta))
             .child(div().flex_1().min_h_0().child(self.table.clone()))
     }
 }
@@ -104,43 +102,50 @@ impl gpui::RenderOnce for ProblemBadge {
     }
 }
 
+fn name_cell(namespace: &Namespace, palette: &Palette) -> AnyElement {
+    let phase = namespace.phase_note().map(|phase| {
+        div()
+            .flex_none()
+            .text_color(palette.warn)
+            .child(phase.to_owned())
+    });
+    div()
+        .flex()
+        .items_center()
+        .gap(SPACE_4)
+        .min_w_0()
+        .child(StatusGlyph::new(namespace.status))
+        .child(div().truncate().child(namespace.name.clone()))
+        .children(phase)
+        .into_any_element()
+}
+
 fn columns() -> Vec<Column<Namespace>> {
     vec![
-        Column::new("Name", |n: &Namespace, _| {
-            div()
-                .flex()
-                .items_center()
-                .gap(SPACE_4)
-                .min_w_0()
-                .child(StatusGlyph::new(n.status))
-                .child(div().truncate().child(n.name.clone()))
-                .into_any_element()
-        })
-        .mono()
-        .flex(NAME_WEIGHT, NAME_MIN)
-        .sort_by_key(|n: &Namespace| n.name.clone()),
-        Column::colored_text(
-            "Status",
-            |n: &Namespace| n.phase.clone().into(),
-            |_, p| p.fg2,
-        )
-        .fixed(STATUS_WIDTH),
+        Column::new("Name", name_cell)
+            .mono()
+            .flex(NAME_WEIGHT, NAME_MIN)
+            .sort_by_key(|n: &Namespace| n.name.clone()),
+        Column::new("Problems", |n: &Namespace, _| problems(n))
+            .flex(PROBLEMS_WEIGHT, PROBLEMS_MIN)
+            .sort_by_key(|n: &Namespace| std::cmp::Reverse(n.status)),
         Column::text("Pods", |n: &Namespace| n.pods.to_string().into())
             .mono()
             .end()
             .fixed(PODS_WIDTH)
             .sort_by_key(|n: &Namespace| n.pods),
-        Column::new("Problems", |n: &Namespace, _| problems(n))
-            .fixed(PROBLEMS_WIDTH)
-            .sort_by_key(|n: &Namespace| std::cmp::Reverse(n.status)),
-        Column::colored_text("CPU", |n: &Namespace| number(n.cpu).into(), |_, p| p.fg2)
-            .mono()
-            .end()
-            .fixed(CPU_WIDTH)
-            .sortable(|a: &Namespace, b: &Namespace| a.cpu.total_cmp(&b.cpu)),
+        Column::colored_text(
+            "CPU",
+            |n: &Namespace| format!("{} {CPU_UNIT}", fixed(n.cpu)).into(),
+            |_, p| p.fg2,
+        )
+        .mono()
+        .end()
+        .fixed(CPU_WIDTH)
+        .sortable(|a: &Namespace, b: &Namespace| a.cpu.total_cmp(&b.cpu)),
         Column::colored_text(
             "Memory",
-            |n: &Namespace| format!("{} {MEMORY_UNIT}", number(n.memory)).into(),
+            |n: &Namespace| format!("{} {MEMORY_UNIT}", fixed(n.memory)).into(),
             |_, p| p.fg2,
         )
         .mono()

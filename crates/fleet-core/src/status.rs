@@ -44,6 +44,26 @@ impl Counts {
         }
     }
 
+    pub fn of(statuses: impl IntoIterator<Item = Status>) -> Self {
+        let mut counts = Self::total(0);
+        for status in statuses {
+            counts.total = counts.total.map(|total| total.saturating_add(1));
+            match status {
+                Status::Err => counts.err = counts.err.saturating_add(1),
+                Status::Warn => counts.warn = counts.warn.saturating_add(1),
+                Status::Suspended => counts.sus = counts.sus.saturating_add(1),
+                Status::Ok => {}
+                Status::Progress => {}
+                Status::Offline => {}
+            }
+        }
+        counts
+    }
+
+    pub fn flagged(&self) -> u32 {
+        self.err + self.warn + self.sus
+    }
+
     pub const fn with_err(self, err: u32) -> Self {
         Self { err, ..self }
     }
@@ -145,6 +165,24 @@ mod tests {
         assert_eq!(counts.badges(), [(Status::Err, 2), (Status::Warn, 1)]);
         assert_eq!(counts.status(), Status::Err);
         assert_eq!(Counts::total(3).status(), Status::Ok);
+    }
+
+    #[test]
+    fn counts_of_statuses_tally_flagged_and_total() {
+        let counts = Counts::of([
+            Status::Ok,
+            Status::Err,
+            Status::Warn,
+            Status::Warn,
+            Status::Suspended,
+            Status::Progress,
+        ]);
+        assert_eq!(
+            counts,
+            Counts::total(6).with_err(1).with_warn(2).with_sus(1)
+        );
+        assert_eq!(counts.flagged(), 4);
+        assert_eq!(Counts::of([]), Counts::total(0));
     }
 
     #[test]

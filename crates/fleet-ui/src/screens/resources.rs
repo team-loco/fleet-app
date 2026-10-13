@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use fleet_core::resources::{Resource, filter_resources, namespaces_of};
+use fleet_core::resources::{Resource, filter_resources, namespaces_of, sentence};
 use fleet_core::time::age;
 use fleet_core::{
-    ClusterDetail, ClusterId, ClusterSummary, Command, ResourceKind, ResourceRef, Status,
+    ClusterDetail, ClusterId, ClusterSummary, Command, Counts, ResourceKind, ResourceRef, Status,
 };
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
@@ -12,19 +12,19 @@ use gpui::{
 
 use super::ScreenEvent;
 use crate::kit::{
-    ActionMenu, CodeView, Column, ConfirmDialog, IconButton, InputEvent, Inspector, MenuItem,
-    SectionHeader, Select, SelectEvent, StatusGlyph, Table, TableEvent, TextField, TextFieldState,
-    confirm,
+    ActionMenu, CodeView, Column, ConfirmDialog, IconButton, InputEvent, Inspector, Lede, MenuItem,
+    Select, SelectEvent, StatusGlyph, Table, TableEvent, TextField, TextFieldState, confirm,
 };
 use crate::theme::{SPACE_3, SPACE_4};
 
 const ALL_NAMESPACES: &str = "All namespaces";
-const PLACEHOLDER: &str = "filter by name";
+const PLACEHOLDER: &str = "filter by name or namespace";
 const NAME_WEIGHT: f32 = 1.4;
 const NAME_MIN: Pixels = px(200.);
 const NAMESPACE_WIDTH: Pixels = px(130.);
 const AGE_WIDTH: Pixels = px(44.);
 const SELECT_WIDTH: Pixels = px(180.);
+const SEARCH_WIDE: Pixels = px(220.);
 const YAML_INSPECTOR: Pixels = px(480.);
 const STATUS_COLUMNS: [&str; 2] = ["Ready", "Status"];
 
@@ -35,11 +35,11 @@ enum Cell {
     Flex(f32, Pixels),
 }
 
-const IMAGE: Cell = Cell::Flex(1.4, px(220.));
+const IMAGE: Cell = Cell::Flex(3., px(300.));
 const DEPLOYMENT_CELLS: [Cell; 4] = [
     Cell::Fixed(px(56.)),
-    Cell::End(px(76.)),
-    Cell::End(px(72.)),
+    Cell::Fixed(px(76.)),
+    Cell::Fixed(px(72.)),
     IMAGE,
 ];
 const STATEFULSET_CELLS: [Cell; 3] = [Cell::Fixed(px(56.)), Cell::Fixed(px(140.)), IMAGE];
@@ -98,6 +98,8 @@ pub struct ResourcesScreen {
     cluster: Option<ClusterId>,
     kind: ResourceKind,
     rows: Vec<Resource>,
+    sentence: String,
+    confirm_destructive: bool,
     namespace: Option<String>,
     query: String,
     selected: Option<(String, String)>,
@@ -139,6 +141,8 @@ impl ResourcesScreen {
             cluster: None,
             kind: ResourceKind::Deployment,
             rows: Vec::new(),
+            sentence: String::new(),
+            confirm_destructive: true,
             namespace: None,
             query: String::new(),
             selected: None,
@@ -156,9 +160,14 @@ impl ResourcesScreen {
         cluster: &ClusterSummary,
         kind: ResourceKind,
         detail: &ClusterDetail,
+        confirm_destructive: bool,
         cx: &mut Context<Self>,
     ) {
         let rows = detail.resources(kind);
+        if self.confirm_destructive != confirm_destructive {
+            self.confirm_destructive = confirm_destructive;
+            self.refresh_menu(cx);
+        }
         let switched = self.kind != kind || self.cluster.as_ref() != Some(&cluster.id);
         if !switched && self.rows == rows {
             return;
@@ -173,6 +182,7 @@ impl ResourcesScreen {
         self.cluster = Some(cluster.id.clone());
         self.kind = kind;
         self.rows = rows.to_vec();
+        self.sentence = sentence(kind, &self.rows);
         let mut options: Vec<SharedString> = vec![ALL_NAMESPACES.into()];
         options.extend(
             namespaces_of(&self.rows)
@@ -205,15 +215,15 @@ impl ResourcesScreen {
         }
     }
 
-    pub fn header_note(&self) -> (Status, String) {
-        let flagged = self.rows.iter().filter(|r| r.status != Status::Ok).count();
-        let worst = Status::worst(self.rows.iter().map(|r| r.status));
+    pub fn header_note(&self) -> (Counts, String) {
+        let counts = Counts::of(self.rows.iter().map(|r| r.status));
+        let flagged = counts.flagged();
         let text = if flagged > 0 {
             format!("{flagged} of {} need attention", self.rows.len())
         } else {
             self.rows.len().to_string()
         };
-        (worst, text)
+        (counts, text)
     }
 
     fn table(&mut self, cx: &mut Context<Self>) -> Entity<Table<Resource>> {
@@ -312,7 +322,14 @@ impl ResourcesScreen {
     fn refresh_menu(&mut self, cx: &mut Context<Self>) {
         let target = self.selected_row().and_then(|r| self.target(r));
         let items = target
-            .map(|target| delete_items(self.kind, target, cx.weak_entity()))
+            .map(|target| {
+                delete_items(
+                    self.kind,
+                    target,
+                    self.confirm_destructive,
+                    cx.weak_entity(),
+                )
+            })
             .unwrap_or_default();
         self.menu.update(cx, |menu, cx| menu.set_items(items, cx));
     }
@@ -341,18 +358,12 @@ impl ResourcesScreen {
 
 impl Render for ResourcesScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let flagged = self.rows.iter().filter(|r| r.status != Status::Ok).count();
-        let count = if flagged > 0 {
-            format!("{} · {flagged} need attention", self.rows.len())
-        } else {
-            self.rows.len().to_string()
-        };
         let controls = div()
             .flex()
             .items_center()
             .gap(SPACE_4)
             .child(self.namespaces.clone())
-            .child(TextField::search(&self.search));
+            .child(TextField::search(&self.search).width(SEARCH_WIDE));
         let table = self.table(cx);
         let inspector = self
             .selected_row()
@@ -367,11 +378,7 @@ impl Render for ResourcesScreen {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .child(
-                        SectionHeader::new(self.kind.page().label())
-                            .count(count)
-                            .end(controls),
-                    )
+                    .child(Lede::new(self.sentence.clone()).end(controls))
                     .child(div().flex_1().min_h_0().child(table)),
             )
             .children(inspector)
@@ -381,6 +388,7 @@ impl Render for ResourcesScreen {
 fn delete_items(
     kind: ResourceKind,
     target: ResourceRef,
+    confirm_destructive: bool,
     screen: WeakEntity<ResourcesScreen>,
 ) -> Vec<MenuItem> {
     let title = format!("Delete {}", kind.name());
@@ -389,6 +397,11 @@ fn delete_items(
         MenuItem::new("Delete…", move |window, cx| {
             let screen = screen.clone();
             let target = target.clone();
+            if !confirm_destructive {
+                let command = Command::Delete(target);
+                let _ = screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+                return;
+            }
             let dialog = ConfirmDialog::new(
                 title.clone(),
                 "It is removed from the cluster now. If Flux or another controller manages it, it comes back on the next reconcile.",

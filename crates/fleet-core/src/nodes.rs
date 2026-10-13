@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use crate::Status;
+use crate::overview::{join_clauses, named, plural, verb};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Usage {
@@ -58,6 +59,7 @@ impl Node {
 
 pub const READY_CONDITION: &str = "Ready";
 pub const CONDITION_TRUE: &str = "True";
+const INSTANCE_SIZE_SEPARATOR: char = '.';
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NodeSummary {
@@ -105,6 +107,82 @@ impl NodeSummary {
             .collect();
         parts.join(" · ")
     }
+
+    pub fn compact_instance_label(&self) -> String {
+        let mut types = self.instance_types.clone();
+        types.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+        let parts: Vec<String> = types
+            .iter()
+            .enumerate()
+            .map(|(ix, (name, count))| {
+                let shown = if ix == 0 {
+                    name.as_str()
+                } else {
+                    name.split(INSTANCE_SIZE_SEPARATOR).next().unwrap_or(name)
+                };
+                format!("{shown} ×{count}")
+            })
+            .collect();
+        parts.join(" · ")
+    }
+}
+
+pub fn sentence(nodes: &[Node]) -> String {
+    if nodes.is_empty() {
+        return "No nodes have registered with this cluster.".into();
+    }
+    let not_ready: Vec<&str> = nodes
+        .iter()
+        .filter(|n| !n.is_ready())
+        .map(|n| n.name.as_str())
+        .collect();
+    let cordoned: Vec<&str> = nodes
+        .iter()
+        .filter(|n| !n.schedulable && n.is_ready())
+        .map(|n| n.name.as_str())
+        .collect();
+    let pressured: Vec<String> = nodes
+        .iter()
+        .filter(|n| n.is_ready())
+        .filter_map(|n| {
+            let kinds: Vec<String> = n
+                .conditions
+                .iter()
+                .filter(|c| !c.healthy && c.kind != READY_CONDITION)
+                .map(|c| c.kind.clone())
+                .collect();
+            (!kinds.is_empty()).then(|| format!("{} reports {}", n.name, join_clauses(&kinds)))
+        })
+        .collect();
+    let mut clauses = Vec::new();
+    if !not_ready.is_empty() {
+        clauses.push(format!(
+            "{} {} not ready",
+            named(&not_ready),
+            verb(not_ready.len(), "is", "are")
+        ));
+    }
+    clauses.extend(pressured);
+    if !cordoned.is_empty() {
+        let only = clauses.is_empty();
+        let mut clause = format!(
+            "{} {} cordoned",
+            named(&cordoned),
+            verb(cordoned.len(), "is", "are")
+        );
+        if only {
+            clause.push_str(", so new pods are not scheduled on ");
+            clause.push_str(verb(cordoned.len(), "it", "them"));
+        }
+        clauses.push(clause);
+    }
+    if clauses.is_empty() {
+        return format!(
+            "All {} are ready and schedulable.",
+            plural(nodes.len(), "node", "nodes")
+        );
+    }
+    format!("{}.", join_clauses(&clauses))
 }
 
 #[cfg(test)]
@@ -155,6 +233,47 @@ pub(crate) mod tests {
         assert_eq!(summary.not_ready, 1);
         assert_eq!(summary.pod_capacity, 440);
         assert_eq!(summary.instance_label(), "m6i.4xlarge ×3 · g5.2xlarge ×1");
+        assert_eq!(summary.compact_instance_label(), "m6i.4xlarge ×3 · g5 ×1");
+    }
+
+    #[test]
+    fn sentence_names_the_cordoned_node() {
+        let nodes = [
+            node("ip-10-4-31-12", "m6i", false, true),
+            node("ip-10-4-22-63", "m6i", true, true),
+        ];
+        assert_eq!(
+            sentence(&nodes),
+            "ip-10-4-31-12 is cordoned, so new pods are not scheduled on it."
+        );
+    }
+
+    #[test]
+    fn sentence_puts_not_ready_and_pressure_before_cordoned() {
+        let mut pressured = node("c", "m6i", true, true);
+        pressured.conditions.push(NodeCondition {
+            kind: "DiskPressure".into(),
+            value: CONDITION_TRUE.into(),
+            healthy: false,
+            message: String::new(),
+        });
+        let nodes = [
+            node("a", "m6i", true, false),
+            node("b", "m6i", false, false),
+            pressured,
+            node("d", "m6i", false, true),
+        ];
+        assert_eq!(
+            sentence(&nodes),
+            "a and b are not ready, c reports DiskPressure and d is cordoned."
+        );
+    }
+
+    #[test]
+    fn sentence_for_healthy_and_empty_clusters() {
+        let nodes = [node("a", "m6i", true, true), node("b", "m6i", true, true)];
+        assert_eq!(sentence(&nodes), "All 2 nodes are ready and schedulable.");
+        assert_eq!(sentence(&[]), "No nodes have registered with this cluster.");
     }
 
     #[test]

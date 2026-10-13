@@ -1,4 +1,4 @@
-use fleet_core::{Command, Page, Status, WorkloadKind};
+use fleet_core::{Command, Counts, Page, WorkloadKind};
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
     MouseButton, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div,
@@ -11,12 +11,13 @@ use crate::screens::add_cluster::empty_fleet;
 use crate::screens::gitops::GitOpsScreen;
 use crate::screens::workload::WorkloadScreen;
 use crate::theme::{
-    ActiveTheme, FONT_MONO, ICON_BUTTON, PAGE_HEADER, Palette, RADIUS, RULE, SPACE_2, SPACE_5,
-    SPACE_7, SPACE_8, TEXT_LABEL, TEXT_SMALL, TEXT_TITLE,
+    ActiveTheme, FONT_MONO, ICON_BUTTON, PAGE_HEADER, Palette, RADIUS, RULE, SPACE_2, SPACE_4,
+    SPACE_5, SPACE_7, SPACE_8, TEXT_LABEL, TEXT_SMALL, TEXT_TITLE,
 };
 
 const LIVE: &str = "live";
 const MORE: &str = "⋯";
+const SEPARATOR: &str = "· ";
 
 impl Shell {
     pub(super) fn page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -117,26 +118,31 @@ impl Shell {
             self.pages
                 .header_note(self.state.page, self.has_detail(), cx)
         };
-        let status = match (self.selected_cluster(), note) {
-            (Some(_), Some((Status::Ok, text))) => Some((text, palette.mute)),
-            (Some(_), Some((status, text))) => {
-                Some((format!("{} {text}", status.glyph()), palette.status(status)))
-            }
+        let status: Option<Vec<(String, gpui::Hsla)>> = match (self.selected_cluster(), note) {
+            (Some(_), Some((counts, text))) => Some(note_parts(&counts, text, palette)),
             (Some(cluster), None) => {
                 let text = format!("{} {}", cluster.status.glyph(), cluster.state);
-                Some((text, palette.status(cluster.status)))
+                Some(vec![(text, palette.status(cluster.status))])
             }
             (None, _) if self.state.page == Page::GitOps => None,
-            (None, _) => Some((LIVE.to_owned(), palette.mute)),
+            (None, _) => Some(vec![(LIVE.to_owned(), palette.mute)]),
         };
-        let status = status.map(|(text, color)| {
+        let status = status.map(|parts| {
             div()
+                .flex()
+                .gap(SPACE_4)
                 .font_family(FONT_MONO)
                 .text_size(TEXT_SMALL)
-                .text_color(color)
-                .child(text)
+                .children(
+                    parts
+                        .into_iter()
+                        .map(|(text, color)| div().text_color(color).child(text)),
+                )
         });
         let more = self.selected_cluster().map(|_| more_button(palette));
+        let controls = self
+            .selected_cluster()
+            .and_then(|_| self.pages.header_controls(self.state.page, cx));
         let filter = (self.state.page == Page::GitOps)
             .then(|| GitOpsScreen::filter_control(&self.gitops, cx));
         div()
@@ -153,11 +159,12 @@ impl Shell {
                 div()
                     .text_size(TEXT_TITLE)
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(self.state.page.label()),
+                    .child(self.state.page.title()),
             )
             .children(status)
             .child(div().flex_1())
             .children(filter)
+            .children(controls)
             .children(more)
     }
 
@@ -207,6 +214,21 @@ impl Shell {
             )
             .child(div().text_color(palette.fg2).child(scope))
     }
+}
+
+fn note_parts(counts: &Counts, text: String, palette: &Palette) -> Vec<(String, gpui::Hsla)> {
+    let mut parts: Vec<(String, gpui::Hsla)> = counts
+        .badges()
+        .into_iter()
+        .map(|(status, n)| (format!("{} {n}", status.glyph()), palette.status(status)))
+        .collect();
+    let text = if parts.is_empty() {
+        text
+    } else {
+        format!("{SEPARATOR}{text}")
+    };
+    parts.push((text, palette.mute));
+    parts
 }
 
 fn more_button(palette: &Palette) -> impl IntoElement {

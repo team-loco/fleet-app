@@ -244,7 +244,11 @@ impl Shell {
     fn sync_pages(&self, cx: &mut Context<Self>) {
         let cluster = self.selected_cluster();
         let detail = cluster.and_then(|c| self.state.snapshot.detail(&c.id));
-        self.pages.sync(self.state.page, cluster, detail, cx);
+        let confirm_destructive = cluster
+            .and_then(|c| self.state.snapshot.catalog.get(&c.id))
+            .is_none_or(|settings| settings.preferences.confirm_destructive);
+        self.pages
+            .sync(self.state.page, cluster, detail, confirm_destructive, cx);
     }
 
     fn screen_event(&mut self, event: &ScreenEvent, cx: &mut Context<Self>) {

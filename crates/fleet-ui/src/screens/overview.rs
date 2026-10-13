@@ -6,26 +6,29 @@ use fleet_core::overview::{
 use fleet_core::time::age;
 use fleet_core::{ClusterDetail, ClusterSummary, Page, Status};
 use gpui::{
-    AnyElement, AppContext, Context, ElementId, Entity, EventEmitter, FontWeight, Hsla,
+    AnyElement, App, AppContext, Context, ElementId, Entity, EventEmitter, FontWeight, Hsla,
     InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, px, relative,
+    StatefulInteractiveElement, Styled, Window, div, px,
 };
 
 use super::ScreenEvent;
 use crate::kit::{
-    Column, LineChart, Link, Meter, SectionHeader, SectionLabel, Segmented, Series, StackedBar,
-    StatusText, Table, TableEvent, Tooltip,
+    Button, Column, Lede, LineChart, Link, Meter, SectionHeader, SectionLabel, Segmented, Series,
+    StackedBar, StatusText, Table, TableEvent, Tooltip,
 };
 use crate::theme::{
-    ActiveTheme, FONT_MONO, LINE_PROSE, METER, Palette, RADIUS_SMALL, RULE, SPACE_1, SPACE_3,
-    SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_CONTROL, TEXT_FIGURE, TEXT_MONO, TEXT_UI,
+    ActiveTheme, FONT_MONO, METER, Palette, RADIUS_SMALL, RULE, SPACE_1, SPACE_3, SPACE_4, SPACE_5,
+    SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_CONTROL, TEXT_FIGURE, TEXT_MONO, TEXT_SMALL,
 };
 
 const RECENT_WARNINGS: usize = 5;
+const LIVE: &str = "Live";
+const LIVE_TOOLTIP: &str = "Follow new data; turn off to hold the current view";
 const CHART_MAX: f32 = 100.;
 const Y_LABELS: [&str; 5] = ["100%", "75%", "50%", "25%", "0"];
 const SEPARATOR: &str = " · ";
 const ALL_EVENTS: &str = "All events →";
+const UTILIZATION: &str = "Utilization";
 const CHART_WEIGHT: f32 = 2.;
 const REASON_WIDTH: Pixels = px(150.);
 const OBJECT_WEIGHT: f32 = 1.2;
@@ -84,6 +87,8 @@ impl OverviewData {
 
 pub struct OverviewScreen {
     data: Option<OverviewData>,
+    paused: Option<(OverviewData, Vec<Event>)>,
+    live: bool,
     range: TimeRange,
     warnings: Entity<Table<Event>>,
 }
@@ -105,6 +110,8 @@ impl OverviewScreen {
         .detach();
         Self {
             data: None,
+            paused: None,
+            live: true,
             range: TimeRange::default(),
             warnings,
         }
@@ -117,14 +124,62 @@ impl OverviewScreen {
         cx: &mut Context<Self>,
     ) {
         let data = OverviewData::new(cluster, detail);
+        let recent = detail.recent_warnings(RECENT_WARNINGS);
+        if self.live || self.data.is_none() {
+            self.show(data, recent, cx);
+        } else {
+            self.paused = Some((data, recent));
+        }
+    }
+
+    fn show(&mut self, data: OverviewData, recent: Vec<Event>, cx: &mut Context<Self>) {
         if self.data.as_ref() == Some(&data) {
             return;
         }
         self.data = Some(data);
-        let recent = detail.recent_warnings(RECENT_WARNINGS);
         self.warnings
             .update(cx, |table, cx| table.set_rows(recent, cx));
         cx.notify();
+    }
+
+    fn toggle_live(&mut self, cx: &mut Context<Self>) {
+        self.live = !self.live;
+        if let Some((data, recent)) = self.paused.take().filter(|_| self.live) {
+            self.show(data, recent, cx);
+        }
+        cx.notify();
+    }
+
+    pub fn header_controls(screen: &Entity<Self>, cx: &App) -> impl IntoElement {
+        let this = screen.read(cx);
+        let selected = TimeRange::ALL
+            .iter()
+            .position(|r| *r == this.range)
+            .unwrap_or_default();
+        let ranges_screen = screen.clone();
+        let ranges = TimeRange::ALL
+            .iter()
+            .fold(Segmented::new("range").small().mono(), |seg, r| {
+                seg.option(r.label())
+            })
+            .selected(selected)
+            .on_select(move |ix, _, cx| {
+                ranges_screen.update(cx, |screen, cx| screen.select_range(*ix, cx));
+            });
+        let live_screen = screen.clone();
+        let live = Button::new("overview-live", LIVE)
+            .small()
+            .selected(this.live)
+            .tooltip(LIVE_TOOLTIP)
+            .on_click(move |_, _, cx| {
+                live_screen.update(cx, OverviewScreen::toggle_live);
+            });
+        div()
+            .flex()
+            .items_center()
+            .gap(SPACE_4)
+            .child(ranges)
+            .child(live)
     }
 
     fn select_range(&mut self, ix: usize, cx: &mut Context<Self>) {
@@ -132,32 +187,6 @@ impl OverviewScreen {
             self.range = *range;
             cx.notify();
         }
-    }
-
-    fn lede(data: &OverviewData, palette: &Palette) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_col()
-            .gap(SPACE_3)
-            .px(SPACE_8)
-            .pt(SPACE_7)
-            .pb(SPACE_7)
-            .border_b(RULE)
-            .border_color(palette.line)
-            .child(
-                div()
-                    .text_size(TEXT_UI)
-                    .line_height(relative(LINE_PROSE))
-                    .text_color(palette.fg2)
-                    .child(data.sentence.clone()),
-            )
-            .child(
-                div()
-                    .font_family(FONT_MONO)
-                    .text_size(TEXT_MONO)
-                    .text_color(palette.mute)
-                    .child(data.meta.clone()),
-            )
     }
 
     fn capacity(data: &OverviewData, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
@@ -178,7 +207,7 @@ impl OverviewScreen {
         let memory = capacity_cell(
             "Memory",
             &data.memory,
-            palette.fg2,
+            palette.ai,
             palette,
             vec![
                 note("Requests", percent(data.memory.requests), palette.fg),
@@ -209,7 +238,7 @@ impl OverviewScreen {
         );
         let nodes_cell = cell(
             "Nodes",
-            data.nodes.instance_label(),
+            data.nodes.compact_instance_label(),
             data.nodes.total.to_string(),
             Self::node_strip(data, palette, cx),
             vec![
@@ -265,23 +294,7 @@ impl OverviewScreen {
             .into_any_element()
     }
 
-    fn utilization(
-        &self,
-        data: &OverviewData,
-        palette: &Palette,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let selected = TimeRange::ALL
-            .iter()
-            .position(|r| *r == self.range)
-            .unwrap_or_default();
-        let ranges = TimeRange::ALL
-            .iter()
-            .fold(Segmented::new("range").small().mono(), |seg, r| {
-                seg.option(r.label())
-            })
-            .selected(selected)
-            .on_select(cx.listener(|this, ix: &usize, _, cx| this.select_range(*ix, cx)));
+    fn utilization(&self, data: &OverviewData, palette: &Palette) -> AnyElement {
         let chart = data
             .utilization
             .iter()
@@ -289,7 +302,7 @@ impl OverviewScreen {
             .map(|u| {
                 LineChart::new(CHART_MAX)
                     .series(Series::new("CPU", palette.acc, u.cpu.clone()).area(palette.accbg))
-                    .series(Series::new("Memory", palette.fg2, u.memory.clone()))
+                    .series(Series::new("Memory", palette.ai, u.memory.clone()))
                     .threshold(u.cpu_requests, "CPU requests", palette.warn)
                     .y_labels(Y_LABELS.iter().map(|l| SharedString::from(*l)).collect())
                     .x_labels(
@@ -299,21 +312,9 @@ impl OverviewScreen {
                             .map(|l| SharedString::from(*l))
                             .collect(),
                     )
+                    .title(SectionLabel::new(UTILIZATION))
             });
-        div()
-            .flex()
-            .flex_col()
-            .gap(SPACE_5)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .child(SectionLabel::new("Utilization"))
-                    .child(div().flex_1())
-                    .child(ranges),
-            )
-            .children(chart)
-            .into_any_element()
+        div().flex().flex_col().children(chart).into_any_element()
     }
 
     fn workloads(data: &OverviewData, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
@@ -386,7 +387,7 @@ impl Render for OverviewScreen {
                     .py(SPACE_7)
                     .border_r(RULE)
                     .border_color(palette.line)
-                    .child(self.utilization(&data, &palette, cx)),
+                    .child(self.utilization(&data, &palette)),
             )
             .child(
                 div()
@@ -404,12 +405,18 @@ impl Render for OverviewScreen {
             .flex()
             .flex_col()
             .pb(SPACE_8)
-            .child(Self::lede(&data, &palette))
+            .child(Lede::new(data.sentence.clone()).meta(data.meta.clone()))
             .child(Self::capacity(&data, &palette, cx))
             .child(middle)
             .child(
                 SectionHeader::new("Warnings")
-                    .count(data.warnings.to_string())
+                    .annotation(
+                        div()
+                            .font_family(FONT_MONO)
+                            .text_size(TEXT_SMALL)
+                            .text_color(warnings_color(data.warnings, &palette))
+                            .child(data.warnings.to_string()),
+                    )
                     .end(div().text_size(TEXT_CONTROL).child(all_events)),
             )
             .child(
@@ -459,6 +466,14 @@ fn warning_columns() -> Vec<Column<Event>> {
         .end()
         .fixed(COUNT_WIDTH),
     ]
+}
+
+fn warnings_color(warnings: usize, palette: &Palette) -> Hsla {
+    if warnings > 0 {
+        palette.warn
+    } else {
+        palette.mute
+    }
 }
 
 fn limit_color(limit: f32, palette: &Palette) -> Hsla {

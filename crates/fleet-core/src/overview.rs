@@ -3,6 +3,7 @@ use crate::{Page, Status};
 
 const PERCENT: f32 = 100.;
 const THOUSANDS_GROUP: usize = 3;
+pub const NAMED_LIMIT: usize = 3;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Capacity {
@@ -38,6 +39,10 @@ pub fn number(value: f32) -> String {
         Some(whole) => whole.to_owned(),
         None => rounded,
     }
+}
+
+pub fn fixed(value: f32) -> String {
+    format!("{value:.1}")
 }
 
 pub fn percent(fraction: f32) -> String {
@@ -195,6 +200,24 @@ pub fn join_clauses(clauses: &[String]) -> String {
     }
 }
 
+pub fn named(names: &[&str]) -> String {
+    if names.len() <= NAMED_LIMIT {
+        let all: Vec<String> = names.iter().map(|name| (*name).to_owned()).collect();
+        return join_clauses(&all);
+    }
+    let mut shown: Vec<String> = names
+        .iter()
+        .take(NAMED_LIMIT)
+        .map(|name| (*name).to_owned())
+        .collect();
+    shown.push(format!("{} more", names.len() - NAMED_LIMIT));
+    join_clauses(&shown)
+}
+
+pub const fn verb(count: usize, one: &'static str, many: &'static str) -> &'static str {
+    if count == 1 { one } else { many }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,6 +282,23 @@ mod tests {
         assert_eq!(join_clauses(&clauses(&["a", "b", "c"])), "a, b and c");
         assert_eq!(plural(1, "node", "nodes"), "1 node");
         assert_eq!(plural(5, "pod", "pods"), "5 pods");
+    }
+
+    #[test]
+    fn named_lists_up_to_the_limit_then_counts_the_rest() {
+        assert_eq!(named(&[]), "");
+        assert_eq!(named(&["a"]), "a");
+        assert_eq!(named(&["a", "b", "c"]), "a, b and c");
+        assert_eq!(named(&["a", "b", "c", "d", "e"]), "a, b, c and 2 more");
+        assert_eq!(verb(1, "is", "are"), "is");
+        assert_eq!(verb(2, "is", "are"), "are");
+    }
+
+    #[test]
+    fn fixed_keeps_one_decimal() {
+        assert_eq!(fixed(61.), "61.0");
+        assert_eq!(fixed(0.), "0.0");
+        assert_eq!(fixed(22.46), "22.5");
     }
 
     #[test]

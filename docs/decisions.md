@@ -24,3 +24,7 @@ Settled; change only with a new entry that says why.
 13. **PRs**: one unit per PR, merged immediately by the orchestrator.
 14. **No hotbar**: v2 has no hotbar, so Cluster settings drops v1's Pin column and `Show in hotbar`
     toggle. The clusters panel lists every cluster.
+15. **What counts as destructive**: cordon and uncordon only toggle scheduling, evict nothing and
+    undo in one click, so they run at once. Drain (evicts pods), delete and apply-from-compare are
+    destructive and confirm in-app unless the cluster's "Confirm destructive actions" setting is
+    off.

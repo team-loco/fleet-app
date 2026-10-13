@@ -1,7 +1,8 @@
 use fleet_core::Status;
 use gpui::{
-    App, Bounds, Hsla, IntoElement, ParentElement, PathBuilder, Pixels, Point, RenderOnce,
-    SharedString, Styled, Window, canvas, div, fill, point, prelude::FluentBuilder, relative,
+    AnyElement, App, Bounds, Hsla, IntoElement, ParentElement, PathBuilder, Pixels, Point,
+    RenderOnce, SharedString, Styled, Window, canvas, div, fill, point, prelude::FluentBuilder,
+    relative,
 };
 
 use crate::theme::{
@@ -91,11 +92,17 @@ impl RenderOnce for Meter {
 #[derive(IntoElement)]
 pub struct MiniMeter {
     value: f32,
+    color: Option<Hsla>,
 }
 
 impl MiniMeter {
     pub fn new(value: f32) -> Self {
-        Self { value }
+        Self { value, color: None }
+    }
+
+    pub fn color(mut self, color: Hsla) -> Self {
+        self.color = Some(color);
+        self
     }
 }
 
@@ -111,7 +118,7 @@ impl RenderOnce for MiniMeter {
                 div()
                     .h_full()
                     .w(relative(fraction(self.value)))
-                    .bg(palette.fg2),
+                    .bg(self.color.unwrap_or(palette.fg2)),
             )
     }
 }
@@ -213,6 +220,7 @@ pub struct LineChart {
     x_labels: Vec<SharedString>,
     threshold: Option<Threshold>,
     height: Pixels,
+    title: Option<AnyElement>,
 }
 
 impl LineChart {
@@ -224,6 +232,7 @@ impl LineChart {
             x_labels: Vec::new(),
             threshold: None,
             height: CHART_HEIGHT,
+            title: None,
         }
     }
 
@@ -253,6 +262,11 @@ impl LineChart {
 
     pub fn height(mut self, height: Pixels) -> Self {
         self.height = height;
+        self
+    }
+
+    pub fn title(mut self, title: impl IntoElement) -> Self {
+        self.title = Some(title.into_any_element());
         self
     }
 }
@@ -379,10 +393,12 @@ impl RenderOnce for LineChart {
             .child(
                 div()
                     .flex()
-                    .justify_end()
+                    .items_center()
                     .gap(SPACE_7)
                     .text_size(TEXT_CONTROL)
                     .text_color(palette.mute)
+                    .children(self.title)
+                    .child(div().flex_1())
                     .children(legend),
             )
             .child(

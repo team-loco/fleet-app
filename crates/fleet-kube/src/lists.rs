@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use fleet_core::Status;
 use fleet_core::resources::{Resource, ResourceKind};
 use fleet_core::time::age as age_label;
-use fleet_core::{Counts, Status};
 use jiff::Timestamp;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
@@ -347,18 +347,6 @@ pub fn rows(
     }
 }
 
-pub fn nav_counts(rows: &[Resource]) -> Counts {
-    let total = u32::try_from(rows.len()).unwrap_or(u32::MAX);
-    let tally = |status: Status| {
-        let matching = rows.iter().filter(|r| r.status == status).count();
-        u32::try_from(matching).unwrap_or(u32::MAX)
-    };
-    Counts::total(total)
-        .with_err(tally(Status::Err))
-        .with_warn(tally(Status::Warn))
-        .with_sus(tally(Status::Suspended))
-}
-
 pub fn watched_lists(
     handle: &ClusterHandle,
     pods: &PodIndex,
@@ -456,15 +444,5 @@ mod tests {
             service(&item, now()).cells,
             ["ClusterIP", "10.96.0.12", "80/TCP,443/TCP"]
         );
-    }
-
-    #[test]
-    fn nav_counts_tally_flagged_rows() {
-        let rows = vec![
-            row(&ObjectMeta::default(), Status::Err, Vec::new(), now()),
-            row(&ObjectMeta::default(), Status::Ok, Vec::new(), now()),
-            row(&ObjectMeta::default(), Status::Suspended, Vec::new(), now()),
-        ];
-        assert_eq!(nav_counts(&rows), Counts::total(3).with_err(1).with_sus(1));
     }
 }
