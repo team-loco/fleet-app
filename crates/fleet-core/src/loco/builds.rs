@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use super::{Workspace, short_digest};
 use crate::filter::TextFilter;
-use crate::{ResourceRef, Status};
+use crate::{ResourceRef, Seen, Status, Uid};
 
 const MISSING: &str = "—";
 const BUILDING: &str = "building…";
@@ -73,6 +73,7 @@ impl BuildLogLine {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Build {
     pub resource: ResourceRef,
+    pub job_uid: Uid,
     pub id: String,
     pub service: String,
     pub workspace: Workspace,
@@ -89,6 +90,10 @@ pub struct Build {
 }
 
 impl Build {
+    pub fn seen(&self) -> Seen {
+        Seen::new(self.resource.clone(), self.job_uid.clone())
+    }
+
     pub fn matches(&self, query: &TextFilter) -> bool {
         let fields = [
             self.id.as_str(),
@@ -198,6 +203,7 @@ mod tests {
             took: Some(Duration::from_secs(108)),
             image_digest: digest.map(Into::into),
             cache_hit_percent: cache,
+            job_uid: Uid::default(),
             job: None,
             node: None,
             fetch: Status::Ok,

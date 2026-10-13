@@ -310,11 +310,6 @@ impl ClusterHandle {
         Ok(())
     }
 
-    pub async fn rollout_restart(&self, target: &ObjectRef) -> Result<DynamicObject> {
-        let body = restart_patch(jiff::Timestamp::now());
-        self.patch(target, PatchBody::Merge(body)).await
-    }
-
     pub async fn delete(
         &self,
         target: &ObjectRef,

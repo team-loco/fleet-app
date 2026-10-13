@@ -1,6 +1,6 @@
 use crate::changes::{LineChange, PatchLine};
 use crate::workload::{ContainerSpec, EnvResolution, EnvSource, EnvVar, Resources, short_image};
-use crate::{ClusterId, ResourceRef, Status, Workload};
+use crate::{ClusterId, ResourceRef, Seen, Status, Uid, Workload};
 
 const DASH: char = '-';
 const MISSING: &str = "—";
@@ -40,6 +40,7 @@ pub struct Comparison {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComparedCluster {
     pub cluster: ClusterId,
+    pub uid: Uid,
     pub status: Status,
     pub health: String,
 }
@@ -103,6 +104,16 @@ impl Comparison {
         self.kind == resource.kind
             && self.namespace == resource.namespace
             && self.name == resource.name
+    }
+
+    pub fn seen_on(&self, cluster: &ClusterId) -> Seen {
+        let uid = self
+            .clusters
+            .iter()
+            .find(|compared| &compared.cluster == cluster)
+            .map(|compared| compared.uid.clone())
+            .unwrap_or_default();
+        Seen::new(self.on(cluster), uid)
     }
 
     pub fn on(&self, cluster: &ClusterId) -> ResourceRef {
@@ -185,6 +196,7 @@ fn compared_cluster(workload: &Workload, cluster: &ClusterId) -> ComparedCluster
     };
     ComparedCluster {
         cluster: cluster.clone(),
+        uid: workload.uid.clone(),
         status,
         health,
     }
@@ -400,6 +412,7 @@ mod tests {
     fn compared(name: &str, status: Status, health: &str) -> ComparedCluster {
         ComparedCluster {
             cluster: ClusterId::new(name),
+            uid: Uid::default(),
             status,
             health: health.into(),
         }

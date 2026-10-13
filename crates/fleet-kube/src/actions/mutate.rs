@@ -105,7 +105,7 @@ pub fn cordon_patch(cordoned: bool) -> Value {
     json!({ "spec": { "unschedulable": unschedulable } })
 }
 
-fn known(uid: &Uid) -> Result<&Uid> {
+pub(crate) fn known(uid: &Uid) -> Result<&Uid> {
     if uid.as_str().is_empty() {
         return Err(Error::MissingField("metadata.uid"));
     }
@@ -181,19 +181,13 @@ pub fn template_patch(template: &Value) -> Value {
     json!([{ "op": "replace", "path": TEMPLATE_PATH, "value": template }])
 }
 
-pub async fn replace_template(
-    handle: &ClusterHandle,
-    target: &ResourceRef,
-    template: &Value,
-) -> Result<()> {
-    require("Apply", target, &[DEPLOYMENT, STATEFUL_SET, DAEMON_SET])?;
-    handle
-        .patch(
-            &object_ref(target)?,
-            PatchBody::Json(template_patch(template)),
-        )
-        .await?;
-    Ok(())
+pub async fn replace_template(handle: &ClusterHandle, seen: &Seen, template: &Value) -> Result<()> {
+    require(
+        "Apply",
+        &seen.target,
+        &[DEPLOYMENT, STATEFUL_SET, DAEMON_SET],
+    )?;
+    patch(handle, seen, PatchBody::Json(template_patch(template))).await
 }
 
 pub async fn delete(handle: &ClusterHandle, seen: &Seen) -> Result<()> {
@@ -283,75 +277,15 @@ pub async fn flux(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
     use fleet_core::ClusterId;
-    use k8s_openapi::api::apps::v1::Deployment;
-    use k8s_openapi::api::core::v1::ConfigMap;
-    use kube::core::ApiResource;
 
     use super::*;
+    use crate::fake::{RECREATED, SEEN, recreated, sent_uid};
     use crate::manager::lock;
 
-    const SEEN: &str = "seen-uid";
-    const RECREATED: &str = "recreated-uid";
     const CONFIGMAP_PATH: &str = "/api/v1/namespaces/apps/configmaps/podinfo";
+    const DEPLOYMENT_PATH: &str = "/apis/apps/v1/namespaces/apps/deployments/podinfo";
     const SCALE_PATH: &str = "/apis/apps/v1/namespaces/apps/deployments/podinfo/scale";
-    const CONFLICT: &str = r#"{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Conflict","code":409,"message":"Precondition failed: UID mismatch"}"#;
-
-    fn object(kind: &str, uid: &str) -> String {
-        json!({
-            "apiVersion": api_version(kind),
-            "kind": kind,
-            "metadata": { "name": "podinfo", "namespace": "apps", "uid": uid }
-        })
-        .to_string()
-    }
-
-    fn sent_uid(body: &Value, pointer: &str) -> Option<String> {
-        body.pointer(pointer)
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-    }
-
-    fn recreated(
-        kind: &'static str,
-    ) -> (
-        crate::manager::ClusterManager,
-        ClusterHandle,
-        Arc<crate::fake::Traffic>,
-        Arc<Mutex<bool>>,
-    ) {
-        let changed = Arc::new(Mutex::new(false));
-        let state = changed.clone();
-        let (client, traffic) =
-            crate::fake::client_reading_bodies(Duration::ZERO, move |method, _, body| {
-                let current = object(kind, RECREATED);
-                if method == http::Method::GET {
-                    return Some((http::StatusCode::OK, current));
-                }
-                let wanted = sent_uid(body, "/preconditions/uid")
-                    .or_else(|| sent_uid(body, "/metadata/uid"));
-                if wanted.as_deref() != Some(RECREATED) {
-                    return Some((http::StatusCode::CONFLICT, CONFLICT.to_owned()));
-                }
-                *lock(&state) = true;
-                Some((http::StatusCode::OK, current))
-            });
-        let (manager, handle) = crate::fake::handle(&client);
-        let mut resources = lock(&handle.shared.resources);
-        resources.insert(
-            ("v1".to_owned(), "ConfigMap".to_owned()),
-            ApiResource::erase::<ConfigMap>(&()),
-        );
-        resources.insert(
-            ("apps/v1".to_owned(), "Deployment".to_owned()),
-            ApiResource::erase::<Deployment>(&()),
-        );
-        drop(resources);
-        (manager, handle, traffic, changed)
-    }
-
     #[tokio::test]
     async fn a_confirmed_delete_never_removes_a_recreated_object() {
         let (_manager, handle, traffic, changed) = recreated("ConfigMap");
@@ -386,6 +320,45 @@ mod tests {
             .map(|body| sent_uid(body, "/metadata/uid"))
             .collect();
         assert_eq!(sent, [Some(SEEN.to_owned())]);
+    }
+
+    #[tokio::test]
+    async fn a_confirmed_template_apply_never_changes_a_recreated_workload() {
+        let (_manager, handle, traffic, changed) = recreated("Deployment");
+        let seen = Seen::new(target("Deployment"), Uid::new(SEEN));
+        let outcome = replace_template(&handle, &seen, &json!({"spec": {}})).await;
+        assert!(
+            matches!(outcome, Err(Error::Replaced { .. })),
+            "{outcome:?}"
+        );
+        assert!(!*lock(&changed));
+        let sent: Vec<Option<String>> = traffic
+            .bodies(&http::Method::PATCH, DEPLOYMENT_PATH)
+            .iter()
+            .map(|body| sent_uid(body, "/0/value"))
+            .collect();
+        assert_eq!(sent, [Some(SEEN.to_owned())]);
+    }
+
+    #[tokio::test]
+    async fn a_template_apply_without_a_uid_is_refused_before_any_request() {
+        let (_manager, handle, traffic, _) = recreated("Deployment");
+        let seen = Seen::new(target("Deployment"), Uid::default());
+        let outcome = replace_template(&handle, &seen, &json!({"spec": {}})).await;
+        assert!(matches!(outcome, Err(Error::MissingField("metadata.uid"))));
+        assert_eq!(traffic.requests(), Vec::new());
+    }
+
+    #[tokio::test]
+    async fn a_template_apply_to_the_seen_workload_goes_through() {
+        let (_manager, handle, _, changed) = recreated("Deployment");
+        let seen = Seen::new(target("Deployment"), Uid::new(RECREATED));
+        assert!(
+            replace_template(&handle, &seen, &json!({"spec": {}}))
+                .await
+                .is_ok()
+        );
+        assert!(*lock(&changed));
     }
 
     #[tokio::test]

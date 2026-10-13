@@ -14,7 +14,7 @@ pub use platform::{
 };
 pub use routes::{Listener, Route, RouteFilter, Routes};
 
-use crate::ResourceRef;
+use crate::Seen;
 
 const DIGEST_PREFIX: &str = "sha256:";
 const DIGEST_KEEP: usize = 4;
@@ -30,12 +30,12 @@ pub struct LocoCluster {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LocoCommand {
-    RestartApplication(ResourceRef),
-    CancelBuild(ResourceRef),
+    RestartApplication(Seen),
+    CancelBuild(Seen),
 }
 
 impl LocoCommand {
-    pub fn target(&self) -> &ResourceRef {
+    pub fn seen(&self) -> &Seen {
         match self {
             Self::RestartApplication(application) => application,
             Self::CancelBuild(build) => build,

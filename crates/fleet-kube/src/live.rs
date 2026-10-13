@@ -14,8 +14,8 @@ use fleet_core::stream::Sink;
 use fleet_core::{
     Backend, ChangesLog, CheckLine, ClusterCatalog, ClusterId, ClusterSummary, Command, Comparison,
     ContextChoice, Counts, FleetHome, GitOps, KubeconfigFile, NewCluster, Notice, Page,
-    Preferences, Receiver, ResourceRef, Sender, Snapshot, Status, Update, Verdict, WatchState,
-    Workload, WorkloadKind,
+    Preferences, Receiver, ResourceRef, Seen, Sender, Snapshot, Status, Update, Verdict,
+    WatchState, Workload, WorkloadKind,
 };
 use jiff::Timestamp;
 use k8s_openapi::api::core::v1::Node;
@@ -561,10 +561,10 @@ impl Live {
         self.navigation.comparison = None;
     }
 
-    fn copy_spec(&mut self, from: &ClusterId, to: &ResourceRef, path: &str) {
+    fn copy_spec(&mut self, from: &ClusterId, to: &Seen, path: &str) {
         let source = ResourceRef {
             cluster: from.clone(),
-            ..to.clone()
+            ..to.target.clone()
         };
         let template = self
             .handle(from)
@@ -578,12 +578,13 @@ impl Live {
             return;
         };
         let mutation = Mutation::CopySpec {
-            target: to.clone(),
+            target: to.target.clone(),
+            uid: to.uid.clone(),
             from: from.clone(),
             path: path.to_owned(),
             template,
         };
-        let handle = self.handle(&to.cluster).cloned();
+        let handle = self.handle(&to.target.cluster).cloned();
         self.actions.copy_spec(mutation, handle);
     }
 
@@ -753,7 +754,7 @@ impl Live {
             Command::Rollback { .. } => self.act(command),
             #[cfg(feature = "loco")]
             Command::Loco(command) => {
-                let cluster = command.target().cluster.clone();
+                let cluster = command.seen().target.cluster.clone();
                 let handle = self.clusters.values().find(|c| c.id == cluster);
                 self.navigation
                     .loco

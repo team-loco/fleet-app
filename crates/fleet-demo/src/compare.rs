@@ -1,6 +1,6 @@
 use fleet_core::changes::{LineChange, PatchLine};
 use fleet_core::compare::{Cell, ComparedCluster, Comparison, Field, SpecDiff};
-use fleet_core::{ClusterId, Status};
+use fleet_core::{ClusterId, Status, Uid};
 
 const PROD_US: &str = "prod-us-east";
 const PROD_EU: &str = "prod-eu-west";
@@ -17,6 +17,7 @@ const ALL_READY: &str = "3 / 3";
 fn compared(name: &str, status: Status, health: &str) -> ComparedCluster {
     ComparedCluster {
         cluster: ClusterId::new(name),
+        uid: Uid::default(),
         status,
         health: health.into(),
     }

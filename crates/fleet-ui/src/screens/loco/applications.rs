@@ -227,7 +227,7 @@ impl ApplicationsScreen {
                 }
             }
         };
-        let restart = Command::Loco(LocoCommand::RestartApplication(app.resource.clone()));
+        let restart = Command::Loco(LocoCommand::RestartApplication(app.seen()));
         let mut items = vec![
             MenuItem::new("Restart", emit(restart))
                 .description("Roll the Deployment's pods one at a time; traffic keeps flowing."),
@@ -584,8 +584,8 @@ fn object_columns() -> Vec<Column<ControllerObject>> {
 
 #[cfg(test)]
 mod tests {
-    use fleet_core::ClusterId;
     use fleet_core::loco::{AppPhase, Placement, WorkspaceApps};
+    use fleet_core::{ClusterId, Uid};
 
     use super::*;
 
@@ -610,6 +610,7 @@ mod tests {
             rollout: None,
             resources: None,
             health_check: None,
+            workload_uid: Uid::default(),
             objects: Vec::new(),
             route: None,
         }

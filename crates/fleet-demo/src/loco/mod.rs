@@ -9,7 +9,7 @@ use fleet_core::loco::{
     ControllerObject, Degraded, HealthCheck, LocoCluster, LocoCommand, LogTone, Placement,
     PlacementIssue, Resources, Rollout, Workspace, WorkspaceApps,
 };
-use fleet_core::{ClusterId, ResourceRef, Snapshot, Status};
+use fleet_core::{ClusterId, ResourceRef, Snapshot, Status, Uid};
 
 const CLUSTER: &str = "prod-us-east";
 const APP_NAMESPACE: &str = "loco-system";
@@ -224,6 +224,7 @@ fn application(seed: &AppSeed, namespace: &str) -> Application {
             timeout_secs: 3,
             fail_threshold: 3,
         }),
+        workload_uid: Uid::default(),
         objects: controller_objects(namespace, seed.name, &replicas, deployment_status),
         route: Some(AppRoute {
             host,
@@ -392,6 +393,7 @@ fn build(seed: &BuildSeed) -> Build {
         took: Some(took),
         image_digest: seed.image.map(|(digest, _)| digest.into()),
         cache_hit_percent: seed.image.map(|(_, cache)| cache),
+        job_uid: Uid::default(),
         job: Some(name),
         node: Some(BUILD_NODE.into()),
         fetch: Status::Ok,
@@ -454,16 +456,17 @@ pub enum Settle {
 pub fn apply(snapshot: &mut Snapshot, command: &LocoCommand) -> Option<Settle> {
     match command {
         LocoCommand::RestartApplication(app) => {
-            let application = find_app(snapshot, app)?;
+            let application = find_app(snapshot, &app.target)?;
             let previous = std::mem::replace(&mut application.phase, AppPhase::Deploying);
-            Some(Settle::Restarted(app.clone(), previous))
+            Some(Settle::Restarted(app.target.clone(), previous))
         }
         LocoCommand::CancelBuild(build) => {
-            let found = find_build(snapshot, build).filter(|found| found.phase.is_active())?;
+            let found =
+                find_build(snapshot, &build.target).filter(|found| found.phase.is_active())?;
             found
                 .log
                 .push(BuildLogLine::new(LogTone::Dim, CANCEL_REQUESTED));
-            Some(Settle::Canceled(build.clone()))
+            Some(Settle::Canceled(build.target.clone()))
         }
     }
 }
@@ -505,6 +508,8 @@ fn find_build<'a>(snapshot: &'a mut Snapshot, build: &ResourceRef) -> Option<&'a
 
 #[cfg(test)]
 mod tests {
+    use fleet_core::Seen;
+
     use super::*;
 
     fn snapshot() -> Snapshot {
@@ -697,7 +702,7 @@ mod tests {
                 .and_then(|c| c.applications.find(&app))
                 .map(|(_, a)| a.phase)
         };
-        let command = LocoCommand::RestartApplication(app.clone());
+        let command = LocoCommand::RestartApplication(Seen::new(app.clone(), Uid::default()));
         let pending = apply(&mut snapshot, &command);
         assert_eq!(
             pending,
@@ -708,10 +713,13 @@ mod tests {
             settle(&mut snapshot, &pending);
         }
         assert_eq!(phase(&snapshot), Some(AppPhase::Ready));
-        let ghost = LocoCommand::RestartApplication(ResourceRef {
-            name: "ghost".into(),
-            ..app.clone()
-        });
+        let ghost = LocoCommand::RestartApplication(Seen::new(
+            ResourceRef {
+                name: "ghost".into(),
+                ..app.clone()
+            },
+            Uid::default(),
+        ));
         assert_eq!(apply(&mut snapshot, &ghost), None);
     }
 
@@ -724,9 +732,9 @@ mod tests {
             namespace: Some(BUILD_NAMESPACE.into()),
             name: format!("build-{id}"),
         };
-        let failed = LocoCommand::CancelBuild(reference("0192f3a1"));
+        let failed = LocoCommand::CancelBuild(Seen::new(reference("0192f3a1"), Uid::default()));
         assert_eq!(apply(&mut snapshot, &failed), None);
-        let running = LocoCommand::CancelBuild(reference("0192f3c7"));
+        let running = LocoCommand::CancelBuild(Seen::new(reference("0192f3c7"), Uid::default()));
         let pending = apply(&mut snapshot, &running);
         assert_eq!(pending, Some(Settle::Canceled(reference("0192f3c7"))));
         if let Some(pending) = pending {

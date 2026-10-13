@@ -64,8 +64,8 @@ pub fn apply(snapshot: &mut Snapshot, command: &Command) -> Option<Settle> {
             Some(Settle::Connected(cluster.clone()))
         }
         Command::CopySpec { from, to, .. } => {
-            sim::copy_spec(snapshot, from, to)?;
-            Some(Settle::RolledOut(to.clone()))
+            sim::copy_spec(snapshot, from, &to.target)?;
+            Some(Settle::RolledOut(to.target.clone()))
         }
         _ => None,
     }
