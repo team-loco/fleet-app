@@ -1,3 +1,5 @@
+mod home;
+
 use std::collections::BTreeMap;
 use std::thread;
 #[cfg(feature = "loco")]
@@ -93,6 +95,7 @@ pub fn snapshot() -> Snapshot {
             }),
         ],
         fleet_nav,
+        home: home::fleet_home(),
     }
 }
 
@@ -124,6 +127,7 @@ fn cluster(seed: ClusterSeed) -> ClusterSummary {
         nodes: seed.nodes,
         problems: seed.problems,
         nav,
+        metrics: home::metrics(seed.name),
         #[cfg(feature = "loco")]
         loco_agent_synced: None,
     }
@@ -185,6 +189,41 @@ mod tests {
         assert_eq!(snapshot.connected(), 5);
         let problems = snapshot.problems();
         assert_eq!((problems.err, problems.warn, problems.sus), (3, 6, 1));
+    }
+
+    #[test]
+    fn problem_list_agrees_with_cluster_rollups() {
+        let snapshot = snapshot();
+        for cluster in &snapshot.clusters {
+            let listed = snapshot
+                .home
+                .problems
+                .iter()
+                .filter(|p| p.target.cluster == cluster.id);
+            let counts = fleet_core::home::problem_counts(listed);
+            assert_eq!(
+                (counts.err, counts.warn, counts.sus),
+                (
+                    cluster.problems.err,
+                    cluster.problems.warn,
+                    cluster.problems.sus
+                ),
+                "{}",
+                cluster.name
+            );
+        }
+    }
+
+    #[test]
+    fn unreachable_clusters_have_no_metrics() {
+        let snapshot = snapshot();
+        let without: Vec<&str> = snapshot
+            .clusters
+            .iter()
+            .filter(|c| c.metrics.is_none())
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(without, ["qa-gke", "edge-k3s"]);
     }
 
     #[test]

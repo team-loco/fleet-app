@@ -40,6 +40,7 @@ impl RenderOnce for SectionLabel {
 pub struct SectionHeader {
     label: SharedString,
     count: Option<SharedString>,
+    annotation: Option<AnyElement>,
     end: Option<AnyElement>,
 }
 
@@ -48,12 +49,18 @@ impl SectionHeader {
         Self {
             label: label.into(),
             count: None,
+            annotation: None,
             end: None,
         }
     }
 
     pub fn count(mut self, count: impl Into<SharedString>) -> Self {
         self.count = Some(count.into());
+        self
+    }
+
+    pub fn annotation(mut self, annotation: impl IntoElement) -> Self {
+        self.annotation = Some(annotation.into_any_element());
         self
     }
 
@@ -84,6 +91,7 @@ impl RenderOnce for SectionHeader {
                         .child(count),
                 )
             })
+            .children(self.annotation)
             .child(div().flex_1())
             .children(self.end)
     }

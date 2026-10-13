@@ -1,9 +1,11 @@
-use crate::{ClusterId, Page, Snapshot};
+use crate::home::page_for_kind;
+use crate::{ClusterId, Page, ResourceRef, Snapshot};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     SelectCluster(Option<ClusterId>),
     SelectPage(Page),
+    OpenResource(ResourceRef),
     ToggleClustersPanel,
     ToggleResourcesPanel,
 }
@@ -48,6 +50,12 @@ impl AppState {
                 self.page = Page::Overview;
             }
             Command::SelectPage(page) => self.select_page(*page),
+            Command::OpenResource(target) => {
+                if self.snapshot.cluster(&target.cluster).is_some() {
+                    self.cluster = Some(target.cluster.clone());
+                    self.page = page_for_kind(&target.kind);
+                }
+            }
             Command::ToggleClustersPanel => self.clusters_open = !self.clusters_open,
             Command::ToggleResourcesPanel => self.resources_open = !self.resources_open,
         }
@@ -121,6 +129,26 @@ mod tests {
         state.apply(&Command::SelectPage(Page::GitOps));
         assert_eq!(state.cluster, None);
         assert_eq!(state.page, Page::GitOps);
+    }
+
+    #[test]
+    fn opening_a_resource_selects_its_cluster_and_kind_page() {
+        let mut state = loaded();
+        let target = ResourceRef {
+            cluster: ClusterId::new("a"),
+            kind: "Deployment".into(),
+            namespace: Some("payments".into()),
+            name: "checkout-api".into(),
+        };
+        state.apply(&Command::OpenResource(target.clone()));
+        assert_eq!(state.cluster, Some(ClusterId::new("a")));
+        assert_eq!(state.page, Page::Deployments);
+        let elsewhere = ResourceRef {
+            cluster: ClusterId::new("nope"),
+            ..target
+        };
+        state.apply(&Command::OpenResource(elsewhere));
+        assert_eq!(state.cluster, Some(ClusterId::new("a")));
     }
 
     #[test]
