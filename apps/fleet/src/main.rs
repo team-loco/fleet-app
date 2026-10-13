@@ -26,7 +26,7 @@ gpui::actions!(fleet, [Quit]);
 #[command(
     name = "fleet",
     about = "Watch many Kubernetes clusters at once",
-    version
+    version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("FLEET_GIT_SHA"), ")")
 )]
 struct Args {
     #[arg(long)]

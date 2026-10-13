@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#MISE description="Build and ad-hoc sign dist/Fleet.app"
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+cargo bundle --release --package fleet --format osx "$@"
+mkdir -p "$root/dist"
+rm -rf "$root/dist/Fleet.app"
+ditto "$root/target/release/bundle/osx/Fleet.app" "$root/dist/Fleet.app"
+plist="$root/dist/Fleet.app/Contents/Info.plist"
+version="$(plutil -extract CFBundleShortVersionString raw "$plist")"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $version" "$plist"
+codesign --force --deep -s - "$root/dist/Fleet.app"
+codesign --verify --deep --strict "$root/dist/Fleet.app"
+echo "$root/dist/Fleet.app"
