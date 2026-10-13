@@ -7,6 +7,7 @@ const SHORT_SHA: usize = 7;
 const ADDED: &str = "+";
 const REMOVED: &str = "−";
 const SEPARATOR: &str = " · ";
+const UNAVAILABLE: &str = "source unavailable";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ChangesLog {
@@ -15,6 +16,7 @@ pub struct ChangesLog {
     pub fetched: Duration,
     pub lanes: Vec<Lane>,
     pub commits: Vec<Commit>,
+    pub unavailable: Option<String>,
 }
 
 impl ChangesLog {
@@ -23,7 +25,14 @@ impl ChangesLog {
     }
 
     pub fn fetched_label(&self) -> String {
-        format!("{} fetched {} ago", self.repository, age(self.fetched))
+        match &self.unavailable {
+            Some(reason) => format!("{UNAVAILABLE}{SEPARATOR}{reason}"),
+            None => format!("{} fetched {} ago", self.repository, age(self.fetched)),
+        }
+    }
+
+    pub fn recent(&self, count: usize) -> &[Commit] {
+        self.commits.get(..count).unwrap_or(&self.commits)
     }
 
     pub fn commit(&self, sha: &str) -> Option<&Commit> {
@@ -47,6 +56,7 @@ impl ChangesLog {
 pub struct Lane {
     pub cluster: ClusterId,
     pub short: String,
+    pub label: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -223,6 +233,17 @@ impl Commit {
     }
 }
 
+pub const fn outcome_label(status: Status) -> &'static str {
+    match status {
+        Status::Ok => "applied",
+        Status::Err => "failing",
+        Status::Suspended => "held",
+        Status::Warn => "retrying",
+        Status::Progress => "pending",
+        Status::Offline => "not yet",
+    }
+}
+
 pub fn change_counts(added: usize, removed: usize) -> String {
     let parts = [
         (added > 0).then(|| format!("{ADDED}{added}")),
@@ -394,6 +415,19 @@ mod tests {
     }
 
     #[test]
+    fn outcomes_read_as_one_word_per_status() {
+        assert_eq!(outcome_label(Status::Ok), "applied");
+        assert_eq!(outcome_label(Status::Suspended), "held");
+        assert_eq!(outcome_label(Status::Offline), "not yet");
+        let log = ChangesLog {
+            commits: vec![payments(), monitoring()],
+            ..ChangesLog::default()
+        };
+        assert_eq!(log.recent(1).len(), 1);
+        assert_eq!(log.recent(5).len(), 2);
+    }
+
+    #[test]
     fn commits_resolve_by_abbreviated_sha() {
         let log = ChangesLog {
             commits: vec![payments(), monitoring()],
@@ -417,6 +451,14 @@ mod tests {
         assert_eq!(log.source_label(), "fleet-infra/main");
         assert_eq!(log.fetched_label(), "fleet-infra fetched 4m ago");
         assert_eq!(east().label(), "Rendered · prod-us-east");
+        let failed = ChangesLog {
+            unavailable: Some("fleet-infra: Permission denied (publickey).".into()),
+            ..log
+        };
+        assert_eq!(
+            failed.fetched_label(),
+            "source unavailable · fleet-infra: Permission denied (publickey)."
+        );
         assert_eq!(ViewKind::Source.label(), "Source");
     }
 }

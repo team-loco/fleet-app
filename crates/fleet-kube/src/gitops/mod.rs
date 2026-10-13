@@ -1,11 +1,14 @@
+mod changes;
 mod convert;
 mod focus;
+mod git;
 mod grid;
 mod health;
 mod watch;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use fleet_core::{
     ClusterId, Command, Counts, FluxKey, FluxKind, Page, ResourceRef, Snapshot, Status,
@@ -14,8 +17,10 @@ use fleet_flux::ObjectKind;
 use jiff::Timestamp;
 
 use crate::manager::{ClusterHandle, ConnectionStatus, lock};
+use changes::{Consumer, Repo, changes_log, repo_key, wanted_revision};
 use convert::{Inputs, Parsed, core_status, flux_object, parse, summary};
 use focus::Focus;
+use git::{Mirrors, RepoKey};
 use grid::ClusterFluxView;
 use health::Workloads;
 use watch::{ClusterFlux, FluxInfo, KINDS};
@@ -25,20 +30,9 @@ const CHANGE_BUFFER: usize = 1;
 pub struct GitOpsState {
     clusters: BTreeMap<ClusterId, ClusterFlux>,
     focus: Option<Focus>,
+    mirrors: Mirrors,
     changed_tx: async_channel::Sender<()>,
     changed_rx: async_channel::Receiver<()>,
-}
-
-impl Default for GitOpsState {
-    fn default() -> Self {
-        let (changed_tx, changed_rx) = async_channel::bounded(CHANGE_BUFFER);
-        Self {
-            clusters: BTreeMap::new(),
-            focus: None,
-            changed_tx,
-            changed_rx,
-        }
-    }
 }
 
 struct ClusterData {
@@ -49,6 +43,17 @@ struct ClusterData {
 }
 
 impl GitOpsState {
+    pub fn new(git_timeout: Duration) -> Self {
+        let (changed_tx, changed_rx) = async_channel::bounded(CHANGE_BUFFER);
+        Self {
+            clusters: BTreeMap::new(),
+            focus: None,
+            mirrors: Mirrors::start(git_timeout, changed_tx.clone()),
+            changed_tx,
+            changed_rx,
+        }
+    }
+
     pub fn changed(&self) -> async_channel::Receiver<()> {
         self.changed_rx.clone()
     }
@@ -173,6 +178,45 @@ impl GitOpsState {
             })
             .collect();
         snapshot.gitops = grid::gitops(&views, now);
+        snapshot.changes = self.changes(&data, now);
+    }
+
+    fn changes(&self, data: &[ClusterData], now: Timestamp) -> fleet_core::ChangesLog {
+        let mut consumers: BTreeMap<RepoKey, Vec<Consumer<'_>>> = BTreeMap::new();
+        let mut wanted: BTreeMap<RepoKey, BTreeSet<String>> = BTreeMap::new();
+        for cluster in data {
+            let kustomizations = cluster
+                .objects
+                .iter()
+                .filter(|parsed| parsed.kind() == ObjectKind::Kustomization);
+            for kustomization in kustomizations {
+                let Some(source) = convert::source(kustomization, &cluster.objects) else {
+                    continue;
+                };
+                let Some(key) = repo_key(source) else {
+                    continue;
+                };
+                let revisions = wanted.entry(key.clone()).or_default();
+                revisions.extend(wanted_revision(source));
+                consumers.entry(key).or_default().push(Consumer {
+                    cluster: &cluster.id,
+                    kustomization,
+                    source,
+                });
+            }
+        }
+        self.mirrors.want(wanted);
+        let states = self.mirrors.states();
+        let repos: Vec<Repo<'_>> = consumers
+            .into_iter()
+            .map(|(key, consumers)| Repo {
+                state: states.get(&key).cloned(),
+                key,
+                consumers,
+            })
+            .collect();
+        let clusters: Vec<ClusterId> = data.iter().map(|cluster| cluster.id.clone()).collect();
+        changes_log(&repos, &clusters, now)
     }
 }
 

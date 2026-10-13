@@ -25,10 +25,10 @@ pub fn log() -> ChangesLog {
         branch: "main".into(),
         fetched: Duration::from_secs(FETCHED_MINUTES * MINUTE),
         lanes: vec![
-            lane(STAGING, "stg"),
-            lane(US_EAST, "use1"),
-            lane(EU_WEST, "euw1"),
-            lane(DEV, "dev"),
+            lane(STAGING, "stg", "staging"),
+            lane(US_EAST, "use1", "us-east"),
+            lane(EU_WEST, "euw1", "eu-west"),
+            lane(DEV, "dev", "dev"),
         ],
         commits: vec![
             checkout_bump(),
@@ -37,13 +37,15 @@ pub fn log() -> ChangesLog {
             retry_budget(),
             payments_pdb(),
         ],
+        unavailable: None,
     }
 }
 
-fn lane(cluster: &str, short: &str) -> Lane {
+fn lane(cluster: &str, short: &str, label: &str) -> Lane {
     Lane {
         cluster: ClusterId::new(cluster),
         short: short.into(),
+        label: label.into(),
     }
 }
 

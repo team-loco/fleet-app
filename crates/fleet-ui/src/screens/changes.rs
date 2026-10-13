@@ -164,6 +164,13 @@ impl ChangesScreen {
                     .text_color(palette.mute)
                     .child(self.log.source_label()),
             )
+            .children(self.log.unavailable.as_ref().map(|_| {
+                div()
+                    .font_family(FONT_MONO)
+                    .text_size(TEXT_SMALL)
+                    .text_color(palette.warn)
+                    .child(self.log.fetched_label())
+            }))
             .child(div().flex_1())
             .child(
                 div()
@@ -460,6 +467,7 @@ mod tests {
         let lanes = [Lane {
             cluster: ClusterId::new("staging"),
             short: "stg".into(),
+            label: "staging".into(),
         }];
         assert_eq!(
             cluster_options(&lanes),

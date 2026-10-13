@@ -1,7 +1,6 @@
-use std::collections::BTreeMap;
 use std::time::Duration;
 
-use fleet_core::home::{ClusterMetrics, Commit, GitOpsChanges, Lane, Outcome, Problem, Revision};
+use fleet_core::home::{ClusterMetrics, Problem, Revision};
 use fleet_core::{ClusterId, Counts, FleetHome, ResourceRef, Status};
 
 const MINUTE: u64 = 60;
@@ -70,7 +69,6 @@ pub fn metrics(cluster: &str) -> Option<ClusterMetrics> {
 pub fn fleet_home() -> FleetHome {
     FleetHome {
         problems: problems(),
-        changes: changes(),
     }
 }
 
@@ -186,76 +184,4 @@ fn problems() -> Vec<Problem> {
             DAY,
         ),
     ]
-}
-
-fn lane(cluster: &str, label: &str) -> Lane {
-    Lane {
-        cluster: ClusterId::new(cluster),
-        label: label.into(),
-    }
-}
-
-fn commit(
-    sha: &str,
-    message: &str,
-    author: &str,
-    age_secs: u64,
-    outcomes: &[(&str, Outcome)],
-) -> Commit {
-    let outcomes = outcomes
-        .iter()
-        .map(|(cluster, outcome)| (ClusterId::new(*cluster), *outcome))
-        .collect::<BTreeMap<_, _>>();
-    Commit {
-        sha: sha.into(),
-        message: message.into(),
-        author: author.into(),
-        age: Duration::from_secs(age_secs),
-        outcomes,
-    }
-}
-
-fn changes() -> GitOpsChanges {
-    GitOpsChanges {
-        source: "fleet-infra/main".into(),
-        lanes: vec![
-            lane("staging", "staging"),
-            lane("prod-us-east", "us-east"),
-            lane("prod-eu-west", "eu-west"),
-            lane("dev-kind", "dev"),
-        ],
-        commits: vec![
-            commit(
-                HEAD,
-                "checkout-api: bump to 2.14.0, read webhook secret from env",
-                "@mkhan",
-                3 * HOUR,
-                &[
-                    ("staging", Outcome::Applied),
-                    ("prod-us-east", Outcome::Failing),
-                    ("prod-eu-west", Outcome::Held),
-                    ("dev-kind", Outcome::Applied),
-                ],
-            ),
-            commit(
-                "3be91f2",
-                "monitoring: kube-prometheus-stack 62.7.0 on staging",
-                "@renovate[bot]",
-                5 * HOUR,
-                &[("staging", Outcome::Retrying)],
-            ),
-            commit(
-                HELD_AT,
-                "web-frontend: raise min replicas to 6",
-                "@jlee",
-                DAY,
-                &[
-                    ("staging", Outcome::Applied),
-                    ("prod-us-east", Outcome::Applied),
-                    ("prod-eu-west", Outcome::Applied),
-                    ("dev-kind", Outcome::Applied),
-                ],
-            ),
-        ],
-    }
 }

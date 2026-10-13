@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::{ClusterId, Counts, ResourceRef, Status};
@@ -103,72 +102,9 @@ pub fn group_problems(problems: &[Problem], severity: Severity) -> Vec<ProblemGr
     groups
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Outcome {
-    Applied,
-    Failing,
-    Held,
-    Retrying,
-    NotTargeted,
-}
-
-impl Outcome {
-    pub const fn status(self) -> Option<Status> {
-        match self {
-            Self::Applied => Some(Status::Ok),
-            Self::Failing => Some(Status::Err),
-            Self::Held => Some(Status::Suspended),
-            Self::Retrying => Some(Status::Warn),
-            Self::NotTargeted => None,
-        }
-    }
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Applied => "applied",
-            Self::Failing => "failing",
-            Self::Held => "held",
-            Self::Retrying => "retrying",
-            Self::NotTargeted => "",
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Lane {
-    pub cluster: ClusterId,
-    pub label: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Commit {
-    pub sha: String,
-    pub message: String,
-    pub author: String,
-    pub age: Duration,
-    pub outcomes: BTreeMap<ClusterId, Outcome>,
-}
-
-impl Commit {
-    pub fn outcome(&self, cluster: &ClusterId) -> Outcome {
-        self.outcomes
-            .get(cluster)
-            .copied()
-            .unwrap_or(Outcome::NotTargeted)
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct GitOpsChanges {
-    pub source: String,
-    pub lanes: Vec<Lane>,
-    pub commits: Vec<Commit>,
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FleetHome {
     pub problems: Vec<Problem>,
-    pub changes: GitOpsChanges,
 }
 
 #[cfg(test)]
@@ -256,22 +192,5 @@ mod tests {
             },
         };
         assert_eq!(metrics.flux_ready(), 20);
-    }
-
-    #[test]
-    fn missing_lane_reads_as_not_targeted() {
-        let commit = Commit {
-            sha: String::new(),
-            message: String::new(),
-            author: String::new(),
-            age: Duration::ZERO,
-            outcomes: BTreeMap::from([(ClusterId::new("staging"), Outcome::Retrying)]),
-        };
-        assert_eq!(
-            commit.outcome(&ClusterId::new("staging")),
-            Outcome::Retrying
-        );
-        assert_eq!(commit.outcome(&ClusterId::new("dev")), Outcome::NotTargeted);
-        assert_eq!(Outcome::NotTargeted.status(), None);
     }
 }
