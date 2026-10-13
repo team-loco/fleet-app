@@ -1,6 +1,7 @@
 pub mod add_cluster;
 pub mod changes;
 pub mod command;
+pub mod compare;
 mod events;
 pub mod fleet;
 pub(crate) mod flux_object;
@@ -9,6 +10,7 @@ mod namespaces;
 mod nodes;
 mod overview;
 mod resources;
+pub mod settings;
 pub mod workload;
 
 use fleet_core::{ClusterDetail, ClusterSummary, Command, Page, ResourceKind, ResourceRef, Status};

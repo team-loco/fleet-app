@@ -4,7 +4,9 @@ use std::rc::Rc;
 
 use anyhow::Context as _;
 use clap::{Parser, ValueEnum};
-use fleet_core::{AddClusterStep, Backend, ClusterId, Command, FluxKey, FluxKind, Page};
+use fleet_core::{
+    AddClusterStep, Backend, ClusterId, Command, FluxKey, FluxKind, Page, ResourceRef,
+};
 use fleet_demo::DemoBackend;
 use fleet_kube::LiveBackend;
 use fleet_kube::discovery::DiscoverySources;
@@ -26,6 +28,8 @@ const MIN_HEIGHT: f32 = 480.;
 const SAMPLE_CLUSTER: &str = "prod-us-east";
 const SAMPLE_QUERY: &str = "checkout";
 const SAMPLE_RELEASE_CLUSTER: &str = "staging";
+const SAMPLE_NAMESPACE: &str = "payments";
+const SAMPLE_DEPLOYMENT: &str = "checkout-api";
 
 gpui::actions!(fleet, [Quit]);
 
@@ -59,6 +63,8 @@ enum Screen {
     Events,
     Resources,
     Gitops,
+    Compare,
+    ClusterSettings,
     Kit,
     KitOverlays,
     KitPanes,
@@ -93,6 +99,15 @@ impl Screen {
             Self::Events => vec![sample, Command::SelectPage(Page::Events)],
             Self::Resources => vec![sample, Command::SelectPage(Page::Deployments)],
             Self::Gitops => vec![Command::SelectPage(Page::GitOps)],
+            Self::Compare => vec![Command::Compare(ResourceRef {
+                cluster: ClusterId::new(SAMPLE_CLUSTER),
+                kind: "Deployment".into(),
+                namespace: Some(SAMPLE_NAMESPACE.into()),
+                name: SAMPLE_DEPLOYMENT.into(),
+            })],
+            Self::ClusterSettings => {
+                vec![Command::ShowClusterSettings(ClusterId::new(SAMPLE_CLUSTER))]
+            }
             Self::Kit => Vec::new(),
             Self::KitOverlays => Vec::new(),
             Self::KitPanes => Vec::new(),
@@ -258,6 +273,8 @@ fn launch(
             Screen::LocoApps => shell_view(updates, commands, screen, window, cx),
             #[cfg(feature = "loco")]
             Screen::LocoBuilds => shell_view(updates, commands, screen, window, cx),
+            Screen::Compare => shell_view(updates, commands, screen, window, cx),
+            Screen::ClusterSettings => shell_view(updates, commands, screen, window, cx),
         };
         cx.new(|cx| Root::new(view, window, cx))
     })

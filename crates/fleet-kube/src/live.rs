@@ -6,22 +6,27 @@ use std::time::Duration;
 
 use fleet_core::add_cluster::home_relative;
 use fleet_core::resource::page_for_kind;
+use fleet_core::settings::{Auth, ClusterSettings, Connection};
 use fleet_core::{
-    Backend, ChangesLog, CheckLine, ClusterId, ClusterSummary, Command, ContextChoice, Counts,
-    FleetHome, GitOps, KubeconfigFile, NewCluster, Page, Receiver, ResourceRef, Sender, Snapshot,
-    Status, Update, Verdict,
+    Backend, ChangesLog, CheckLine, ClusterCatalog, ClusterId, ClusterSummary, Command,
+    ContextChoice, Counts, FleetHome, GitOps, KubeconfigFile, NewCluster, Page, Preferences,
+    Receiver, ResourceRef, Sender, Snapshot, Status, Update, Verdict,
 };
 use tokio::time::MissedTickBehavior;
 
 use crate::checks::{self, CheckResult, run_checks_streaming};
-use crate::discovery::{ContextRef, Discovery, DiscoveryEvent, DiscoverySources, discover};
-use crate::manager::{COALESCE_INTERVAL, ClusterHandle, ClusterManager, Subscription};
+use crate::discovery::{
+    ContextRef, Discovery, DiscoveryEvent, DiscoverySources, KubeContext, discover,
+};
+use crate::manager::{
+    COALESCE_INTERVAL, ClusterHandle, ClusterManager, ConnectionStatus, Subscription,
+};
 use crate::provider::AuthKind;
 use crate::resources::WatchKind;
 use crate::settings::KubeSettings;
 use crate::shell_env::{ShellEnv, capture, user_shell};
 use crate::snapshot::{page_kind, summarize};
-use crate::store::{ClusterStore, SavedCluster};
+use crate::store::{ClusterStore, SavedCluster, SavedPreferences};
 use crate::watch::KubeconfigWatcher;
 
 const THREAD_NAME: &str = "fleet-kube";
@@ -208,6 +213,14 @@ impl Live {
             Command::Rollback { .. } => {}
             #[cfg(feature = "loco")]
             Command::Loco(_) => {}
+            Command::CopySpec { .. } => {}
+            Command::ShowClusterSettings(_) => {}
+            Command::SetPreferences(id, preferences) => {
+                return self.set_preferences(id, preferences);
+            }
+            Command::Connect(_) => {}
+            Command::Reauthenticate(_) => {}
+            Command::Disconnect(_) => {}
         }
         false
     }
@@ -223,6 +236,16 @@ impl Live {
             tracing::error!(%error, path = %self.store.path().display(), "saving clusters failed");
         }
         self.reconcile();
+    }
+
+    fn set_preferences(&mut self, id: &ClusterId, preferences: &Preferences) -> bool {
+        match self.store.set_preferences(id, preferences) {
+            Ok(changed) => changed,
+            Err(error) => {
+                tracing::error!(%error, path = %self.store.path().display(), "saving preferences failed");
+                false
+            }
+        }
     }
 
     fn remove(&mut self, id: &ClusterId) {
@@ -296,6 +319,16 @@ impl Live {
             .map(missing_summary);
         let mut clusters: Vec<_> = connected.chain(missing).collect();
         clusters.sort_by(|a, b| a.name.cmp(&b.name));
+        let settings: Vec<ClusterSettings> = self
+            .clusters
+            .values()
+            .map(|cluster| {
+                let status = cluster.handle.status();
+                let saved = self.store.get(&cluster.id).map(|c| &c.preferences);
+                cluster_settings(cluster.id.clone(), cluster.handle.context(), &status, saved)
+            })
+            .collect();
+        let sources: BTreeSet<&Path> = self.clusters.keys().map(|id| id.file.as_path()).collect();
         Snapshot {
             clusters,
             fleet_nav: BTreeMap::new(),
@@ -307,7 +340,40 @@ impl Live {
             flux: Vec::new(),
             #[cfg(feature = "loco")]
             loco: BTreeMap::new(),
+            comparisons: Vec::new(),
+            catalog: ClusterCatalog {
+                sources: sources.len(),
+                clusters: settings,
+            },
         }
+    }
+}
+
+pub fn cluster_settings(
+    cluster: ClusterId,
+    context: &KubeContext,
+    status: &ConnectionStatus,
+    saved: Option<&SavedPreferences>,
+) -> ClusterSettings {
+    let auth = match &context.auth {
+        AuthKind::Exec(exec) => Auth::Exec(exec.summary()),
+        other => Auth::Other(other.to_string()),
+    };
+    let mut preferences = saved.map(Preferences::from).unwrap_or_default();
+    if preferences.default_namespace.is_none() {
+        preferences.default_namespace.clone_from(&context.namespace);
+    }
+    ClusterSettings {
+        cluster,
+        connection: Connection {
+            context: context.id.context.clone(),
+            server: context.server.clone().unwrap_or_default(),
+            auth,
+            kubeconfig: context.id.file.display().to_string(),
+        },
+        auth_expired: matches!(status, ConnectionStatus::AuthExpired(_)),
+        prometheus: None,
+        preferences,
     }
 }
 
@@ -487,8 +553,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::discovery::KubeContext;
-    use crate::provider::Provider;
+    use crate::provider::{ExecCommand, Provider};
 
     fn context(file: &str, name: &str) -> KubeContext {
         KubeContext {
@@ -519,7 +584,7 @@ mod tests {
         assert!(store.add(&[added]).is_ok());
         let mut eks = context("/h/.kube/eks/sandbox.yaml", "sandbox");
         eks.server = Some("https://x.eks.amazonaws.com".to_owned());
-        eks.auth = AuthKind::Exec(crate::provider::ExecCommand {
+        eks.auth = AuthKind::Exec(ExecCommand {
             command: "aws".to_owned(),
             args: ["eks", "get-token", "--cluster-name", "sandbox"]
                 .map(str::to_owned)
@@ -561,6 +626,7 @@ mod tests {
             file: PathBuf::from("/gone"),
             context: "old".to_owned(),
             name: "old".to_owned(),
+            preferences: SavedPreferences::default(),
         };
         let summary = missing_summary(&saved);
         assert_eq!(summary.status, Status::Offline);
@@ -598,5 +664,33 @@ mod tests {
             DiscoveryEvent::Removed(context("/a", "x").id),
         );
         assert_eq!(discovery.contexts, Vec::new());
+    }
+
+    #[test]
+    fn settings_carry_the_kubeconfig_connection() {
+        let mut gke = context("/h/.kube/config", "gke_qa");
+        gke.server = Some("https://10.0.0.1".to_owned());
+        gke.namespace = Some("payments".to_owned());
+        gke.auth = AuthKind::Exec(ExecCommand {
+            command: "/usr/local/bin/gke-gcloud-auth-plugin".to_owned(),
+            args: Vec::new(),
+        });
+        let settings = cluster_settings(
+            ClusterId::new("gke_qa"),
+            &gke,
+            &ConnectionStatus::Connected,
+            None,
+        );
+        assert_eq!(
+            settings.connection.auth.label(),
+            "exec · gke-gcloud-auth-plugin"
+        );
+        assert_eq!(settings.connection.server, "https://10.0.0.1");
+        assert_eq!(settings.connection.kubeconfig, "/h/.kube/config");
+        assert_eq!(
+            settings.preferences.default_namespace.as_deref(),
+            Some("payments")
+        );
+        assert!(!settings.auth_expired);
     }
 }

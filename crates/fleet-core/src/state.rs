@@ -1,7 +1,8 @@
 use crate::resource::page_for_kind;
 use crate::{
     AddClusterStep, CheckLine, ClusterId, ContextRef, ExecRequest, FluxAction, FluxKey, FluxKind,
-    KubeconfigFile, LogRequest, NewCluster, Page, ResourceRef, Sink, Snapshot, Verdict, Workload,
+    KubeconfigFile, LogRequest, NewCluster, Page, Preferences, ResourceRef, Sink, Snapshot,
+    Verdict, Workload,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,6 +47,16 @@ pub enum Command {
     Flux(FluxKey, FluxAction),
     #[cfg(feature = "loco")]
     Loco(crate::loco::LocoCommand),
+    CopySpec {
+        from: ClusterId,
+        to: ResourceRef,
+        path: String,
+    },
+    ShowClusterSettings(ClusterId),
+    SetPreferences(ClusterId, Preferences),
+    Connect(ClusterId),
+    Reauthenticate(ClusterId),
+    Disconnect(ClusterId),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -104,7 +115,7 @@ impl AppState {
             Command::ToggleResourcesPanel => self.resources_open = !self.resources_open,
             Command::OpenResource(resource) => self.open_resource(resource),
             Command::FollowLogs(resource) => self.open_resource(resource),
-            Command::Compare(_) => {}
+            Command::Compare(resource) => self.compare(resource),
             Command::PortForward { .. } => {}
             Command::Cordon(_) => {}
             Command::Uncordon(_) => {}
@@ -124,6 +135,12 @@ impl AppState {
             Command::Flux(..) => {}
             #[cfg(feature = "loco")]
             Command::Loco(_) => {}
+            Command::CopySpec { .. } => {}
+            Command::ShowClusterSettings(_) => self.select_page(Page::ClusterSettings),
+            Command::SetPreferences(..) => {}
+            Command::Connect(_) => {}
+            Command::Reauthenticate(_) => {}
+            Command::Disconnect(_) => {}
         }
     }
 
@@ -163,6 +180,15 @@ impl AppState {
             self.resource = None;
             self.flux_object = None;
         }
+    }
+
+    fn compare(&mut self, resource: &ResourceRef) {
+        if self.snapshot.cluster(&resource.cluster).is_none() {
+            return;
+        }
+        self.cluster = Some(resource.cluster.clone());
+        self.page = Page::Compare;
+        self.resource = Some(resource.clone());
     }
 
     fn open_resource(&mut self, resource: &ResourceRef) {
@@ -299,6 +325,30 @@ mod tests {
         };
         state.apply(&Command::FollowLogs(ghost));
         assert_eq!(state, loaded());
+    }
+
+    #[test]
+    fn compare_opens_the_compare_page_for_the_resource() {
+        let mut state = loaded();
+        let deploy = ResourceRef {
+            cluster: ClusterId::new("a"),
+            kind: "Deployment".into(),
+            namespace: Some("shop".into()),
+            name: "cart".into(),
+        };
+        state.apply(&Command::Compare(deploy.clone()));
+        assert_eq!(state.page, Page::Compare);
+        assert_eq!(state.cluster, Some(ClusterId::new("a")));
+        assert_eq!(state.resource, Some(deploy));
+    }
+
+    #[test]
+    fn cluster_settings_is_a_fleet_page() {
+        let mut state = loaded();
+        state.apply(&Command::SelectCluster(Some(ClusterId::new("a"))));
+        state.apply(&Command::ShowClusterSettings(ClusterId::new("b")));
+        assert_eq!(state.page, Page::ClusterSettings);
+        assert_eq!(state.cluster, None);
     }
 
     #[test]

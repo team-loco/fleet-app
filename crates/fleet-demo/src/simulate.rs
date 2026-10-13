@@ -2,10 +2,11 @@ use std::time::Duration;
 
 use fleet_core::nodes::Node;
 use fleet_core::{
-    ClusterDetail, Command, Counts, Page, ResourceKind, ResourceRef, Snapshot, Status,
+    ClusterDetail, ClusterId, Command, Counts, Page, ResourceKind, ResourceRef, Snapshot, Status,
 };
 
 use crate::detail::{READY, SCHEDULING_DISABLED};
+use crate::sim;
 
 pub const SETTLE: Duration = Duration::from_secs(2);
 const DAEMON_PODS: u32 = 6;
@@ -20,6 +21,8 @@ pub enum Settle {
     Deleted(ResourceRef),
     #[cfg(feature = "loco")]
     Loco(crate::loco::Settle),
+    Connected(ClusterId),
+    RolledOut(ResourceRef),
 }
 
 pub fn apply(snapshot: &mut Snapshot, command: &Command) -> Option<Settle> {
@@ -43,6 +46,18 @@ pub fn apply(snapshot: &mut Snapshot, command: &Command) -> Option<Settle> {
         }
         #[cfg(feature = "loco")]
         Command::Loco(command) => crate::loco::apply(snapshot, command).map(Settle::Loco),
+        Command::Connect(cluster) => {
+            sim::reconnect(snapshot, cluster, sim::CONNECTING)?;
+            Some(Settle::Connected(cluster.clone()))
+        }
+        Command::Reauthenticate(cluster) => {
+            sim::reconnect(snapshot, cluster, sim::REAUTHENTICATING)?;
+            Some(Settle::Connected(cluster.clone()))
+        }
+        Command::CopySpec { from, to, .. } => {
+            sim::copy_spec(snapshot, from, to)?;
+            Some(Settle::RolledOut(to.clone()))
+        }
         _ => None,
     }
 }
@@ -68,6 +83,8 @@ pub fn settle(snapshot: &mut Snapshot, settle: &Settle) {
         Settle::Deleted(target) => remove_resource(snapshot, target),
         #[cfg(feature = "loco")]
         Settle::Loco(pending) => crate::loco::settle(snapshot, pending),
+        Settle::Connected(cluster) => sim::connected(snapshot, cluster),
+        Settle::RolledOut(target) => sim::rolled_out(snapshot, target),
     }
     if let Settle::Cordoned(target) | Settle::Uncordoned(target) | Settle::Drained(target) = settle
     {

@@ -4,6 +4,7 @@ pub enum Page {
     Problems,
     GitOps,
     Changes,
+    ClusterSettings,
     ClusterOverview,
     Nodes,
     Namespaces,
@@ -30,6 +31,7 @@ pub enum Page {
     ConfigMaps,
     Secrets,
     Pvcs,
+    Compare,
 }
 
 impl Page {
@@ -39,6 +41,7 @@ impl Page {
             Self::Problems => "Problems",
             Self::GitOps => "GitOps",
             Self::Changes => "Changes",
+            Self::ClusterSettings => "Clusters",
             Self::ClusterOverview => "Overview",
             Self::Nodes => "Nodes",
             Self::Namespaces => "Namespaces",
@@ -65,13 +68,14 @@ impl Page {
             Self::ConfigMaps => "ConfigMaps",
             Self::Secrets => "Secrets",
             Self::Pvcs => "PVCs",
+            Self::Compare => "Compare",
         }
     }
 
     pub const fn is_fleet(self) -> bool {
         matches!(
             self,
-            Self::Overview | Self::Problems | Self::GitOps | Self::Changes
+            Self::Overview | Self::Problems | Self::GitOps | Self::Changes | Self::ClusterSettings
         )
     }
 }

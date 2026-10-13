@@ -4,6 +4,9 @@ use gpui::{AppContext, Context, Window};
 use super::Shell;
 use crate::kit::{ActionMenu, ConfirmDialog, MenuItem, confirm};
 
+const SETTINGS: &str = "Settings…";
+const SETTINGS_DESCRIPTION: &str =
+    "Connection details, default namespace, metrics source and labels.";
 const REMOVE: &str = "Remove from Fleet";
 const REMOVE_DESCRIPTION: &str =
     "Disconnect and forget this cluster. Your kubeconfig is not changed.";
@@ -24,6 +27,15 @@ impl Shell {
             if self.cluster_menus.contains_key(&id) {
                 continue;
             }
+            let shown = id.clone();
+            let settings_shell = shell.clone();
+            let settings = MenuItem::new(SETTINGS, move |_, cx| {
+                let command = Command::ShowClusterSettings(shown.clone());
+                settings_shell
+                    .update(cx, |shell, cx| shell.dispatch(command, cx))
+                    .ok();
+            })
+            .description(SETTINGS_DESCRIPTION);
             let removed = id.clone();
             let shell = shell.clone();
             let item = MenuItem::new(REMOVE, move |window, cx| {
@@ -35,7 +47,11 @@ impl Shell {
             .destructive()
             .description(REMOVE_DESCRIPTION);
             let menu_id = format!("cluster-menu-{id}");
-            let menu = cx.new(|cx| ActionMenu::new(menu_id, cx).plain().items(vec![item]));
+            let menu = cx.new(|cx| {
+                ActionMenu::new(menu_id, cx)
+                    .plain()
+                    .items(vec![settings, item])
+            });
             self.cluster_menus.insert(id, menu);
         }
     }
