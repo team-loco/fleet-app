@@ -514,6 +514,35 @@ fn event_row_opens_inspector_enter_reopens_and_escape_closes() -> anyhow::Result
 }
 
 #[test]
+fn inspector_edge_resizes_clamps_and_double_click_resets() -> anyhow::Result<()> {
+    use fleet_ui::theme::{INSPECTOR_MAX, INSPECTOR_MIN};
+    use gpui::{point, px};
+    let mut ui = Ui::open(Screen::ResourceInspector)?;
+    let width = |ui: &mut Ui| ui.bounds("resource-inspector-pane").map(|b| b.size.width);
+    let original = width(&mut ui).ok_or_else(|| anyhow::anyhow!("no inspector"))?;
+    ui.drag("resource-inspector-resize", point(px(-120.), px(0.)))?;
+    assert_eq!(width(&mut ui), Some(original + px(120.)));
+    assert_eq!(
+        ui.read(|_, cx| fleet_ui::settings::current(cx)
+            .inspector_widths
+            .get("resource-inspector")
+            .copied()),
+        Some(600)
+    );
+    ui.click("close-resource")?;
+    assert!(ui.bounds("resource-inspector-pane").is_none());
+    ui.click("resources-ConfigMap-row-0")?;
+    assert_eq!(width(&mut ui), Some(original + px(120.)));
+    ui.drag("resource-inspector-resize", point(px(-2000.), px(0.)))?;
+    assert_eq!(width(&mut ui), Some(INSPECTOR_MAX));
+    ui.drag("resource-inspector-resize", point(px(2000.), px(0.)))?;
+    assert_eq!(width(&mut ui), Some(INSPECTOR_MIN));
+    ui.double_click("resource-inspector-resize")?;
+    assert_eq!(width(&mut ui), Some(original));
+    Ok(())
+}
+
+#[test]
 fn events_namespace_choice_is_kept_per_cluster_in_preferences() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Events)?;
     let cluster = ui
@@ -556,5 +585,53 @@ fn events_namespace_choice_is_kept_per_cluster_in_preferences() -> anyhow::Resul
             .map(|settings| &settings.preferences.namespace_selection),
         Some(&Some(fleet_core::settings::NamespaceSelection::All))
     );
+    Ok(())
+}
+
+#[test]
+fn yaml_wrap_and_expand_work_and_escape_returns() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::ResourceInspector)?;
+    assert!(ui.bounds("code-horizontal").is_some());
+    ui.click("code-wrap")?;
+    assert!(ui.bounds("code-horizontal").is_none());
+    assert!(ui.bounds("code-wrapped").is_some());
+    ui.click("code-expand")?;
+    let expanded = ui
+        .bounds("expanded-yaml")
+        .ok_or_else(|| anyhow::anyhow!("no expanded YAML"))?;
+    let inspector = ui
+        .bounds("resource-inspector-pane")
+        .ok_or_else(|| anyhow::anyhow!("no inspector"))?;
+    assert!(expanded.size.width > inspector.size.width);
+    ui.press("escape")?;
+    assert!(ui.bounds("expanded-yaml").is_none());
+    assert!(ui.bounds("code-wrapped").is_some());
+    ui.click("code-wrap")?;
+    assert!(ui.bounds("code-horizontal").is_some());
+    Ok(())
+}
+
+#[test]
+fn yaml_scrolls_in_both_axes_and_the_gutter_stays_fixed_horizontally() -> anyhow::Result<()> {
+    use gpui::{point, px};
+    let mut ui = Ui::open(Screen::ResourceInspector)?;
+    let gutter = ui
+        .bounds("code-gutter")
+        .ok_or_else(|| anyhow::anyhow!("no gutter"))?;
+    let lines = ui
+        .bounds("code-lines")
+        .ok_or_else(|| anyhow::anyhow!("no code"))?;
+    ui.scroll("code-horizontal", point(px(-120.), px(0.)))?;
+    let scrolled = ui
+        .bounds("code-lines")
+        .ok_or_else(|| anyhow::anyhow!("no code"))?;
+    assert!(scrolled.origin.x < lines.origin.x);
+    assert_eq!(ui.bounds("code-gutter"), Some(gutter));
+    ui.scroll("code-vertical", point(px(0.), px(-120.)))?;
+    let scrolled_gutter = ui
+        .bounds("code-gutter")
+        .ok_or_else(|| anyhow::anyhow!("no gutter"))?;
+    assert!(scrolled_gutter.origin.y < gutter.origin.y);
+    assert_eq!(scrolled_gutter.origin.x, gutter.origin.x);
     Ok(())
 }

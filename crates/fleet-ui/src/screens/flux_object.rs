@@ -11,9 +11,9 @@ use gpui::{
 };
 
 use crate::kit::{
-    ActionMenu, Button, CodeView, Column, ConfirmDialog, DiffView, KeyValue, MenuItem, PageHeader,
-    Prose, SectionHeader, SectionLabel, Segmented, StatusGlyph, Table, TableEvent, Toast, confirm,
-    parse_unified, toast,
+    ActionMenu, Button, CodeView, Column, ConfirmDialog, DiffView, InspectorPane, KeyValue,
+    MenuItem, PageHeader, Prose, SectionHeader, SectionLabel, Segmented, StatusGlyph, Table,
+    TableEvent, Toast, confirm, parse_unified, toast,
 };
 use crate::theme::{
     ASIDE_WIDTH, ActiveTheme, FONT_MONO, FONT_SANS, LINE_PROSE, Palette, ROW_DOCUMENT,
@@ -575,7 +575,7 @@ impl FluxObjectPage {
         };
         div()
             .id("flux-aside")
-            .w(ASIDE_WIDTH)
+            .w_full()
             .flex_none()
             .h_full()
             .overflow_y_scroll()
@@ -628,11 +628,13 @@ impl Render for FluxObjectPage {
             window.focus(&self.focus, cx);
         }
         let content = self.page.clone().map(|page| {
+            let aside = Self::aside(&page, &palette, cx);
+            let aside = InspectorPane::new("flux-inspector", aside).width(ASIDE_WIDTH);
             div()
                 .flex()
                 .size_full()
                 .child(self.main(&page, &palette, cx))
-                .child(Self::aside(&page, &palette, cx))
+                .child(aside)
         });
         div()
             .id("flux-object")

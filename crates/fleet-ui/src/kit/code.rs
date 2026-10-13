@@ -2,18 +2,20 @@ use std::ops::Range;
 
 use fleet_core::Status;
 use gpui::{
-    App, ClipboardItem, ElementId, HighlightStyle, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, SharedString, StatefulInteractiveElement, Styled, StyledText, Window, div,
+    App, ClipboardItem, ElementId, Entity, FocusHandle, HighlightStyle, InteractiveElement,
+    IntoElement, ParentElement, Pixels, RenderOnce, SharedString, StatefulInteractiveElement,
+    Styled, StyledText, TextRun, Window, div, font,
 };
 
 use super::button::Button;
 use super::overlay::{Toast, toast};
 use crate::theme::{
-    ActiveTheme, CODE_LINE, FONT_MONO, GUTTER_NUMBER, Palette, RADIUS, RULE, SPACE_2, SPACE_3,
-    SPACE_4, TEXT_MONO,
+    ActiveTheme, CODE_HEIGHT, CODE_LINE, CONTROL_SMALL, DIALOG_TOP, FONT_MONO, GUTTER_NUMBER,
+    PAGE_HEADER, Palette, RADIUS, RULE, SPACE_2, SPACE_3, SPACE_4, SPACE_8, TEXT_MONO,
 };
 
 const COPY: &str = "Copy";
+const PANEL_EDGES: f32 = 2.;
 const COPIED: &str = "Copied to the clipboard";
 const COMMENT: char = '#';
 const KEY_END: &str = ": ";
@@ -124,69 +126,250 @@ impl CodeView {
     }
 }
 
-impl RenderOnce for CodeView {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let palette = *cx.palette();
-        let numbers = self.text.lines().enumerate().map(|(ix, _)| {
+struct CodeState {
+    wrap: bool,
+    expanded: bool,
+    focus: FocusHandle,
+    return_focus: Option<FocusHandle>,
+}
+
+fn styled_line(line: &str, language: Language, palette: &Palette) -> StyledText {
+    let owned = SharedString::from(line.to_owned());
+    match language {
+        Language::Yaml => {
+            let highlights = yaml_tokens(line)
+                .into_iter()
+                .map(|(range, token)| (range, token_style(token, palette)));
+            StyledText::new(owned).with_highlights(highlights)
+        }
+        Language::Plain => StyledText::new(owned),
+    }
+}
+
+fn code_width(text: &str, palette: &Palette, window: &Window) -> Pixels {
+    let code_font = font(FONT_MONO);
+    text.lines()
+        .map(|line| {
+            let runs = [TextRun {
+                len: line.len(),
+                font: code_font.clone(),
+                color: palette.fg,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            }];
+            let shaped =
+                window
+                    .text_system()
+                    .shape_line(line.to_owned().into(), TEXT_MONO, &runs, None);
+            shaped.width
+        })
+        .max()
+        .unwrap_or(Pixels::ZERO)
+}
+
+fn code_body(
+    text: &str,
+    language: Language,
+    wrap: bool,
+    palette: &Palette,
+    height: Pixels,
+    window: &Window,
+) -> impl IntoElement + use<> {
+    let body = if wrap {
+        let rows = text.lines().enumerate().map(|(ix, line)| {
+            let number = div()
+                .w(GUTTER_NUMBER)
+                .flex_none()
+                .justify_end()
+                .flex()
+                .pr(SPACE_4)
+                .text_color(palette.mute)
+                .child((ix + 1).to_string());
+            let styled = styled_line(line, language, palette);
+            let text = div().flex_1().min_w_0().child(styled);
+            div()
+                .flex()
+                .min_h(CODE_LINE)
+                .line_height(CODE_LINE)
+                .child(number)
+                .child(text)
+        });
+        div()
+            .id("code-wrapped")
+            .debug_selector(|| "code-wrapped".to_owned())
+            .flex()
+            .flex_col()
+            .children(rows)
+            .into_any_element()
+    } else {
+        let width = code_width(text, palette, window);
+        let numbers = text.lines().enumerate().map(|(ix, _)| {
             div()
                 .h(CODE_LINE)
                 .flex()
                 .justify_end()
                 .pr(SPACE_4)
-                .child(SharedString::from((ix + 1).to_string()))
+                .child((ix + 1).to_string())
         });
-        let lines = self.text.lines().map(|line| {
-            let owned = SharedString::from(line.to_owned());
-            let styled = match self.language {
-                Language::Yaml => {
-                    let highlights = yaml_tokens(line)
-                        .into_iter()
-                        .map(|(range, token)| (range, token_style(token, &palette)));
-                    StyledText::new(owned).with_highlights(highlights)
-                }
-                Language::Plain => StyledText::new(owned),
-            };
-            div().h(CODE_LINE).whitespace_nowrap().child(styled)
-        });
-        let copy = self.copy.then(|| {
-            let text = self.text.clone();
-            div().absolute().top(SPACE_2).right(SPACE_2).child(
-                Button::new("copy", COPY).small().on_click(move |_, _, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
-                    toast(Toast::new(Status::Ok, COPIED), cx);
-                }),
-            )
+        let lines = text.lines().map(|line| {
+            let styled = styled_line(line, language, palette);
+            div()
+                .h(CODE_LINE)
+                .line_height(CODE_LINE)
+                .whitespace_nowrap()
+                .child(styled)
         });
         div()
-            .id(self.id)
-            .relative()
             .flex()
-            .rounded(RADIUS)
-            .border(RULE)
-            .border_color(palette.line)
-            .bg(palette.editor)
-            .py(SPACE_3)
-            .font_family(FONT_MONO)
-            .text_size(TEXT_MONO)
             .child(
                 div()
+                    .id("code-gutter")
+                    .debug_selector(|| "code-gutter".to_owned())
                     .w(GUTTER_NUMBER)
                     .flex_none()
-                    .flex()
-                    .flex_col()
                     .text_color(palette.mute)
                     .children(numbers),
             )
             .child(
                 div()
-                    .id("code-scroll")
+                    .id("code-horizontal")
+                    .debug_selector(|| "code-horizontal".to_owned())
                     .flex_1()
                     .min_w_0()
                     .overflow_x_scroll()
-                    .text_color(palette.fg)
-                    .child(div().flex().flex_col().children(lines)),
+                    .child(
+                        div()
+                            .id("code-lines")
+                            .debug_selector(|| "code-lines".to_owned())
+                            .w(width)
+                            .flex()
+                            .flex_col()
+                            .children(lines),
+                    ),
             )
-            .children(copy)
+            .into_any_element()
+    };
+    div()
+        .id("code-vertical")
+        .debug_selector(|| "code-vertical".to_owned())
+        .min_h_0()
+        .h(height)
+        .overflow_y_scroll()
+        .font_family(FONT_MONO)
+        .text_size(TEXT_MONO)
+        .line_height(CODE_LINE)
+        .text_color(palette.fg)
+        .py(SPACE_3)
+        .child(body)
+}
+
+fn tools(
+    state: &Entity<CodeState>,
+    text: SharedString,
+    copy: bool,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let wrapping = state.clone();
+    let expanding = state.clone();
+    div()
+        .flex()
+        .flex_none()
+        .gap(SPACE_3)
+        .p(SPACE_2)
+        .child(
+            Button::new("code-wrap", "Soft wrap")
+                .small()
+                .selected(state.read(cx).wrap)
+                .on_click(move |_, window, cx| {
+                    wrapping.update(cx, |state, _| state.wrap = !state.wrap);
+                    window.refresh();
+                }),
+        )
+        .child(
+            Button::new("code-expand", "Expand")
+                .small()
+                .disabled(state.read(cx).expanded)
+                .on_click(move |_, window, cx| {
+                    expanding.update(cx, |state, cx| {
+                        state.expanded = true;
+                        state.return_focus = window.focused(cx);
+                        state.focus.focus(window, cx);
+                    });
+                    window.refresh();
+                }),
+        )
+        .children(copy.then(|| {
+            Button::new("copy", COPY).small().on_click(move |_, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
+                toast(Toast::new(Status::Ok, COPIED), cx);
+            })
+        }))
+}
+
+impl RenderOnce for CodeView {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let palette = *cx.palette();
+        let state =
+            window.use_keyed_state((self.id.clone(), "code-state"), cx, |_, cx| CodeState {
+                wrap: false,
+                expanded: false,
+                focus: cx.focus_handle(),
+                return_focus: None,
+            });
+        let wrap = state.read(cx).wrap;
+        let expanded = state.read(cx).expanded;
+        let overlay = expanded.then(|| {
+            let closing = state.clone();
+            let focus = state.read(cx).focus.clone();
+            super::modal::Modal::new(
+                "expanded-yaml",
+                "YAML",
+                window.viewport_size().width - SPACE_8,
+            )
+            .focus(&focus)
+            .on_close(move |window, cx| {
+                closing.update(cx, |state, cx| {
+                    state.expanded = false;
+                    if let Some(focus) = state.return_focus.take() {
+                        focus.focus(window, cx);
+                    }
+                });
+                window.refresh();
+            })
+            .child(tools(&state, self.text.clone(), self.copy, cx))
+            .child(code_body(
+                &self.text,
+                self.language,
+                wrap,
+                &palette,
+                window.viewport_size().height
+                    - DIALOG_TOP * PANEL_EDGES
+                    - PAGE_HEADER
+                    - CONTROL_SMALL,
+                window,
+            ))
+            .into_any_element()
+        });
+        div()
+            .id(self.id)
+            .flex()
+            .flex_col()
+            .min_w_0()
+            .rounded(RADIUS)
+            .border(RULE)
+            .border_color(palette.line)
+            .bg(palette.editor)
+            .child(tools(&state, self.text.clone(), self.copy, cx))
+            .child(code_body(
+                &self.text,
+                self.language,
+                wrap,
+                &palette,
+                CODE_HEIGHT,
+                window,
+            ))
+            .children(overlay)
     }
 }
 

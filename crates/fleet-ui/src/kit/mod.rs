@@ -35,7 +35,7 @@ pub use input::{
     InputEvent, TextArea, TextAreaState, TextField, TextFieldDown, TextFieldEnd, TextFieldEscape,
     TextFieldHome, TextFieldPageDown, TextFieldPageUp, TextFieldState, TextFieldUp,
 };
-pub use inspector::Inspector;
+pub use inspector::{Inspector, InspectorPane, clamp_inspector_width};
 pub use log::{LOG_CAPACITY, Level, LogLine, LogView, strip_ansi};
 pub use matrix::{Matrix, MatrixCell};
 pub use menu::{ActionMenu, MenuItem};

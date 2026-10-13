@@ -85,7 +85,7 @@ mod tests {
         let Ok(mut store) = SettingsStore::open_at(&nested, now()) else {
             panic!("open");
         };
-        let settings = AppSettings {
+        let mut settings = AppSettings {
             theme: ThemeChoice::Light,
             refresh: Refresh {
                 metrics: PollInterval::Seconds60,
@@ -93,6 +93,12 @@ mod tests {
             },
             ..AppSettings::default()
         };
+        settings
+            .inspector_widths
+            .insert("node-inspector".to_owned(), 640);
+        settings
+            .inspector_widths
+            .insert("resource-inspector".to_owned(), 420);
         assert!(store.save(&settings).is_ok());
         let Ok(reopened) = SettingsStore::open_at(&nested, now()) else {
             panic!("reopen");

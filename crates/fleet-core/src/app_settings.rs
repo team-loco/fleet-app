@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -5,6 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
+    pub inspector_widths: BTreeMap<String, u16>,
     pub theme: ThemeChoice,
     pub refresh: Refresh,
     pub notifications: Notifications,
@@ -175,6 +177,7 @@ mod tests {
                 enabled: false,
                 warnings: true,
             },
+            inspector_widths: BTreeMap::from([("resource-inspector".to_owned(), 640)]),
         };
         let json = serde_json::to_string(&settings).unwrap_or_default();
         assert!(json.contains("\"theme\":\"dark\""), "{json}");

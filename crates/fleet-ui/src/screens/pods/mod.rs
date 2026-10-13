@@ -14,8 +14,9 @@ use streams::{LogSession, SEARCH_PLACEHOLDER, ShellSession, TERMINAL_ID, crash_l
 
 use crate::kit::{
     ActionMenu, Button, Column, ConfirmDialog, DockState, FilterBar, FilterEvent, InputEvent,
-    KeyValue, Link, LogView, MenuItem, SectionLabel, Select, SelectEvent, Split, StatusGlyph,
-    StatusText, Table, TableEvent, Terminal, TextFieldState, chip_label, confirm, swap_in,
+    InspectorPane, KeyValue, Link, LogView, MenuItem, SectionLabel, Select, SelectEvent,
+    StatusGlyph, StatusText, Table, TableEvent, Terminal, TextFieldState, chip_label, confirm,
+    swap_in,
 };
 use crate::theme::{
     ActiveTheme, CONTAINER_SQUARE, CONTAINER_SQUARE_GAP, FONT_MONO, LINE_PROSE, Palette,
@@ -34,7 +35,6 @@ const STATUS: Pixels = px(150.);
 const NAMESPACE_SELECT: Pixels = px(180.);
 const CONTAINER_SELECT: Pixels = px(160.);
 const INSPECTOR_LABEL: Pixels = px(96.);
-const TABLE_SHARE: f32 = 0.7;
 
 const ALL_NAMESPACES: &str = "All namespaces";
 const MISSING: &str = "—";
@@ -787,7 +787,7 @@ impl Render for PodsScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let inspector = self.inspector(cx);
         let dock = self.dock_view(cx).into_any_element();
-        let table = div().size_full().child(self.table.clone());
+        let table = div().flex_1().min_w_0().h_full().child(self.table.clone());
         div()
             .size_full()
             .flex()
@@ -797,7 +797,9 @@ impl Render for PodsScreen {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .child(Split::horizontal("pods-split", table, inspector).ratio(TABLE_SHARE)),
+                    .flex()
+                    .child(table)
+                    .child(InspectorPane::new(INSPECTOR_ID, inspector)),
             )
             .child(dock)
     }

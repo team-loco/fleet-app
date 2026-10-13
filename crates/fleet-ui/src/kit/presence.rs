@@ -76,39 +76,63 @@ pub fn swap_in(element: impl IntoElement, id: &str, selection: &str) -> AnyEleme
         .into_any_element()
 }
 
+#[derive(gpui::IntoElement)]
+struct Slide {
+    element: AnyElement,
+    id: String,
+    selection: String,
+    width: Pixels,
+    entering: bool,
+}
+
+impl gpui::RenderOnce for Slide {
+    fn render(self, _: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
+        let width = super::inspector::stored_width(&self.id, self.width, cx);
+        let duration = if self.entering {
+            INSPECTOR_IN
+        } else {
+            INSPECTOR_OUT
+        };
+        let phase = if self.entering { ENTER } else { LEAVE };
+        let content = if self.entering {
+            swap_in(self.element, &self.id, &self.selection)
+        } else {
+            self.element
+        };
+        let animation = Animation::new(duration).with_easing(ease_out_quint());
+        div()
+            .flex_none()
+            .h_full()
+            .overflow_hidden()
+            .w(width)
+            .child(div().flex_none().w(width).h_full().child(content))
+            .with_animation(key(&self.id, phase, ""), animation, move |panel, delta| {
+                let shown = if self.entering { delta } else { 1. - delta };
+                panel.w(width * shown).opacity(shown)
+            })
+    }
+}
+
 pub fn slide_in(element: impl IntoElement, id: &str, selection: &str, width: Pixels) -> AnyElement {
-    let animation = Animation::new(INSPECTOR_IN).with_easing(ease_out_quint());
-    let content = div()
-        .flex_none()
-        .w(width)
-        .h_full()
-        .child(swap_in(element, id, selection));
-    div()
-        .flex_none()
-        .h_full()
-        .overflow_hidden()
-        .w(width)
-        .child(content)
-        .with_animation(key(id, ENTER, ""), animation, move |panel, delta| {
-            panel.w(width * delta).opacity(delta)
-        })
-        .into_any_element()
+    Slide {
+        element: element.into_any_element(),
+        id: id.to_owned(),
+        selection: selection.to_owned(),
+        width,
+        entering: true,
+    }
+    .into_any_element()
 }
 
 pub fn slide_out(element: impl IntoElement, id: &str, width: Pixels) -> AnyElement {
-    let animation = Animation::new(INSPECTOR_OUT).with_easing(ease_out_quint());
-    let content = div().flex_none().w(width).h_full().child(element);
-    div()
-        .flex_none()
-        .h_full()
-        .overflow_hidden()
-        .w(width)
-        .child(content)
-        .with_animation(key(id, LEAVE, ""), animation, move |panel, delta| {
-            let shown = 1. - delta;
-            panel.w(width * shown).opacity(shown)
-        })
-        .into_any_element()
+    Slide {
+        element: element.into_any_element(),
+        id: id.to_owned(),
+        selection: String::new(),
+        width,
+        entering: false,
+    }
+    .into_any_element()
 }
 
 #[cfg(test)]

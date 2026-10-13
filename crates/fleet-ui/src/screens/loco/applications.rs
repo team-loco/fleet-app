@@ -11,8 +11,8 @@ use gpui::{
 };
 
 use crate::kit::{
-    ActionMenu, Button, Column, FilterBar, FilterEvent, KeyValue, Link, MenuItem, PageTitle,
-    SectionHeader, StatusGlyph, StatusText, Table, TableEvent, chip_label,
+    ActionMenu, Button, Column, FilterBar, FilterEvent, InspectorPane, KeyValue, Link, MenuItem,
+    PageTitle, SectionHeader, StatusGlyph, StatusText, Table, TableEvent, chip_label,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, LINE_PROSE, Palette, RADIUS, ROW_TABLE_MAX, ROW_TABLE_MIN, RULE,
@@ -405,11 +405,8 @@ impl Render for ApplicationsScreen {
             .child(self.header())
             .child(self.filter.clone())
             .child(div().flex_1().min_h_0().child(self.list.clone()));
-        let detail = div()
-            .flex_none()
-            .w(DETAIL_WIDTH)
-            .h_full()
-            .child(self.detail(&palette, cx));
+        let content = self.detail(&palette, cx);
+        let detail = InspectorPane::new("loco-application-inspector", content).width(DETAIL_WIDTH);
         div().flex().size_full().child(list).child(detail)
     }
 }
