@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use crate::filter::{StatusFilter, TextFilter};
-use crate::overview::{named, plural, verb};
 use crate::{Page, Status, Uid};
 
 const READY_COLUMN: &str = "Ready";
@@ -162,34 +161,6 @@ pub fn filter_counts(rows: &[Resource]) -> Vec<(StatusFilter, usize)> {
     StatusFilter::counts(rows.iter().map(|row| row.status))
 }
 
-pub fn sentence(kind: ResourceKind, rows: &[Resource]) -> String {
-    let label = kind.page().label();
-    if rows.is_empty() {
-        return format!("There are no {label} in this cluster.");
-    }
-    let mut flagged: Vec<&Resource> = rows.iter().filter(|r| r.status != Status::Ok).collect();
-    if flagged.is_empty() {
-        return format!(
-            "Nothing needs attention across {}.",
-            plural(rows.len(), kind.name(), label)
-        );
-    }
-    flagged.sort_by_key(|r| std::cmp::Reverse(r.status));
-    let described: Vec<String> = flagged
-        .iter()
-        .map(|row| match kind.status_cell(row) {
-            Some(cell) => format!("{} ({cell})", row.name),
-            None => row.name.clone(),
-        })
-        .collect();
-    let described: Vec<&str> = described.iter().map(String::as_str).collect();
-    format!(
-        "{} {} attention.",
-        named(&described),
-        verb(flagged.len(), "needs", "need")
-    )
-}
-
 pub fn namespaces_of(rows: &[Resource]) -> Vec<String> {
     let mut names: Vec<String> = rows.iter().map(|row| row.namespace.clone()).collect();
     names.sort();
@@ -275,59 +246,6 @@ pub(crate) mod tests {
             ["loco-system", "payments", "web"]
         );
         assert_eq!(namespace_choices(known, None), ["payments", "web"]);
-    }
-
-    fn with_cells(mut row: Resource, cells: &[&str]) -> Resource {
-        row.cells = cells.iter().map(|c| (*c).to_owned()).collect();
-        row
-    }
-
-    #[test]
-    fn sentence_names_flagged_rows_worst_first_with_their_state() {
-        let rows = vec![
-            with_cells(
-                resource("monitoring", "grafana", Status::Warn),
-                &["0/1", "1", "0", "grafana"],
-            ),
-            with_cells(
-                resource("payments", "checkout-api", Status::Err),
-                &["2/3", "3", "2", "checkout"],
-            ),
-            resource("web", "web-frontend", Status::Ok),
-        ];
-        assert_eq!(
-            sentence(ResourceKind::Deployment, &rows),
-            "checkout-api (2/3 ready) and grafana (0/1 ready) need attention."
-        );
-    }
-
-    #[test]
-    fn sentence_uses_the_status_column_and_caps_names() {
-        let rows: Vec<Resource> = ["a", "b", "c", "d"]
-            .into_iter()
-            .map(|name| with_cells(resource("ml", name, Status::Err), &["0/1", "4m", "Failed"]))
-            .collect();
-        assert_eq!(
-            sentence(ResourceKind::Job, &rows),
-            "a (Failed), b (Failed), c (Failed) and 1 more need attention."
-        );
-        assert_eq!(
-            sentence(ResourceKind::Job, &rows[..1]),
-            "a (Failed) needs attention."
-        );
-    }
-
-    #[test]
-    fn sentence_when_nothing_is_wrong() {
-        let rows = vec![resource("web", "a", Status::Ok)];
-        assert_eq!(
-            sentence(ResourceKind::ConfigMap, &rows),
-            "Nothing needs attention across 1 ConfigMap."
-        );
-        assert_eq!(
-            sentence(ResourceKind::PersistentVolumeClaim, &[]),
-            "There are no PVCs in this cluster."
-        );
     }
 
     #[test]

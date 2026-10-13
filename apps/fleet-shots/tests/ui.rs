@@ -854,3 +854,46 @@ fn every_page_state_renders_and_retry_or_refresh_reloads() -> anyhow::Result<()>
     }
     Ok(())
 }
+
+#[test]
+fn row_menus_carry_each_objects_actions_and_inspectors_keep_only_the_primary() -> anyhow::Result<()>
+{
+    let mut nodes = Ui::open(Screen::Nodes)?;
+    nodes.click("nodes-row-0")?;
+    assert!(nodes.bounds("node-primary").is_some());
+    assert!(nodes.bounds("node-actions").is_none());
+    nodes.right_click("nodes-row-1")?;
+    assert!(nodes.bounds("nodes-row-menu-item-0").is_some());
+    nodes.click("nodes-row-menu-item-1")?;
+    assert!(nodes.bounds("dialog-cancel").is_some());
+    nodes.click("dialog-cancel")?;
+
+    let mut pods = Ui::open(Screen::Pods)?;
+    assert!(pods.bounds("pod-shell").is_some());
+    assert!(pods.bounds("pod-actions").is_none());
+    pods.hover("pods-row-2")?;
+    pods.click("pods-row-2-more")?;
+    assert!(pods.bounds("pods-row-menu-item-0").is_some());
+
+    let mut fleet = Ui::open(Screen::Fleet)?;
+    fleet.right_click("fleet-clusters-row-0")?;
+    fleet.click("fleet-clusters-row-menu-item-0")?;
+    assert_eq!(fleet.state().page, Page::ClusterSettings);
+    Ok(())
+}
+
+#[test]
+fn list_pages_open_on_the_filter_without_a_summary_sentence() -> anyhow::Result<()> {
+    for screen in [
+        Screen::Resources,
+        Screen::Nodes,
+        Screen::Namespaces,
+        Screen::Events,
+    ] {
+        let mut ui = Ui::open(screen)?;
+        let filter = ui.read(|shell, cx| shell.filter_bar(cx).is_some());
+        assert!(filter, "{screen:?} has no filter bar");
+        assert!(ui.bounds("page-actions").is_none(), "{screen:?}");
+    }
+    Ok(())
+}

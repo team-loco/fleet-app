@@ -31,7 +31,7 @@ pub use code::CodeView;
 pub use diff::{DiffFile, DiffLine, DiffView, LineKind, parse_unified};
 pub use dock::{Dock, DockState, DockTab};
 pub use filter::{FilterBar, FilterEvent, chip_label, match_note};
-pub use header::{Lede, PageHeader, PageTitle};
+pub use header::{MetaLine, PageHeader, PageTitle};
 pub use input::{
     InputEvent, TextArea, TextAreaState, TextField, TextFieldDown, TextFieldEnd, TextFieldEscape,
     TextFieldHome, TextFieldPageDown, TextFieldPageUp, TextFieldState, TextFieldUp,

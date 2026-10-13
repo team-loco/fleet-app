@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use fleet_core::settings::ClusterAction;
 use fleet_core::switcher::{self, ADD_CLUSTER, ALL_CLUSTERS, Entry, Row};
 use fleet_core::{ClusterId, ClusterSummary, Command};
@@ -12,7 +14,7 @@ use super::Shell;
 use crate::assets::{CHEVRON_LEFT, CHEVRON_UP};
 use crate::kit::list_keys::Nav;
 use crate::kit::{
-    ConfirmDialog, Dismissal, Highlighted, InputEvent, Step, TextField, TextFieldDown,
+    ConfirmDialog, Dismissal, Highlighted, InputEvent, MenuItem, Step, TextField, TextFieldDown,
     TextFieldEnd, TextFieldEscape, TextFieldHome, TextFieldPageDown, TextFieldPageUp,
     TextFieldState, TextFieldUp, Tooltip, above_left, appear, confirm, status_symbols, step,
     surface,
@@ -97,6 +99,42 @@ impl Action {
             Self::Remove => SwitcherEvent::Remove(id.clone()),
         }
     }
+}
+
+pub(crate) type Run = Rc<dyn Fn(Command, &mut App)>;
+
+fn remove_dialog(id: ClusterId, run: Run) -> ConfirmDialog {
+    let title = format!("Remove {id}");
+    let body = format!(
+        "Fleet disconnects from {id} and stops watching it. Your kubeconfig file is not \
+         changed, so you can add the context again from Add cluster."
+    );
+    ConfirmDialog::new(title, body, REMOVE_CONFIRM, move |_, cx: &mut App| {
+        run(Command::RemoveCluster(id.clone()), cx);
+    })
+}
+
+pub(crate) fn cluster_items(cluster: &ClusterSummary, run: &Run) -> Vec<MenuItem> {
+    Action::for_cluster(cluster)
+        .into_iter()
+        .map(|action| {
+            let id = cluster.id.clone();
+            let run = run.clone();
+            let item = MenuItem::new(action.label(), move |window, cx| match action.event(&id) {
+                SwitcherEvent::Run(command) => run(command, cx),
+                SwitcherEvent::Remove(id) => confirm(remove_dialog(id, run.clone()), window, cx),
+                SwitcherEvent::Select(_) => {}
+                SwitcherEvent::AddCluster => {}
+            })
+            .description(action.description());
+            match action {
+                Action::Remove => item.destructive(),
+                Action::Settings => item,
+                Action::Connect => item,
+                Action::Disconnect => item,
+            }
+        })
+        .collect()
 }
 
 fn starts_group(rows: &[Row], ix: usize) -> bool {
@@ -767,19 +805,12 @@ impl Shell {
 
     fn confirm_remove(id: ClusterId, window: &mut Window, cx: &mut Context<Self>) {
         let shell = cx.entity().downgrade();
-        let title = format!("Remove {id}");
-        let body = format!(
-            "Fleet disconnects from {id} and stops watching it. Your kubeconfig file is not \
-             changed, so you can add the context again from Add cluster."
-        );
-        let removed = id;
-        let dialog = ConfirmDialog::new(title, body, REMOVE_CONFIRM, move |_, cx: &mut App| {
-            let command = Command::RemoveCluster(removed.clone());
+        let run: Run = Rc::new(move |command, cx| {
             shell
                 .update(cx, |shell, cx| shell.dispatch(command, cx))
                 .ok();
         });
-        confirm(dialog, window, cx);
+        confirm(remove_dialog(id, run), window, cx);
     }
 }
 

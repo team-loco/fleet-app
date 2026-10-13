@@ -1,5 +1,5 @@
 use fleet_core::filter::StatusFilter;
-use fleet_core::nodes::{Node, NodeSummary, Usage, sentence};
+use fleet_core::nodes::{Node, NodeSummary, Usage};
 use fleet_core::overview::{Capacity, Commitment, number, percent};
 use fleet_core::time::age;
 use fleet_core::{
@@ -12,8 +12,8 @@ use gpui::{
 
 use super::{NODE_KIND, ScreenEvent};
 use crate::kit::{
-    ActionMenu, Button, CapacityMeter, Column, ConfirmDialog, FilterBar, FilterEvent, IconButton,
-    Inspector, KeyValue, Lede, MenuItem, Meter, MiniMeter, Presence, SectionLabel, StatusGlyph,
+    Button, CapacityMeter, Column, ConfirmDialog, FilterBar, FilterEvent, IconButton, Inspector,
+    KeyValue, MenuItem, MetaLine, Meter, MiniMeter, Presence, SectionLabel, StatusGlyph,
     StatusText, Table, TableEvent, chip_label, confirm, slide_in, slide_out,
 };
 use crate::theme::{
@@ -42,12 +42,10 @@ pub struct NodesScreen {
     cluster: Option<ClusterId>,
     summary: NodeSummary,
     nodes: Vec<Node>,
-    sentence: String,
     confirm_destructive: bool,
     selected: Option<String>,
     table: Entity<Table<Node>>,
     filter: Entity<FilterBar>,
-    menu: Entity<ActionMenu>,
     presence: Presence<Node>,
 }
 
@@ -85,7 +83,6 @@ impl NodesScreen {
             this.select(name, cx);
         })
         .detach();
-        let menu = cx.new(|cx| ActionMenu::new("node-actions", cx));
         let filter = cx.new(|cx| FilterBar::new("node-filter", window, cx));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh(cx);
@@ -95,12 +92,10 @@ impl NodesScreen {
             cluster: None,
             summary: NodeSummary::default(),
             nodes: Vec::new(),
-            sentence: String::new(),
             confirm_destructive: true,
             selected: None,
             table,
             filter,
-            menu,
             presence: Presence::default(),
         }
     }
@@ -116,14 +111,13 @@ impl NodesScreen {
         self.cluster = Some(cluster.id.clone());
         if self.confirm_destructive != confirm_destructive {
             self.confirm_destructive = confirm_destructive;
-            self.refresh_menu(cx);
+            self.refresh(cx);
         }
         if self.nodes == detail.nodes {
             return;
         }
         self.nodes.clone_from(&detail.nodes);
         self.summary = detail.node_summary();
-        self.sentence = sentence(&self.nodes);
         if self
             .selected
             .as_ref()
@@ -162,7 +156,9 @@ impl NodesScreen {
         });
         let scope = self.cluster.as_ref().map(|c| c.as_str().to_owned());
         let words = query.words;
+        let actions = self.row_actions(cx);
         self.table.update(cx, |table, cx| {
+            table.set_row_actions(actions, cx);
             if let Some(scope) = scope {
                 table.set_scope(scope, cx);
             }
@@ -170,7 +166,6 @@ impl NodesScreen {
             table.set_rows(rows, cx);
         });
         self.select_in_table(cx);
-        self.refresh_menu(cx);
         cx.notify();
     }
 
@@ -178,7 +173,6 @@ impl NodesScreen {
         self.cluster = Some(cluster);
         self.selected = Some(name);
         self.select_in_table(cx);
-        self.refresh_menu(cx);
         cx.notify();
     }
 
@@ -205,7 +199,6 @@ impl NodesScreen {
 
     fn select(&mut self, name: Option<String>, cx: &mut Context<Self>) {
         self.selected = name;
-        self.refresh_menu(cx);
         cx.notify();
     }
 
@@ -220,22 +213,20 @@ impl NodesScreen {
     }
 
     fn target(&self, node: &Node) -> Option<Seen> {
-        let cluster = self.cluster.clone()?;
-        let target = ResourceRef {
-            cluster,
-            kind: NODE_KIND.into(),
-            namespace: None,
-            name: node.name.clone(),
-        };
-        Some(Seen::new(target, node.uid.clone()))
+        let cluster = self.cluster.as_ref()?;
+        Some(node_target(node, cluster))
     }
 
-    fn refresh_menu(&mut self, cx: &mut Context<Self>) {
-        let target = self.selected_node().and_then(|n| self.target(n));
-        let items = target
-            .map(|target| drain_items(target, self.confirm_destructive, cx.weak_entity()))
-            .unwrap_or_default();
-        self.menu.update(cx, |menu, cx| menu.set_items(items, cx));
+    fn row_actions(&self, cx: &mut Context<Self>) -> impl Fn(&Node) -> Vec<MenuItem> + 'static {
+        let cluster = self.cluster.clone();
+        let confirm_destructive = self.confirm_destructive;
+        let screen = cx.weak_entity();
+        move |node: &Node| {
+            let Some(cluster) = cluster.clone() else {
+                return Vec::new();
+            };
+            node_items(node, &cluster, confirm_destructive, screen.clone())
+        }
     }
 
     fn inspector(&self, node: &Node, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
@@ -297,14 +288,7 @@ impl NodesScreen {
         Inspector::new(INSPECTOR_ID, node.name.clone())
             .mono()
             .status(node.status, node.state.clone())
-            .actions(
-                div()
-                    .flex()
-                    .gap(SPACE_3)
-                    .children(primary)
-                    .child(self.menu.clone())
-                    .child(close),
-            )
+            .actions(div().flex().gap(SPACE_3).children(primary).child(close))
             .section(None, facts.into_any_element())
             .section(Some("Capacity"), capacity.into_any_element())
             .section(
@@ -354,7 +338,7 @@ impl Render for NodesScreen {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .child(Lede::new(self.sentence.clone()).meta(meta))
+                    .child(MetaLine::new(meta))
                     .child(self.filter.clone())
                     .child(div().flex_1().min_h_0().child(self.table.clone())),
             )
@@ -362,13 +346,46 @@ impl Render for NodesScreen {
     }
 }
 
-fn drain_items(
-    target: Seen,
+fn node_target(node: &Node, cluster: &ClusterId) -> Seen {
+    let target = ResourceRef {
+        cluster: cluster.clone(),
+        kind: NODE_KIND.into(),
+        namespace: None,
+        name: node.name.clone(),
+    };
+    Seen::new(target, node.uid.clone())
+}
+
+fn node_items(
+    node: &Node,
+    cluster: &ClusterId,
     confirm_destructive: bool,
     screen: WeakEntity<NodesScreen>,
 ) -> Vec<MenuItem> {
+    let target = node_target(node, cluster);
+    let (label, description, command) = if node.schedulable {
+        (
+            "Cordon",
+            "Stop scheduling new pods here; running pods stay.",
+            Command::Cordon(target.clone()),
+        )
+    } else {
+        (
+            "Uncordon",
+            "Let the scheduler place new pods here again.",
+            Command::Uncordon(target.clone()),
+        )
+    };
+    let toggle_screen = screen.clone();
+    let toggle = MenuItem::new(label, move |_, cx| {
+        let command = command.clone();
+        let _ = toggle_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+    })
+    .disabled(node.status == Status::Progress)
+    .description(description);
     let detail = format!("{} · {}", target.target.cluster, target.target.name);
     vec![
+        toggle,
         MenuItem::new("Drain…", move |window, cx| {
             let screen = screen.clone();
             let target = target.clone();

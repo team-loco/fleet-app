@@ -90,3 +90,14 @@ Settled; change only with a new entry that says why.
     cluster-wide watches, so a scoped list shows no count instead of a partial one. Pods stay on the
     always-on cluster-wide pod watch that problem detection needs, so for pods only the view is
     scoped.
+22. **No summary sentence on list pages; actions live on rows** (#119, #120): requested by the
+    product owner; supersedes HANDOFF's "one plain sentence first" for list pages (Cluster overview,
+    Nodes, Namespaces, Events, Pods and every resource list), which now open on the FilterBar. The
+    overview and Nodes keep their mono meta line (`kit::MetaLine`). Object pages keep their
+    sentence where it says something nothing else does: the Flux object status, the workload
+    rollout, the pod inspector's container state, Compare. Object actions move off inspector
+    headers onto the rows themselves: every row with actions shows a ⋯ on hover and opens the same
+    menu on right-click (`Table::row_actions`), with one-line descriptions and the usual in-app
+    confirm for destructive items (decision 15). Inspectors keep only their primary action (Cordon
+    or Uncordon, Shell) and close. Page headers keep one primary action plus their Actions menu
+    (workload, Flux object). The non-functional ⋯ on list page headers is gone.

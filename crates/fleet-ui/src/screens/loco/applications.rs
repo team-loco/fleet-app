@@ -6,13 +6,13 @@ use fleet_core::{Command, Page, ResourceRef, Status};
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla,
     InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder, px,
-    relative,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
+    prelude::FluentBuilder, px, relative,
 };
 
 use crate::kit::{
-    ActionMenu, Button, Column, FilterBar, FilterEvent, InspectorPane, KeyValue, Link, MenuItem,
-    PageTitle, SectionHeader, StatusGlyph, StatusText, Table, TableEvent, chip_label,
+    Button, Column, FilterBar, FilterEvent, InspectorPane, KeyValue, Link, MenuItem, PageTitle,
+    SectionHeader, StatusGlyph, StatusText, Table, TableEvent, chip_label,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, LINE_PROSE, Palette, RADIUS, ROW_TABLE_MAX, ROW_TABLE_MIN, RULE,
@@ -59,7 +59,6 @@ pub struct ApplicationsScreen {
     selected: Option<ResourceRef>,
     list: Entity<Table<AppRow>>,
     objects: Entity<Table<ControllerObject>>,
-    menu: Entity<ActionMenu>,
     _subscriptions: [Subscription; 3],
 }
 
@@ -68,8 +67,13 @@ impl EventEmitter<Command> for ApplicationsScreen {}
 impl ApplicationsScreen {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let filter = cx.new(|cx| FilterBar::new("loco-app-filter", window, cx));
+        let screen = cx.weak_entity();
         let list = cx.new(|cx| {
             Table::new("loco-apps", app_columns(), cx)
+                .row_actions(move |row: &AppRow| match row {
+                    AppRow::App(app) => Self::menu_items(app, &screen),
+                    AppRow::Group(_) => Vec::new(),
+                })
                 .headerless()
                 .row_height(ROW_TABLE_MAX)
                 .column_gap(SPACE_5)
@@ -86,7 +90,6 @@ impl ApplicationsScreen {
                 .unruled()
                 .fit_content()
         });
-        let menu = cx.new(|cx| ActionMenu::new("loco-app-actions", cx));
         let subscriptions = [
             cx.subscribe(&list, |this, table, event: &TableEvent, cx| {
                 let TableEvent::Selected(ix) = *event else {
@@ -128,7 +131,6 @@ impl ApplicationsScreen {
             selected: None,
             list,
             objects,
-            menu,
             _subscriptions: subscriptions,
         }
     }
@@ -162,10 +164,6 @@ impl ApplicationsScreen {
             .update(cx, |table, cx| table.set_rows(objects, cx));
         let row = self.selected_row(cx);
         self.list.update(cx, |table, cx| table.select(row, cx));
-        let items = app
-            .map(|app| Self::menu_items(&app, cx))
-            .unwrap_or_default();
-        self.menu.update(cx, |menu, cx| menu.set_items(items, cx));
         cx.notify();
     }
 
@@ -217,8 +215,8 @@ impl ApplicationsScreen {
         });
     }
 
-    fn menu_items(app: &Application, cx: &mut Context<Self>) -> Vec<MenuItem> {
-        let this = cx.entity().downgrade();
+    fn menu_items(app: &Application, screen: &WeakEntity<Self>) -> Vec<MenuItem> {
+        let this = screen.clone();
         let emit = move |command: Command| {
             let this = this.clone();
             move |_: &mut Window, cx: &mut gpui::App| {
@@ -260,7 +258,7 @@ impl ApplicationsScreen {
                 .child(NOTHING_SELECTED)
                 .into_any_element();
         };
-        let summary = self.summary(workspace, app, palette, cx);
+        let summary = Self::summary(workspace, app, palette, cx);
         let deployment = deployment_section(app, palette);
         let route = Self::route_section(app, palette, cx);
         div()
@@ -283,7 +281,6 @@ impl ApplicationsScreen {
     }
 
     fn summary(
-        &self,
         workspace: &Workspace,
         app: &Application,
         palette: &Palette,
@@ -313,8 +310,7 @@ impl ApplicationsScreen {
             )
             .child(status)
             .child(div().flex_1())
-            .child(logs)
-            .child(self.menu.clone());
+            .child(logs);
         let problem = app.degraded.as_ref().map(|degraded| {
             div()
                 .mt(SPACE_3)

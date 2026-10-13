@@ -15,10 +15,9 @@ mod streams;
 use streams::{LogSession, SEARCH_PLACEHOLDER, ShellSession, TERMINAL_ID};
 
 use crate::kit::{
-    ActionMenu, Button, Column, ConfirmDialog, DockState, FilterBar, FilterEvent, InputEvent,
-    InspectorPane, KeyValue, Link, LogView, MenuItem, SectionLabel, Select, SelectEvent,
-    StatusGlyph, StatusText, Table, TableEvent, Terminal, TextFieldState, chip_label, confirm,
-    swap_in,
+    Button, Column, ConfirmDialog, DockState, FilterBar, FilterEvent, InputEvent, InspectorPane,
+    KeyValue, Link, LogView, MenuItem, SectionLabel, Select, SelectEvent, StatusGlyph, StatusText,
+    Table, TableEvent, Terminal, TextFieldState, chip_label, confirm, swap_in,
 };
 use crate::theme::{
     ActiveTheme, CONTAINER_SQUARE, CONTAINER_SQUARE_GAP, FONT_MONO, LINE_PROSE, Palette,
@@ -62,7 +61,6 @@ pub struct PodsScreen {
     logs: Entity<LogView>,
     terminal: Entity<Terminal>,
     dock: Entity<DockState>,
-    menu: Entity<ActionMenu>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -78,8 +76,10 @@ impl PodsScreen {
     }
 
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let screen = cx.weak_entity();
         let table = cx.new(|cx| {
             Table::new("pods", columns(), cx)
+                .row_actions(move |pod: &Pod| menu_items(pod, &screen))
                 .row_key(|pod: &Pod| pod.name.clone().into())
                 .column_gap(SPACE_7)
                 .empty(NO_PODS)
@@ -99,7 +99,6 @@ impl PodsScreen {
         let logs = cx.new(|_| LogView::new("pod-logs"));
         let terminal = cx.new(|cx| Terminal::new(TERMINAL_ID, cx));
         let dock = cx.new(|_| DockState::new());
-        let menu = cx.new(|cx| ActionMenu::new("pod-actions", cx));
         let subscriptions = vec![
             cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
                 let ix = match *event {
@@ -161,7 +160,6 @@ impl PodsScreen {
             logs,
             terminal,
             dock,
-            menu,
             _subscriptions: subscriptions,
         }
     }
@@ -360,15 +358,8 @@ impl PodsScreen {
             select.set_options(names, cx);
             select.set_selected(index, cx);
         });
-        self.rebuild_menu(cx);
         self.sync_streams(cx);
         cx.notify();
-    }
-
-    fn rebuild_menu(&mut self, cx: &mut Context<Self>) {
-        let items = self.selected_pod().map(|pod| menu_items(pod, cx));
-        self.menu
-            .update(cx, |menu, cx| menu.set_items(items.unwrap_or_default(), cx));
     }
 
     fn inspector(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -379,7 +370,7 @@ impl PodsScreen {
             .unwrap_or_default();
         let (header, body) = match self.selected_pod() {
             Some(pod) => (
-                Some(self.pod_header(pod, &palette, cx)),
+                Some(Self::pod_header(pod, &palette, cx)),
                 Self::pod_details(pod, &palette, cx).into_any_element(),
             ),
             None => (
@@ -413,7 +404,7 @@ impl PodsScreen {
             .into_any_element()
     }
 
-    fn pod_header(&self, pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn pod_header(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let shell = Button::new("pod-shell", "Shell")
             .primary()
             .on_click(cx.listener(|this, _, window, cx| this.show_terminal(window, cx)));
@@ -426,8 +417,7 @@ impl PodsScreen {
                     .gap(SPACE_4)
                     .child(SectionLabel::new("Pod"))
                     .child(div().flex_1())
-                    .child(shell)
-                    .child(self.menu.clone()),
+                    .child(shell),
             )
             .child(
                 div()
@@ -685,14 +675,20 @@ fn events(pod: &Pod, palette: &Palette) -> impl IntoElement {
         })
 }
 
-fn menu_items(pod: &Pod, cx: &mut Context<PodsScreen>) -> Vec<MenuItem> {
-    let screen = cx.entity().downgrade();
+fn menu_items(pod: &Pod, screen: &gpui::WeakEntity<PodsScreen>) -> Vec<MenuItem> {
+    let screen = screen.clone();
     let logs_screen = screen.clone();
+    let logs_pod = pod.resource();
     let mut items = vec![
         MenuItem::new("Logs", move |_, cx| {
-            let _ = logs_screen.update(cx, PodsScreen::show_logs);
+            let pod = logs_pod.clone();
+            let _ = logs_screen.update(cx, |this, cx| {
+                this.select(Some(pod), cx);
+                this.refresh(cx);
+                this.show_logs(cx);
+            });
         })
-        .description("Follow the selected container's output."),
+        .description("Follow this pod's output in the dock."),
     ];
     for (container, port) in pod.ports() {
         let target = pod.resource();

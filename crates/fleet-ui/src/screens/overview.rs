@@ -13,8 +13,8 @@ use gpui::{
 
 use super::ScreenEvent;
 use crate::kit::{
-    Button, CapacityMeter, Column, Lede, LineChart, Link, SectionHeader, SectionLabel, Segmented,
-    Series, StackedBar, StatusText, Table, TableEvent, Tooltip,
+    Button, CapacityMeter, Column, LineChart, Link, MetaLine, SectionHeader, SectionLabel,
+    Segmented, Series, StackedBar, StatusText, Table, TableEvent, Tooltip,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, METER, Palette, RADIUS_SMALL, RULE, SPACE_1, SPACE_3, SPACE_4, SPACE_5,
@@ -41,7 +41,6 @@ const COUNT_WIDTH: Pixels = px(44.);
 
 #[derive(Clone, Debug, PartialEq)]
 struct OverviewData {
-    sentence: String,
     meta: String,
     cpu: Capacity,
     memory: Capacity,
@@ -71,7 +70,6 @@ impl OverviewData {
             .map(|n| (n.status, format!("{}{SEPARATOR}{}", n.name, n.state)))
             .collect();
         Self {
-            sentence: detail.sentence(),
             meta: meta.join(SEPARATOR),
             cpu: detail.cpu(),
             memory: detail.memory(),
@@ -406,7 +404,7 @@ impl Render for OverviewScreen {
             .flex_col()
             .tab_group()
             .pb(SPACE_8)
-            .child(Lede::new(data.sentence.clone()).meta(data.meta.clone()))
+            .child(MetaLine::new(data.meta.clone()))
             .child(Self::capacity(&data, &palette, cx))
             .child(middle)
             .child(
