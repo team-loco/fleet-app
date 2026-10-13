@@ -13,6 +13,9 @@
     "LocoApps.dc.html": {"x": 1520, "y": -1600, "w": 1440, "h": 900, "title": "Loco · Applications — why is checkout down?", "expand": "fill", "is_interactive": true, "page": "v2"},
     "LocoBuilds.dc.html": {"x": 3040, "y": -1600, "w": 1440, "h": 900, "title": "Loco · Builds — buildkit jobs", "expand": "fill", "is_interactive": true, "page": "v2"},
     "LocoRoutes.dc.html": {"x": 4560, "y": -1600, "w": 1440, "h": 900, "title": "Loco · Routes — Gateway listeners + HTTPRoutes", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "Split.dc.html": {"x": 6080, "y": -1600, "w": 1440, "h": 900, "title": "Tabs + split panes — same deployment, two clusters", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "ClusterSwitcher.dc.html": {"x": 7600, "y": -1600, "w": 1440, "h": 900, "title": "Cluster switcher — status bar, bottom right", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "PaneTabs.dc.html": {"x": 3240, "y": 3900, "w": 720, "h": 32, "title": "Component · pane tabs", "page": "v2"},
     "Fleet.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "title": "1 · Fleet — what needs attention?", "expand": "fill", "is_interactive": true, "page": "v2"},
     "Command.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 900, "title": "2 · ⌘K — jump to checkout-api", "expand": "fill", "page": "v2"},
     "Workload.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 900, "title": "3 · Deployment — why is it crashing?", "expand": "fill", "is_interactive": true, "page": "v2"},
@@ -25,7 +28,7 @@
     "KustomizationLight.dc.html": {"x": 3040, "y": 2600, "w": 1440, "h": 900, "title": "Kustomization — light", "expand": "fill", "is_interactive": true, "page": "v2"},
     "ChangesLight.dc.html": {"x": 4560, "y": 2600, "w": 1440, "h": 900, "title": "Changes — light", "expand": "fill", "is_interactive": true, "page": "v2"},
     "StatusBar.dc.html": {"x": 0, "y": 3900, "w": 1440, "h": 26, "title": "Component · status bar", "page": "v2"},
-    "Nav.dc.html": {"x": 1520, "y": 3900, "w": 360, "h": 874, "title": "Component · clusters + resources", "page": "v2"},
+    "Nav.dc.html": {"x": 1520, "y": 3900, "w": 200, "h": 874, "title": "Component · sidebar", "page": "v2"},
     "AppIcon.dc.html": {"x": 1960, "y": 3900, "w": 1200, "h": 640, "title": "macOS app icon", "page": "v2"},
 
     "Main.dc.html": {"expand": "fill", "h": 900, "is_interactive": true, "title": "Cluster overview — dark", "w": 1440, "x": 0, "y": 0, "page": "v1"},
@@ -42,7 +45,7 @@
     "Titlebar.dc.html": {"h": 40, "title": "Component · title bar", "w": 1440, "x": 348, "y": 5100, "page": "v1"}
   },
   "order": [
-    "LocoPlatform.dc.html", "LocoApps.dc.html", "LocoBuilds.dc.html", "LocoRoutes.dc.html",
+    "LocoPlatform.dc.html", "LocoApps.dc.html", "LocoBuilds.dc.html", "LocoRoutes.dc.html", "Split.dc.html", "ClusterSwitcher.dc.html", "PaneTabs.dc.html",
     "Fleet.dc.html", "Command.dc.html", "Workload.dc.html", "Kustomization.dc.html", "Changes.dc.html",
     "AddCluster.dc.html", "AddClusterCheck.dc.html",
     "Flux.dc.html", "FleetLight.dc.html", "KustomizationLight.dc.html", "ChangesLight.dc.html",
@@ -52,7 +55,7 @@
   ],
   "notes": {
     "title": {"kind": "title1", "maxW": 2960, "text": "Shoal — multi-cluster Kubernetes, native desktop (GPUI)", "w": 240, "x": 0, "y": -300, "page": "v1"},
-    "lo": {"kind": "title1", "maxW": 6000, "text": "Loco — first-class (built with the loco flag)", "x": 0, "y": -1900, "page": "v2"},
+    "lo": {"kind": "title1", "maxW": 9040, "text": "Loco — first-class (built with the loco flag) · tabs + split panes · cluster switcher", "x": 0, "y": -1900, "page": "v2"},
     "f1": {"kind": "title1", "maxW": 7520, "text": "Flow 1 — Triage: fleet → workload → Flux → the commit that caused it", "x": 0, "y": -300, "page": "v2"},
     "f2": {"kind": "title1", "maxW": 2960, "text": "Flow 2 — Add a cluster", "x": 0, "y": 1000, "page": "v2"},
     "lt": {"kind": "title1", "maxW": 6000, "text": "GitOps across the fleet · light appearance", "x": 0, "y": 2300, "page": "v2"},
