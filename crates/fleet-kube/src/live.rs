@@ -178,6 +178,10 @@ impl Live {
             Command::FollowLogs(resource) => self.open(resource),
             Command::Compare(_) => {}
             Command::PortForward { .. } => {}
+            Command::Cordon(_) => {}
+            Command::Uncordon(_) => {}
+            Command::Drain(_) => {}
+            Command::Delete(_) => {}
         }
     }
 
@@ -200,6 +204,7 @@ impl Live {
             home: FleetHome::default(),
             resources: Vec::new(),
             changes: ChangesLog::default(),
+            details: BTreeMap::new(),
         }
     }
 }

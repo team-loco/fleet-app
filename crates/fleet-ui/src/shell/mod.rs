@@ -13,6 +13,7 @@ use crate::kit::{Toast, toast};
 use crate::screens::changes::ChangesScreen;
 use crate::screens::command::{CommandPalette, PaletteEvent};
 use crate::screens::fleet::FleetScreen;
+use crate::screens::{ClusterPages, ScreenEvent};
 use crate::theme::{self, ActiveTheme, NAV_MIN_WIDTH, RULE, STRIP, TEXT_UI};
 
 pub struct Shell {
@@ -25,6 +26,7 @@ pub struct Shell {
     fleet: Entity<FleetScreen>,
     palette: Entity<CommandPalette>,
     changes: Entity<ChangesScreen>,
+    pages: ClusterPages,
     _updates: Task<()>,
     _appearance: Subscription,
     _fleet_commands: Subscription,
@@ -68,6 +70,7 @@ impl Shell {
                 this.dispatch(command.clone(), cx);
             },
         );
+        let pages = ClusterPages::new(window, cx, Self::screen_event);
         Self {
             state: AppState::default(),
             commands,
@@ -78,6 +81,7 @@ impl Shell {
             fleet,
             palette,
             changes,
+            pages,
             _updates: listen,
             _appearance: appearance,
             _fleet_commands: fleet_commands,
@@ -124,6 +128,18 @@ impl Shell {
         });
     }
 
+    fn sync_pages(&self, cx: &mut Context<Self>) {
+        let cluster = self.selected_cluster();
+        let detail = cluster.and_then(|c| self.state.snapshot.detail(&c.id));
+        self.pages.sync(self.state.page, cluster, detail, cx);
+    }
+
+    fn screen_event(&mut self, event: &ScreenEvent, cx: &mut Context<Self>) {
+        match event {
+            ScreenEvent::Command(command) => self.dispatch(command.clone(), cx),
+        }
+    }
+
     fn dispatch(&mut self, command: Command, cx: &mut Context<Self>) {
         match command {
             Command::ToggleClustersPanel => self.clusters_generation += 1,
@@ -152,8 +168,15 @@ impl Shell {
             Command::OpenCommit(ref sha) => {
                 self.changes.update(cx, |changes, cx| changes.open(sha, cx));
             }
+            Command::Cordon(_) => {}
+            Command::Uncordon(_) => {}
+            Command::Drain(_) => {}
+            Command::Delete(_) => {}
         }
         self.state.apply(&command);
+        if let Command::OpenResource(target) = &command {
+            self.pages.reveal(target, cx);
+        }
         self.sync_page(cx);
         if let Err(error) = self.commands.try_send(command) {
             tracing::warn!(%error, "backend stopped accepting commands");
@@ -165,6 +188,7 @@ impl Shell {
     fn sync_page(&self, cx: &mut Context<Self>) {
         let page = self.state.page;
         self.fleet.update(cx, |fleet, cx| fleet.set_page(page, cx));
+        self.sync_pages(cx);
     }
 
     fn strip(cx: &App) -> impl IntoElement {

@@ -115,6 +115,8 @@ select.read(cx).selected_index()
 ```
 
 Own popover (same look and keyboard as the action menu); arrow keys, Enter, Esc.
+`select.update(cx, |s, cx| { s.set_options(options, cx); s.set_selected(ix, cx) })` changes it from code
+(no `Changed` event).
 
 ## ActionMenu (⋯ / Actions)
 
@@ -288,6 +290,21 @@ LineChart::new(100.)                                 // y max
 ```
 
 Values outside 0..=1 (or 0..=max) are clamped; NaN reads as 0.
+
+## Inspector
+
+The side panel next to a list (`panel` background, rule on the left, scrolls on its own). A header
+with the title, an optional status line and actions, then sections separated by rules.
+
+```rust
+Inspector::new("node-inspector", "ip-10-4-31-12")
+    .mono()
+    .status(Status::Warn, "SchedulingDisabled")
+    .actions(div().flex().gap(SPACE_3).child(primary).child(self.menu.clone()).child(close))
+    .section(None, KeyValue::new().row("zone", "us-east-1c"))
+    .section(Some("Conditions"), conditions)
+    .width(px(480.))                       // default `theme::INSPECTOR` (360)
+```
 
 ## Relative time
 

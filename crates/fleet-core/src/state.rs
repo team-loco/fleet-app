@@ -16,14 +16,18 @@ pub enum Command {
         local: u16,
         remote: u16,
     },
+    Cordon(ResourceRef),
+    Uncordon(ResourceRef),
+    Drain(ResourceRef),
+    Delete(ResourceRef),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Update {
     Snapshot(Snapshot),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AppState {
     pub snapshot: Snapshot,
     pub cluster: Option<ClusterId>,
@@ -69,6 +73,10 @@ impl AppState {
             Command::FollowLogs(resource) => self.open_resource(resource),
             Command::Compare(_) => {}
             Command::PortForward { .. } => {}
+            Command::Cordon(_) => {}
+            Command::Uncordon(_) => {}
+            Command::Drain(_) => {}
+            Command::Delete(_) => {}
         }
     }
 

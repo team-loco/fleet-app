@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::home::ClusterMetrics;
-use crate::{ChangesLog, ClusterId, Counts, FleetHome, Page, ResourceSummary, Status};
+use crate::{
+    ChangesLog, ClusterDetail, ClusterId, Counts, FleetHome, Page, ResourceSummary, Status,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClusterSummary {
@@ -28,18 +30,23 @@ impl ClusterSummary {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Snapshot {
     pub clusters: Vec<ClusterSummary>,
     pub fleet_nav: BTreeMap<Page, Counts>,
     pub home: FleetHome,
     pub resources: Vec<ResourceSummary>,
     pub changes: ChangesLog,
+    pub details: BTreeMap<ClusterId, ClusterDetail>,
 }
 
 impl Snapshot {
     pub fn cluster(&self, id: &ClusterId) -> Option<&ClusterSummary> {
         self.clusters.iter().find(|c| &c.id == id)
+    }
+
+    pub fn detail(&self, id: &ClusterId) -> Option<&ClusterDetail> {
+        self.details.get(id)
     }
 
     pub fn connected(&self) -> usize {
@@ -88,6 +95,7 @@ pub(crate) mod tests {
             home: FleetHome::default(),
             resources: Vec::new(),
             changes: ChangesLog::default(),
+            details: BTreeMap::new(),
         }
     }
 
