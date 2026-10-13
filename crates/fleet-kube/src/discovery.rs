@@ -3,6 +3,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub use fleet_core::ContextRef;
 use kube::config::Kubeconfig;
 
 use crate::provider::{AuthKind, Provider, detect_auth, detect_provider};
@@ -13,12 +14,6 @@ const DEFAULT_FILE: &str = "config";
 const SKIPPED_DIRS: [&str; 2] = ["cache", "http-cache"];
 const MAX_KUBECONFIG_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_SCAN_DEPTH: usize = 6;
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ContextRef {
-    pub file: PathBuf,
-    pub context: String,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KubeContext {

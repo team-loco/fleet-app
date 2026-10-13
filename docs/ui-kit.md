@@ -141,6 +141,20 @@ menu.update(cx, |m, cx| m.toggle(window, cx));   // e.g. from a ⌘. key binding
 menu.update(cx, |m, cx| m.set_items(items, cx));
 ```
 
+`ActionMenu::new(id, cx).plain()` draws the ⋯ trigger without a border (for rows in the side panels).
+
+## Modal
+
+A wider dialog with its own content, for flows such as Add cluster. Rendered by the view that owns
+it (deferred above the window, below confirm dialogs and toasts); Esc and × call `on_close`.
+
+```rust
+Modal::new("add-cluster", self.flow.title(), theme::DIALOG_WIDE)
+    .focus(&self.focus)                         // so Esc reaches it
+    .on_close(move |window, cx| ..)
+    .child(body)                                // flex column; give scrolling parts flex_1 + min_h_0
+```
+
 ## ConfirmDialog and toasts
 
 Both render in the window-wide overlay layer. Every root view must include it once:

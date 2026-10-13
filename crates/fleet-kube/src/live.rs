@@ -182,6 +182,10 @@ impl Live {
             Command::Uncordon(_) => {}
             Command::Drain(_) => {}
             Command::Delete(_) => {}
+            Command::OpenAddCluster(_) => {}
+            Command::CheckContexts(_) => {}
+            Command::AddClusters(_) => {}
+            Command::RemoveCluster(_) => {}
         }
     }
 

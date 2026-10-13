@@ -1,5 +1,6 @@
 use fleet_core::{
-    CLUSTER_NAV, ClusterSummary, Command, Counts, FLEET_NAV, NavSection, Page, Status,
+    AddClusterStep, CLUSTER_NAV, ClusterSummary, Command, Counts, FLEET_NAV, NavSection, Page,
+    Status,
 };
 use gpui::{
     Animation, AnimationExt, AnyElement, Context, ElementId, FontWeight, Hsla, InteractiveElement,
@@ -94,16 +95,15 @@ impl Shell {
             .enumerate()
             .map(|(ix, cluster)| self.cluster_row(ix, cluster, palette, cx))
             .collect::<Vec<_>>();
-        let add = div()
-            .flex()
-            .items_center()
+        let add = nav_row("add-cluster", ROW_CLUSTER, false, palette)
             .gap(SPACE_4)
-            .h(ROW_CLUSTER)
-            .px(SPACE_4)
             .mt(SPACE_2)
             .text_color(palette.mute)
             .child(div().w(GLYPH_SLOT).flex_none().child("+"))
-            .child(ADD_CLUSTER);
+            .child(ADD_CLUSTER)
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.open_add_cluster(AddClusterStep::Pick, window, cx);
+            }));
         div()
             .w(CLUSTERS_PANEL)
             .h_full()
@@ -142,6 +142,8 @@ impl Shell {
     ) -> AnyElement {
         let selected = self.state.cluster.as_ref() == Some(&cluster.id);
         let id = cluster.id.clone();
+        let group: SharedString = format!("cluster-row-{ix}").into();
+        let menu = self.cluster_menus.get(&cluster.id).cloned();
         let name_color = if cluster.status == Status::Offline {
             palette.mute
         } else {
@@ -155,8 +157,24 @@ impl Shell {
         )
         .gap(SPACE_4)
         .when(!selected, |row| row.text_color(name_color))
+        .group(group.clone())
         .child(glyph(cluster.status, palette))
-        .child(div().truncate().child(cluster.name.clone()))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .child(cluster.name.clone()),
+        )
+        .children(menu.map(|menu| {
+            let open = menu.read(cx).is_open();
+            div()
+                .flex_none()
+                .when(!open && !selected, |slot| {
+                    slot.invisible().group_hover(group, Styled::visible)
+                })
+                .child(menu)
+        }))
         .on_click(cx.listener(move |this, _, _, cx| {
             this.dispatch(Command::SelectCluster(Some(id.clone())), cx);
         }))

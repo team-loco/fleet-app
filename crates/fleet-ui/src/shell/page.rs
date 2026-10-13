@@ -4,7 +4,10 @@ use gpui::{
     ParentElement, SharedString, StatefulInteractiveElement, Styled, div,
 };
 
+use fleet_core::AddClusterStep;
+
 use super::Shell;
+use crate::screens::add_cluster::empty_fleet;
 use crate::theme::{
     ActiveTheme, FONT_MONO, ICON_BUTTON, PAGE_HEADER, Palette, RADIUS, RULE, SPACE_2, SPACE_5,
     SPACE_7, SPACE_8, TEXT_LABEL, TEXT_SMALL, TEXT_TITLE,
@@ -39,7 +42,7 @@ impl Shell {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .child(self.content(&palette)),
+                    .child(self.content(&palette, cx)),
             )
             .into_any_element()
     }
@@ -85,7 +88,16 @@ impl Shell {
             .children(more)
     }
 
-    fn content(&self, palette: &Palette) -> AnyElement {
+    fn content(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let empty = self.loaded
+            && self.state.snapshot.clusters.is_empty()
+            && self.state.page == Page::Overview;
+        if empty {
+            let add = cx.listener(|this, _, window, cx| {
+                this.open_add_cluster(AddClusterStep::Pick, window, cx);
+            });
+            return empty_fleet(palette, add).into_any_element();
+        }
         match self.state.page {
             Page::Overview => self.fleet.clone().into_any_element(),
             Page::Problems => self.fleet.clone().into_any_element(),

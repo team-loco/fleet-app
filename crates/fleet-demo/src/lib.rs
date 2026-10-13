@@ -1,3 +1,4 @@
+mod add_cluster;
 mod changes;
 mod detail;
 mod home;
@@ -46,6 +47,7 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
     {
         return;
     }
+    let mut adding = add_cluster::AddClusters::default();
     let (input_tx, input_rx) = mpsc::channel();
     let forward = input_tx.clone();
     let commands = commands.clone();
@@ -65,6 +67,9 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
     while let Ok(input) = input_rx.recv() {
         let changed = match input {
             Input::Command(command) => {
+                if adding.handle(&command, &mut state, updates) {
+                    continue;
+                }
                 tracing::debug!(?command, "demo backend received command");
                 let pending = simulate::apply(&mut state, &command);
                 let changed = pending.is_some();

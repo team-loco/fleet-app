@@ -1,5 +1,8 @@
 use crate::resource::page_for_kind;
-use crate::{ClusterId, Page, ResourceRef, Snapshot};
+use crate::{
+    AddClusterStep, CheckLine, ClusterId, ContextRef, KubeconfigFile, NewCluster, Page,
+    ResourceRef, Snapshot, Verdict,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
@@ -20,11 +23,18 @@ pub enum Command {
     Uncordon(ResourceRef),
     Drain(ResourceRef),
     Delete(ResourceRef),
+    OpenAddCluster(AddClusterStep),
+    CheckContexts(Vec<ContextRef>),
+    AddClusters(Vec<NewCluster>),
+    RemoveCluster(ClusterId),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Update {
     Snapshot(Snapshot),
+    Contexts(Vec<KubeconfigFile>),
+    Check(ContextRef, CheckLine),
+    Checked(ContextRef, Verdict),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,6 +87,10 @@ impl AppState {
             Command::Uncordon(_) => {}
             Command::Drain(_) => {}
             Command::Delete(_) => {}
+            Command::OpenAddCluster(_) => {}
+            Command::CheckContexts(_) => {}
+            Command::AddClusters(_) => {}
+            Command::RemoveCluster(_) => {}
         }
     }
 
@@ -92,6 +106,9 @@ impl AppState {
                     self.apply(&Command::SelectCluster(None));
                 }
             }
+            Update::Contexts(_) => {}
+            Update::Check(..) => {}
+            Update::Checked(..) => {}
         }
     }
 

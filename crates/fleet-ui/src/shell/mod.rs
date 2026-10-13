@@ -1,15 +1,19 @@
+mod cluster_menu;
 mod page;
 mod panels;
 mod status_bar;
 
-use fleet_core::{AppState, Command, Receiver, Sender, Status, Update};
+use std::collections::BTreeMap;
+
+use fleet_core::{AddClusterStep, AppState, ClusterId, Command, Receiver, Sender, Status, Update};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement,
     IntoElement, MouseButton, ParentElement, Render, Styled, Subscription, Task, Window, div,
 };
 
 use crate::actions::{ToggleClustersPanel, ToggleCommandPalette, ToggleResourcesPanel};
-use crate::kit::{Toast, toast};
+use crate::kit::{ActionMenu, Toast, toast};
+use crate::screens::add_cluster::{AddClusterDialog, AddClusterEvent};
 use crate::screens::changes::ChangesScreen;
 use crate::screens::command::{CommandPalette, PaletteEvent};
 use crate::screens::fleet::FleetScreen;
@@ -27,6 +31,9 @@ pub struct Shell {
     palette: Entity<CommandPalette>,
     changes: Entity<ChangesScreen>,
     pages: ClusterPages,
+    loaded: bool,
+    add_cluster: Option<(Entity<AddClusterDialog>, Subscription)>,
+    cluster_menus: BTreeMap<ClusterId, Entity<ActionMenu>>,
     _updates: Task<()>,
     _appearance: Subscription,
     _fleet_commands: Subscription,
@@ -41,9 +48,11 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let listen = cx.spawn(async move |this, cx| {
+        let listen = cx.spawn_in(window, async move |this, cx| {
             while let Ok(update) = updates.recv().await {
-                let applied = this.update(cx, |shell, cx| shell.receive(update, cx));
+                let applied = this.update_in(cx, |shell, window, cx| {
+                    shell.receive(update, window, cx);
+                });
                 if applied.is_err() {
                     break;
                 }
@@ -82,6 +91,9 @@ impl Shell {
             palette,
             changes,
             pages,
+            loaded: false,
+            add_cluster: None,
+            cluster_menus: BTreeMap::new(),
             _updates: listen,
             _appearance: appearance,
             _fleet_commands: fleet_commands,
@@ -89,11 +101,21 @@ impl Shell {
         }
     }
 
-    fn receive(&mut self, update: Update, cx: &mut Context<Self>) {
+    fn receive(&mut self, update: Update, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((dialog, _)) = &self.add_cluster {
+            dialog.update(cx, |dialog, cx| dialog.receive(&update, window, cx));
+        }
+        if let Update::Snapshot(_) = update {
+            self.loaded = true;
+        }
         self.state.update(update);
+        self.sync_cluster_menus(cx);
         let pending = std::mem::take(&mut self.pending);
         for command in pending {
             self.state.apply(&command);
+            if let Command::OpenAddCluster(step) = command {
+                self.open_add_cluster(step, window, cx);
+            }
         }
         let snapshot = &self.state.snapshot;
         self.fleet
@@ -141,6 +163,38 @@ impl Shell {
         }
     }
 
+    fn send(&self, command: Command) {
+        if let Err(error) = self.commands.try_send(command) {
+            tracing::warn!(%error, "backend stopped accepting commands");
+        }
+    }
+
+    pub(super) fn open_add_cluster(
+        &mut self,
+        step: AddClusterStep,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let existing = self.state.snapshot.clusters.iter().map(|c| c.name.clone());
+        let existing: Vec<String> = existing.collect();
+        let dialog = cx.new(|cx| AddClusterDialog::new(step, existing, window, cx));
+        let subscription = cx.subscribe_in(
+            &dialog,
+            window,
+            |this, _, event: &AddClusterEvent, window, cx| match event {
+                AddClusterEvent::Send(command) => this.send(command.clone()),
+                AddClusterEvent::Close => {
+                    this.add_cluster = None;
+                    window.focus(&this.focus, cx);
+                    cx.notify();
+                }
+            },
+        );
+        self.add_cluster = Some((dialog, subscription));
+        self.send(Command::OpenAddCluster(step));
+        cx.notify();
+    }
+
     fn dispatch(&mut self, command: Command, cx: &mut Context<Self>) {
         match command {
             Command::ToggleClustersPanel => self.clusters_generation += 1,
@@ -173,15 +227,17 @@ impl Shell {
             Command::Uncordon(_) => {}
             Command::Drain(_) => {}
             Command::Delete(_) => {}
+            Command::OpenAddCluster(_) => {}
+            Command::CheckContexts(_) => {}
+            Command::AddClusters(_) => {}
+            Command::RemoveCluster(_) => {}
         }
         self.state.apply(&command);
         if let Command::OpenResource(target) = &command {
             self.pages.reveal(target, cx);
         }
         self.sync_page(cx);
-        if let Err(error) = self.commands.try_send(command) {
-            tracing::warn!(%error, "backend stopped accepting commands");
-        }
+        self.send(command);
         self.sync_palette(cx);
         cx.notify();
     }
@@ -259,6 +315,7 @@ impl Render for Shell {
             )
             .child(self.status_bar(cx))
             .child(self.palette.clone())
+            .children(self.add_cluster.as_ref().map(|(dialog, _)| dialog.clone()))
             .child(crate::kit::overlay_layer(cx))
     }
 }
