@@ -30,6 +30,18 @@ pub enum Error {
     Prometheus(String),
     #[error("timed out after {0:?}")]
     Timeout(std::time::Duration),
+    #[error("svc/{service} has no port {port}")]
+    NoServicePort { service: String, port: u16 },
+    #[error("svc/{0} has no pod selector")]
+    NoSelector(String),
+    #[error("no ready pod backs svc/{0}")]
+    NoReadyPod(String),
+    #[error("pod {pod} has no container port named {name}")]
+    NoNamedPort { pod: String, name: String },
+    #[error("{action} is not supported for {kind}")]
+    Unsupported { action: &'static str, kind: String },
+    #[error("debug container {name} did not start: {reason}")]
+    DebugContainer { name: String, reason: String },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

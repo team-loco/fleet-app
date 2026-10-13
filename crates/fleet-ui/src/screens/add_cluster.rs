@@ -72,6 +72,7 @@ impl AddClusterDialog {
             Update::Check(id, line) => self.flow.record(id, line.clone()),
             Update::Checked(id, verdict) => self.flow.finish(id, *verdict),
             Update::Snapshot(_) => return,
+            Update::Notice(_) => return,
         }
         cx.notify();
     }

@@ -15,13 +15,14 @@ const CLUSTER_PREFIX: &str = "@";
 const NAMESPACE_PREFIX: &str = "ns:";
 const KIND_PREFIX: &str = "k:";
 const LABEL_PREFIX: &str = "l:";
-const COMMAND_PREFIX: &str = ">";
+pub const COMMAND_PREFIX: &str = ">";
 const FLEET: &str = "Fleet";
 const CLUSTER_KIND: &str = "cluster";
 const PAGE_KIND: &str = "page";
 const LOGS_KEY: &str = "⌘L";
 const COMPARE_KEY: &str = "⌘⇧D";
 const OWNER_KEY: &str = "⌘⇧G";
+pub const STOP_FORWARD: &str = "Stop port-forward";
 
 const GLOBAL_COMMANDS: &[(&str, &str, Command)] = &[
     ("Toggle clusters panel", "⌘⇧B", Command::ToggleClustersPanel),
@@ -185,7 +186,7 @@ pub fn search(snapshot: &Snapshot, current: Option<&ClusterId>, input: &str) -> 
     hits.extend(resources.into_iter().map(|(hit, _)| hit));
     hits.extend(contextual);
     if query.commands_only || (browsing && unscoped) {
-        hits.extend(global_commands(&query.text));
+        hits.extend(global_commands(snapshot, &query.text));
     }
     Results {
         hits,
@@ -414,12 +415,22 @@ pub fn local_port(remote: u16) -> u16 {
     }
 }
 
-fn global_commands(text: &str) -> Vec<Hit> {
-    let mut scored: Vec<(i64, Hit)> = GLOBAL_COMMANDS
+fn global_commands(snapshot: &Snapshot, text: &str) -> Vec<Hit> {
+    let fixed = GLOBAL_COMMANDS
         .iter()
+        .map(|(label, key, command)| ((*label).to_owned(), Some(*key), command.clone()));
+    let stops = snapshot.forwards.iter().map(|forward| {
+        let label = format!("{STOP_FORWARD} {}", forward.label());
+        let command = Command::StopPortForward {
+            local: forward.local,
+        };
+        (label, None, command)
+    });
+    let mut scored: Vec<(i64, Hit)> = fixed
+        .chain(stops)
         .filter_map(|(label, key, command)| {
-            let (score, highlights) = matched(label, text)?;
-            let mut hit = command_hit((*label).to_owned(), Some(key), command.clone());
+            let (score, highlights) = matched(&label, text)?;
+            let mut hit = command_hit(label, key, command);
             hit.highlights = highlights;
             Some((score, hit))
         })
@@ -566,6 +577,29 @@ mod tests {
                     }
                 ),
             ]
+        );
+    }
+
+    #[test]
+    fn active_forwards_can_be_stopped_from_commands() {
+        let mut snapshot = snapshot();
+        snapshot.forwards = vec![crate::Forward {
+            target: resource("a", "Service", "shop", "cart"),
+            local: 8080,
+            remote: 80,
+        }];
+        let results = search(&snapshot, None, ">stop port");
+        let stops: Vec<_> = results
+            .hits
+            .iter()
+            .map(|hit| (hit.name.as_str(), hit.command.clone()))
+            .collect();
+        assert_eq!(
+            stops,
+            [(
+                "Stop port-forward localhost:8080 → svc/cart:80",
+                Command::StopPortForward { local: 8080 }
+            )]
         );
     }
 

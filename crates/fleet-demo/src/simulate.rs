@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use fleet_core::nodes::Node;
 use fleet_core::{
-    ClusterDetail, ClusterId, Command, Counts, Page, ResourceKind, ResourceRef, Snapshot, Status,
+    ClusterDetail, ClusterId, Command, Counts, Forward, Page, ResourceKind, ResourceRef, Snapshot,
+    Status,
 };
 
 use crate::detail::{READY, SCHEDULING_DISABLED};
@@ -64,6 +65,30 @@ pub fn apply(snapshot: &mut Snapshot, command: &Command) -> Option<Settle> {
             Some(Settle::RolledOut(to.clone()))
         }
         _ => None,
+    }
+}
+
+pub fn forward(snapshot: &mut Snapshot, command: &Command) -> bool {
+    match command {
+        Command::PortForward {
+            service,
+            local,
+            remote,
+        } => {
+            snapshot.forwards.retain(|forward| forward.local != *local);
+            snapshot.forwards.push(Forward {
+                target: service.clone(),
+                local: *local,
+                remote: *remote,
+            });
+            true
+        }
+        Command::StopPortForward { local } => {
+            let before = snapshot.forwards.len();
+            snapshot.forwards.retain(|forward| forward.local != *local);
+            snapshot.forwards.len() != before
+        }
+        _ => false,
     }
 }
 
@@ -291,6 +316,34 @@ mod tests {
             .and_then(|c| c.nav.get(&Page::ConfigMaps))
             .and_then(|c| c.total);
         assert_eq!(nav, Some(87));
+    }
+
+    #[test]
+    fn port_forwards_are_listed_until_stopped() {
+        let mut snapshot = crate::snapshot();
+        let service = ResourceRef {
+            cluster: ClusterId::new(CLUSTER),
+            kind: "Service".into(),
+            namespace: Some("payments".into()),
+            name: "checkout-api".into(),
+        };
+        let start = Command::PortForward {
+            service,
+            local: 8080,
+            remote: 80,
+        };
+        assert!(forward(&mut snapshot, &start));
+        assert!(forward(&mut snapshot, &start));
+        assert_eq!(snapshot.forwards.len(), 1);
+        assert!(forward(
+            &mut snapshot,
+            &Command::StopPortForward { local: 8080 }
+        ));
+        assert_eq!(snapshot.forwards, Vec::new());
+        assert!(!forward(
+            &mut snapshot,
+            &Command::StopPortForward { local: 8080 }
+        ));
     }
 
     #[test]

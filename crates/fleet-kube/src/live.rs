@@ -14,6 +14,7 @@ use fleet_core::{
 };
 use tokio::time::MissedTickBehavior;
 
+use crate::actions::{Actions, cluster_of};
 use crate::checks::{self, CheckResult, run_checks_streaming};
 use crate::discovery::{
     ContextRef, Discovery, DiscoveryEvent, DiscoverySources, KubeContext, discover,
@@ -88,6 +89,7 @@ struct Live {
     selected: Option<ClusterId>,
     page: Page,
     page_subscription: Option<Subscription>,
+    actions: Actions,
 }
 
 impl Live {
@@ -187,7 +189,8 @@ impl Live {
             Command::OpenResource(resource) => self.open(resource),
             Command::FollowLogs(resource) => self.open(resource),
             Command::Compare(_) => {}
-            Command::PortForward { .. } => {}
+            Command::PortForward { .. } => self.act(command),
+            Command::StopPortForward { .. } => self.act(command),
             Command::Cordon(_) => {}
             Command::Uncordon(_) => {}
             Command::Drain(_) => {}
@@ -206,8 +209,8 @@ impl Live {
                 return true;
             }
             Command::WatchWorkload { .. } => {}
-            Command::StreamLogs(_) => {}
-            Command::Exec(_) => {}
+            Command::StreamLogs(_) => self.act(command),
+            Command::Exec(_) => self.act(command),
             Command::RestartRollout(_) => {}
             Command::Scale { .. } => {}
             Command::Rollback { .. } => {}
@@ -300,6 +303,18 @@ impl Live {
         }
     }
 
+    fn handle(&self, id: &ClusterId) -> Option<&ClusterHandle> {
+        self.clusters
+            .values()
+            .find(|cluster| &cluster.id == id)
+            .map(|cluster| &cluster.handle)
+    }
+
+    fn act(&self, command: &Command) {
+        let handle = cluster_of(command).and_then(|id| self.handle(id)).cloned();
+        self.actions.run(command, handle);
+    }
+
     fn open(&mut self, resource: &ResourceRef) {
         self.selected = Some(resource.cluster.clone());
         self.page = page_for_kind(&resource.kind);
@@ -329,7 +344,7 @@ impl Live {
             })
             .collect();
         let sources: BTreeSet<&Path> = self.clusters.keys().map(|id| id.file.as_path()).collect();
-        Snapshot {
+        let mut snapshot = Snapshot {
             clusters,
             fleet_nav: BTreeMap::new(),
             home: FleetHome::default(),
@@ -346,7 +361,10 @@ impl Live {
                 clusters: settings,
             },
             pods: Vec::new(),
-        }
+            forwards: Vec::new(),
+        };
+        self.actions.overlay(&mut snapshot);
+        snapshot
     }
 }
 
@@ -403,6 +421,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
     };
     let runtime = tokio::runtime::Handle::current();
     let (manager, cluster_events) = ClusterManager::new(runtime, settings.clone(), env.clone());
+    let (actions, action_changes) = Actions::new(updates.clone());
     let mut live = Live {
         manager,
         store,
@@ -415,6 +434,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
         selected: None,
         page: Page::Overview,
         page_subscription: None,
+        actions,
     };
     live.reconcile();
     let mut dirty = true;
@@ -431,6 +451,11 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
             }
             event = cluster_events.recv() => {
                 if event.is_ok() {
+                    dirty = true;
+                }
+            }
+            changed = action_changes.recv() => {
+                if changed.is_ok() {
                     dirty = true;
                 }
             }

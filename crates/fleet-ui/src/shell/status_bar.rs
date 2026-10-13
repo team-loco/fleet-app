@@ -1,4 +1,6 @@
+use fleet_core::action::forwards_label;
 use fleet_core::gitops::flux_ready;
+use fleet_core::palette::{COMMAND_PREFIX, STOP_FORWARD};
 use fleet_core::{Command, Page, Status};
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
@@ -72,8 +74,23 @@ impl Shell {
             )
             .child(left)
             .child(div().flex_1())
+            .children(self.forwards(cx))
             .children(self.loco_agent(&palette))
             .into_any_element()
+    }
+
+    fn forwards(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let label = forwards_label(self.state.snapshot.forwards.len())?;
+        let element = div()
+            .id("status-forwards")
+            .cursor_pointer()
+            .on_click(cx.listener(|this, _, window, cx| {
+                let query = format!("{COMMAND_PREFIX}{STOP_FORWARD}");
+                this.open_palette(&query, window, cx);
+            }))
+            .child(label)
+            .into_any_element();
+        Some(element)
     }
 
     #[cfg(feature = "loco")]

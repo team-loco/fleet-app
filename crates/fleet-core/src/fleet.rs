@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::home::ClusterMetrics;
 use crate::{
     ChangesLog, ClusterCatalog, ClusterDetail, ClusterId, Comparison, Counts, FleetHome,
-    FluxObject, GitOps, Page, ResourceRef, ResourceSummary, Status,
+    FluxObject, Forward, GitOps, Page, ResourceRef, ResourceSummary, Status,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,6 +42,7 @@ pub struct Snapshot {
     pub comparisons: Vec<Comparison>,
     pub catalog: ClusterCatalog,
     pub pods: Vec<crate::pods::Pod>,
+    pub forwards: Vec<Forward>,
 }
 
 impl Snapshot {
@@ -109,6 +110,7 @@ pub(crate) mod tests {
             comparisons: Vec::new(),
             catalog: ClusterCatalog::default(),
             pods: Vec::new(),
+            forwards: Vec::new(),
         }
     }
 
