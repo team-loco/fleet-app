@@ -4,7 +4,8 @@ use std::ops::Range;
 use crate::fuzzy::fuzzy;
 use crate::resource::{kind_info, kind_matches, kind_rank, short_kind};
 use crate::{
-    ClusterId, ClusterSummary, Command, FLEET_NAV, ResourceRef, ResourceSummary, Snapshot, Status,
+    ClusterId, ClusterSummary, Command, FLEET_NAV, Page, ResourceRef, ResourceSummary, Snapshot,
+    Status,
 };
 
 const MAX_RESOURCES: usize = 50;
@@ -23,8 +24,10 @@ pub const COMPARE_KEY: &str = "⌘⇧D";
 pub const OWNER_KEY: &str = "⌘⇧G";
 pub const STOP_FORWARD: &str = "Stop port-forward";
 
-const GLOBAL_COMMANDS: &[(&str, &str, Command)] =
-    &[("Toggle sidebar", "⌘B", Command::ToggleSidebar)];
+const GLOBAL_COMMANDS: &[(&str, &str, Command)] = &[
+    ("Toggle sidebar", "⌘B", Command::ToggleSidebar),
+    ("Open settings", "⌘,", Command::SelectPage(Page::Settings)),
+];
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Query {
@@ -709,7 +712,7 @@ mod tests {
             command_names(">owner cart"),
             ["Show Flux owner of deploy/cart"]
         );
-        assert_eq!(command_names(">"), ["Toggle sidebar"]);
+        assert_eq!(command_names(">"), ["Toggle sidebar", "Open settings"]);
     }
 
     #[test]

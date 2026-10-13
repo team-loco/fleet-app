@@ -197,3 +197,23 @@ fn option_enter_requests_a_window_with_the_cluster_page_without_navigating_the_s
     assert_eq!(ui.state(), before);
     Ok(())
 }
+
+#[test]
+fn command_comma_opens_settings_and_its_controls_change_the_app_settings() -> anyhow::Result<()> {
+    use fleet_core::app_settings::{PollInterval, ThemeChoice};
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.press("cmd-,")?;
+    assert_eq!(ui.state().page, Page::Settings);
+    let current = |ui: &Ui| ui.read(|_, cx| fleet_ui::settings::current(cx).clone());
+    assert_eq!(current(&ui).theme, ThemeChoice::System);
+    ui.click("settings-theme-2")?;
+    assert_eq!(current(&ui).theme, ThemeChoice::Dark);
+    ui.click("settings-metrics-0")?;
+    assert_eq!(current(&ui).refresh.metrics, PollInterval::Seconds5);
+    assert!(current(&ui).notifications.enabled);
+    ui.click("settings-notify")?;
+    assert!(!current(&ui).notifications.enabled);
+    ui.click("settings-clusters")?;
+    assert_eq!(ui.state().page, Page::ClusterSettings);
+    Ok(())
+}

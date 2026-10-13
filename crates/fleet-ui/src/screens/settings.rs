@@ -36,6 +36,7 @@ const LABELS: &str = "Labels";
 const DEFAULT_NAMESPACE: &str = "Default namespace";
 const METRICS_SOURCE: &str = "Metrics source";
 const CONFIRM_DESTRUCTIVE: &str = "Confirm destructive actions";
+const NOTIFY: &str = "Notify about new problems";
 const NAMESPACE_PLACEHOLDER: &str = "default";
 const LABELS_PLACEHOLDER: &str = "env=prod team=platform";
 const LABELS_HINT: &str = "Space-separated. Press Return to save.";
@@ -224,6 +225,7 @@ impl SettingsScreen {
             default_namespace: parse_namespace(&namespace),
             metrics,
             confirm_destructive: settings.preferences.confirm_destructive,
+            notify: settings.preferences.notify,
             labels: parse_labels(&labels),
         };
         Some((settings.cluster.clone(), preferences))
@@ -372,23 +374,29 @@ impl SettingsScreen {
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let confirm_on = settings.preferences.confirm_destructive;
-        let cluster = settings.cluster.clone();
-        let stored = settings.preferences.clone();
-        let toggle = Toggle::new("cluster-confirm", confirm_on)
-            .label(CONFIRM_DESTRUCTIVE)
-            .on_toggle(cx.listener(move |_, on: &bool, _, cx| {
-                let preferences = Preferences {
-                    confirm_destructive: *on,
-                    ..stored.clone()
-                };
-                cx.emit(Command::SetPreferences(cluster.clone(), preferences));
-            }));
+        let stored = &settings.preferences;
+        let confirm = preference_toggle(
+            "cluster-confirm",
+            CONFIRM_DESTRUCTIVE,
+            settings,
+            stored.confirm_destructive,
+            |preferences, on| preferences.confirm_destructive = on,
+            cx,
+        );
+        let notify = preference_toggle(
+            "cluster-notify",
+            NOTIFY,
+            settings,
+            stored.notify,
+            |preferences, on| preferences.notify = on,
+            cx,
+        );
         section(PREFERENCES, palette)
             .gap(SPACE_6)
             .child(labelled(DEFAULT_NAMESPACE, TextField::new(&self.namespace)))
             .child(labelled(METRICS_SOURCE, TextField::new(&self.metrics)))
-            .child(toggle)
+            .child(confirm)
+            .child(notify)
     }
 }
 
@@ -429,6 +437,25 @@ impl Render for SettingsScreen {
                     .children(inspector),
             )
     }
+}
+
+fn preference_toggle(
+    id: &'static str,
+    label: &'static str,
+    settings: &ClusterSettings,
+    on: bool,
+    set: impl Fn(&mut Preferences, bool) + 'static,
+    cx: &mut Context<SettingsScreen>,
+) -> Toggle {
+    let cluster = settings.cluster.clone();
+    let stored = settings.preferences.clone();
+    Toggle::new(id, on)
+        .label(label)
+        .on_toggle(cx.listener(move |_, on: &bool, _, cx| {
+            let mut preferences = stored.clone();
+            set(&mut preferences, *on);
+            cx.emit(Command::SetPreferences(cluster.clone(), preferences));
+        }))
 }
 
 fn emit(this: &WeakEntity<SettingsScreen>, command: Command, cx: &mut gpui::App) {

@@ -5,6 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use fleet_core::add_cluster::home_relative;
+use fleet_core::app_settings::DEFAULT_SNAPSHOTS;
 use fleet_core::home::problems_badge;
 use fleet_core::resource::page_for_kind;
 use fleet_core::settings::{Auth, ClusterSettings, Connection};
@@ -45,7 +46,7 @@ use crate::usage::prometheus_utilization;
 use crate::watch::KubeconfigWatcher;
 
 const THREAD_NAME: &str = "fleet-kube";
-pub const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(100);
+pub const SNAPSHOT_INTERVAL: Duration = DEFAULT_SNAPSHOTS.duration();
 const EXTENSION_POLL_INTERVAL: Duration = SNAPSHOT_INTERVAL;
 const BASELINE_KINDS: [WatchKind; 2] = [WatchKind::Nodes, WatchKind::Pods];
 const DEFAULT_WINDOW: u64 = 0;
@@ -703,6 +704,7 @@ impl Live {
             Command::SetPreferences(id, preferences) => {
                 return self.set_preferences(id, preferences);
             }
+            Command::SetRefresh(refresh) => self.settings.apply_refresh(refresh),
             Command::Connect(id) => self.reconnect(id),
             Command::Reauthenticate(id) => self.reconnect(id),
             Command::Disconnect(id) => {
@@ -1116,7 +1118,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
     let gitops_changed = live.gitops.changed();
     live.start();
     let mut dirty = true;
-    let mut publish = Throttle::new(SNAPSHOT_INTERVAL);
+    let mut publish = Throttle::new(live.settings.snapshot_interval);
     let mut poll = ticker(EXTENSION_POLL_INTERVAL);
     loop {
         tokio::select! {
@@ -1150,6 +1152,9 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
             command = commands.recv() => {
                 let Ok(command) = command else { return };
                 live.apply(&command);
+                retick(&mut usage_tick, live.settings.metrics_interval);
+                retick(&mut prometheus_tick, live.settings.prometheus_interval);
+                publish.set_period(live.settings.snapshot_interval);
                 if let Some(restarted) = live.rescan_sources().await {
                     (_watcher, discovery_events) = restarted;
                 }
@@ -1164,6 +1169,12 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
                 }
             }
         }
+    }
+}
+
+fn retick(interval: &mut tokio::time::Interval, period: Duration) {
+    if interval.period() != period {
+        *interval = ticker(period);
     }
 }
 
@@ -1386,6 +1397,23 @@ mod tests {
         live.apply(&window_command(SECOND_WINDOW, pods));
         assert_eq!(live.viewing(&cluster), Some(true));
         assert_eq!(live.viewing(&ClusterId::new("b")), None);
+    }
+
+    #[tokio::test]
+    async fn refresh_settings_apply_at_runtime_from_any_window() {
+        use fleet_core::app_settings::{PollInterval, Refresh, SnapshotCap};
+        let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let mut live = test_live(dir.path());
+        let refresh = Refresh {
+            metrics: PollInterval::Seconds5,
+            prometheus: PollInterval::Seconds30,
+            snapshots: SnapshotCap::Seconds1,
+        };
+        live.apply(&window_command(FIRST_WINDOW, Command::SetRefresh(refresh)));
+        assert_eq!(live.settings, KubeSettings::with_refresh(&refresh));
+        let mut usage = ticker(Duration::from_secs(15));
+        retick(&mut usage, live.settings.metrics_interval);
+        assert_eq!(usage.period(), Duration::from_secs(5));
     }
 
     #[tokio::test]

@@ -1821,6 +1821,8 @@ name = "fleet-core"
 version = "0.1.0"
 dependencies = [
  "async-channel",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

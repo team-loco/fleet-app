@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod app_settings;
 pub mod assemble;
 pub mod backoff;
 pub mod checks;

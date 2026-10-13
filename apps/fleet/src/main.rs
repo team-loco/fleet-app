@@ -5,15 +5,18 @@ use std::rc::Rc;
 use anyhow::Context as _;
 use clap::Parser;
 use fleet::{
-    AppearanceArg, NewWindow, Object, Preset, Quit, Screen, WINDOW_HEIGHT, WINDOW_WIDTH, bind_keys,
-    parse_object, root_view,
+    APP_ID, APP_NAME, AppearanceArg, NewWindow, Object, Preset, Quit, Screen, WINDOW_HEIGHT,
+    WINDOW_WIDTH, bind_keys, bundled, menus, parse_object, root_view,
 };
+use fleet_core::Status;
 use fleet_core::{Backend, ClusterId, Command};
 use fleet_demo::DemoBackend;
 use fleet_kube::LiveBackend;
+use fleet_kube::app_settings::SettingsStore;
 use fleet_kube::discovery::DiscoverySources;
 use fleet_kube::settings::KubeSettings;
 use fleet_kube::store::ClusterStore;
+use fleet_ui::kit::{Toast, toast};
 use fleet_ui::theme::{Appearance, TRAFFIC_LIGHT_X, TRAFFIC_LIGHT_Y};
 use fleet_ui::{NewWindowRequest, Root, Shell, Store, assets};
 use gpui::{
@@ -25,6 +28,7 @@ use tracing_subscriber::EnvFilter;
 const MIN_WIDTH: f32 = 720.;
 const MIN_HEIGHT: f32 = 480.;
 const LOG_SNAPSHOTS_VAR: &str = "FLEET_LOG_SNAPSHOTS";
+const SETTINGS_SET_ASIDE: &str = "Settings could not be read";
 
 #[derive(Parser, Debug)]
 #[command(
@@ -54,12 +58,28 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let (update_tx, update_rx) = async_channel::unbounded();
     let (command_tx, command_rx) = async_channel::unbounded();
+    let sources = DiscoverySources::from_env();
+    let dir = data_dir(args.data_dir.clone(), &sources);
+    let settings = dir
+        .as_ref()
+        .ok()
+        .map(|dir| {
+            SettingsStore::open(dir)
+                .with_context(|| format!("reading settings in {}", dir.display()))
+        })
+        .transpose()?;
+    let refresh = settings
+        .as_ref()
+        .map(|store| store.settings().refresh)
+        .unwrap_or_default();
     let backend: Box<dyn Backend> = if args.demo {
         Box::new(DemoBackend)
     } else {
-        let sources = DiscoverySources::from_env();
-        let store = cluster_store(args.data_dir.clone(), &sources)?;
-        Box::new(LiveBackend::new(KubeSettings::default(), sources, store))
+        let dir = dir?;
+        let store = ClusterStore::open(&dir)
+            .with_context(|| format!("reading saved clusters in {}", dir.display()))?;
+        let kube = KubeSettings::with_refresh(&refresh);
+        Box::new(LiveBackend::new(kube, sources, store))
     };
     backend.start(update_tx, command_rx);
     let update_rx = if std::env::var_os(LOG_SNAPSHOTS_VAR).is_some() {
@@ -79,7 +99,8 @@ fn main() -> anyhow::Result<()> {
     gpui_platform::application()
         .with_assets(assets::Assets)
         .run(move |cx: &mut App| {
-            if let Err(error) = launch(cx, forced, update_rx, command_tx, screen, &preset) {
+            let launched = launch(cx, forced, settings, update_rx, command_tx, screen, &preset);
+            if let Err(error) = launched {
                 failed.replace(Some(error));
                 cx.quit();
             }
@@ -125,28 +146,48 @@ fn log_snapshots(
     forward_rx
 }
 
-fn cluster_store(
-    data_dir: Option<PathBuf>,
-    sources: &DiscoverySources,
-) -> anyhow::Result<ClusterStore> {
-    let dir = match (data_dir, &sources.home) {
-        (Some(dir), _) => dir,
-        (None, Some(home)) => ClusterStore::default_dir(home),
+fn data_dir(data_dir: Option<PathBuf>, sources: &DiscoverySources) -> anyhow::Result<PathBuf> {
+    match (data_dir, &sources.home) {
+        (Some(dir), _) => Ok(dir),
+        (None, Some(home)) => Ok(ClusterStore::default_dir(home)),
         (None, None) => anyhow::bail!("no home directory; pass --data-dir"),
-    };
-    ClusterStore::open(&dir).with_context(|| format!("reading saved clusters in {}", dir.display()))
+    }
+}
+
+fn install_settings(store: SettingsStore, cx: &mut App) {
+    let set_aside = store.set_aside().map(|kept| kept.display().to_string());
+    let initial = store.settings().clone();
+    let store = Rc::new(RefCell::new(store));
+    let save: fleet_ui::settings::Saver = Rc::new(move |settings| {
+        store
+            .borrow_mut()
+            .save(settings)
+            .map_err(|error| error.to_string())
+    });
+    let is_bundled = std::env::current_exe().is_ok_and(|exe| bundled(&exe));
+    fleet_ui::settings::install(initial, save, is_bundled, cx);
+    if let Some(kept) = set_aside {
+        let notice = Toast::new(Status::Warn, SETTINGS_SET_ASIDE).detail(format!("Kept as {kept}"));
+        toast(notice, cx);
+    }
 }
 
 fn launch(
     cx: &mut App,
     forced: Option<Appearance>,
+    settings: Option<SettingsStore>,
     updates: async_channel::Receiver<fleet_core::Update>,
     commands: async_channel::Sender<Command>,
     screen: Screen,
     preset: &Preset,
 ) -> anyhow::Result<()> {
     fleet_ui::init(forced, cx)?;
+    cx.set_app_identity(APP_ID, APP_NAME);
+    if let Some(settings) = settings {
+        install_settings(settings, cx);
+    }
     bind_keys(cx);
+    cx.set_menus(menus());
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_window_closed(|cx, _| {
         if cx.windows().is_empty() {
@@ -238,6 +279,7 @@ mod tests {
             launch(
                 cx,
                 Some(Appearance::Dark),
+                None,
                 updates,
                 commands,
                 Screen::Fleet,

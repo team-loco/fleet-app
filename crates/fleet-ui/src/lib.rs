@@ -2,6 +2,7 @@ pub mod assets;
 mod gallery;
 pub mod kit;
 pub mod screens;
+pub mod settings;
 mod shell;
 mod store;
 pub mod theme;
@@ -22,7 +23,8 @@ pub mod actions {
             CompareAcrossClusters,
             ShowFluxOwner,
             OpenSelectedNewWindow,
-            CloseWindow
+            CloseWindow,
+            OpenSettings
         ]
     );
 }
@@ -34,6 +36,7 @@ pub fn init(
     gpui_component::init(cx);
     assets::register_fonts(cx)?;
     theme::init(forced, cx);
+    settings::init(cx);
     kit::init(cx);
     screens::init(cx);
     Ok(())

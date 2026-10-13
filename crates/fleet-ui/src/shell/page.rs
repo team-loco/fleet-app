@@ -39,6 +39,7 @@ impl Shell {
             Page::Changes => Some(self.changes.clone().into_any_element()),
             Page::Compare => Some(self.compare.clone().into_any_element()),
             Page::ClusterSettings => Some(self.settings.clone().into_any_element()),
+            Page::Settings => Some(self.app_settings.clone().into_any_element()),
             _ => None,
         };
         if let Some(screen) = full_page {

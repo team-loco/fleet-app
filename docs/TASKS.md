@@ -64,3 +64,4 @@ Spec column points at `design/`.
 | SEC1 | redact Secret data in YAML views and Helm diffs; strip credentials from URLs, git errors, auth and kubeconfig errors | claude | secret-redaction | done |
 | SHELL2 | single sidebar, cluster switcher in the status bar, Loco nav only where installed, animated inspectors (#110, #111, #121) | claude | shell-single-sidebar | done |
 | PIO | Independent network calls run concurrently (git mirrors, checks, Flux/Loco probes, workload page, drain, Prometheus); bounded git output (#107, #109) | claude | parallel-io | done |
+| SET1 | app settings ⌘, : theme, data refresh, notifications (#112) | claude | settings-and-keys | done |

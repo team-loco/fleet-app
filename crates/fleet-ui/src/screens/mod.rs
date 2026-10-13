@@ -1,4 +1,5 @@
 pub mod add_cluster;
+pub mod app_settings;
 pub mod changes;
 pub mod command;
 pub mod compare;

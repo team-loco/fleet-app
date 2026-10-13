@@ -1,5 +1,8 @@
+use std::time::Instant;
+
+use fleet_core::notify::{Alert, Notifier};
 use fleet_core::{Command, Receiver, Sender, Snapshot, Update};
-use gpui::{Context, Task};
+use gpui::{App, Context, SystemNotification, Task};
 
 use crate::kit::{Toast, toast};
 
@@ -31,6 +34,7 @@ impl Updates {
 
 pub struct Store {
     updates: Updates,
+    notifier: Notifier,
     commands: Sender<Command>,
     _listen: Task<()>,
 }
@@ -53,6 +57,9 @@ impl Store {
                             };
                             toast(shown, cx);
                         }
+                        if let Update::Snapshot(snapshot) = &update {
+                            store.notify(snapshot, cx);
+                        }
                         store.updates.publish(&update);
                     })
                     .is_err()
@@ -63,8 +70,17 @@ impl Store {
         });
         Self {
             updates: Updates::default(),
+            notifier: Notifier::default(),
             commands,
             _listen: listen,
+        }
+    }
+
+    fn notify(&mut self, snapshot: &Snapshot, cx: &mut App) {
+        let settings = crate::settings::current(cx).notifications;
+        let alerts = self.notifier.observe(snapshot, settings, Instant::now());
+        for alert in alerts {
+            cx.show_system_notification(system_notification(alert));
         }
     }
 
@@ -74,6 +90,15 @@ impl Store {
 
     pub fn commands(&self) -> Sender<Command> {
         self.commands.clone()
+    }
+}
+
+fn system_notification(alert: Alert) -> SystemNotification {
+    SystemNotification {
+        tag: alert.tag.into(),
+        title: alert.title.into(),
+        body: alert.body.into(),
+        actions: Vec::new(),
     }
 }
 
