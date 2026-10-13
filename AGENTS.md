@@ -18,6 +18,7 @@ Every tool is pinned in `mise.toml`. `mise run <task>`:
 - `check` runs everything a PR needs: fmt, clippy (default and `--features loco`), nextest, typos, deny
 - `run` / `demo` / `run:loco` start the app (live / sample data / with Loco)
 - `e2e:up` / `e2e:down` create and remove the kind + Flux scenario clusters
+- `e2e:test` brings them up, verifies, and runs every `FLEET_E2E` test (flags: `--skip-up`, `--no-teardown`)
 
 ## Principles
 
