@@ -79,6 +79,7 @@ impl ClusterPages {
         cluster: Option<&ClusterSummary>,
         detail: Option<&ClusterDetail>,
         confirm_destructive: bool,
+        namespace: Option<&str>,
         cx: &mut App,
     ) {
         let (Some(cluster), Some(detail)) = (cluster, detail) else {
@@ -100,7 +101,7 @@ impl ClusterPages {
             other => {
                 if let Some(kind) = ResourceKind::for_page(other) {
                     self.resources.update(cx, |screen, cx| {
-                        screen.set(cluster, kind, detail, confirm_destructive, cx);
+                        screen.set(cluster, kind, detail, confirm_destructive, namespace, cx);
                     });
                 }
             }
@@ -120,8 +121,10 @@ impl ClusterPages {
             .find(|kind| kind.name() == target.kind);
         if let (Some(kind), Some(namespace)) = (kind, target.namespace.clone()) {
             let name = target.name.clone();
-            self.resources
-                .update(cx, |screen, cx| screen.reveal(kind, namespace, name, cx));
+            let cluster = target.cluster.clone();
+            self.resources.update(cx, |screen, cx| {
+                screen.reveal(&cluster, kind, namespace, name, cx);
+            });
         }
     }
 

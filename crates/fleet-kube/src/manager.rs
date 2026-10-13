@@ -62,6 +62,21 @@ pub enum ClusterEvent {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WatchKey {
+    pub kind: WatchKind,
+    pub namespace: Option<String>,
+}
+
+impl WatchKey {
+    fn all(kind: WatchKind) -> Self {
+        Self {
+            kind,
+            namespace: None,
+        }
+    }
+}
+
 struct WatchEntry {
     refs: usize,
     resource: Option<ApiResource>,
@@ -76,7 +91,7 @@ pub(crate) struct Shared {
     status: Mutex<ConnectionStatus>,
     info: Mutex<ClusterInfo>,
     client: Mutex<Option<Client>>,
-    watches: Mutex<HashMap<WatchKind, WatchEntry>>,
+    watches: Mutex<HashMap<WatchKey, WatchEntry>>,
     signals: mpsc::UnboundedSender<Signal>,
     pub(crate) resources: Mutex<HashMap<(String, String), ApiResource>>,
     pub(crate) forwards: Mutex<BTreeMap<u64, crate::ops::ActiveForward>>,
@@ -95,8 +110,9 @@ impl Shared {
         lock(&self.client).clone()
     }
 
-    fn start(&self, kind: &WatchKind, entry: &mut WatchEntry, client: &Client) {
+    fn start(&self, key: &WatchKey, entry: &mut WatchEntry, client: &Client) {
         let signals = self.signals.clone();
+        let kind = &key.kind;
         entry.running = match (kind, &entry.resource) {
             (WatchKind::Custom(custom), Some(resource)) => Some(spawn_custom(
                 &self.runtime,
@@ -106,25 +122,31 @@ impl Shared {
                 signals,
             )),
             (WatchKind::Custom(_), None) => None,
-            (builtin, _) => spawn_builtin(builtin, &self.runtime, client.clone(), signals),
+            (builtin, _) => spawn_builtin(
+                builtin,
+                key.namespace.as_deref(),
+                &self.runtime,
+                client.clone(),
+                signals,
+            ),
         };
     }
 
     pub(crate) fn set_client(&self, client: Option<&Client>) {
         *lock(&self.client) = client.cloned();
         let mut watches = lock(&self.watches);
-        for (kind, entry) in watches.iter_mut() {
+        for (key, entry) in watches.iter_mut() {
             entry.running = None;
             if let Some(client) = client {
-                self.start(kind, entry, client);
+                self.start(key, entry, client);
             }
         }
     }
 
-    fn subscribe(&self, kind: &WatchKind, resource: Option<ApiResource>) {
+    fn subscribe(&self, key: &WatchKey, resource: Option<ApiResource>) {
         let client = lock(&self.client).clone();
         let mut watches = lock(&self.watches);
-        let entry = watches.entry(kind.clone()).or_insert_with(|| WatchEntry {
+        let entry = watches.entry(key.clone()).or_insert_with(|| WatchEntry {
             refs: 0,
             resource,
             running: None,
@@ -133,37 +155,41 @@ impl Shared {
         if entry.running.is_none()
             && let Some(client) = client
         {
-            self.start(kind, entry, &client);
+            self.start(key, entry, &client);
         }
     }
 
-    fn unsubscribe(&self, kind: &WatchKind) {
+    fn unsubscribe(&self, key: &WatchKey) {
         let mut watches = lock(&self.watches);
-        let remove = watches.get_mut(kind).is_some_and(|entry| {
+        let remove = watches.get_mut(key).is_some_and(|entry| {
             entry.refs = entry.refs.saturating_sub(1);
             entry.refs == 0
         });
         if remove {
-            watches.remove(kind);
+            watches.remove(key);
         }
     }
 }
 
 pub struct Subscription {
     shared: Weak<Shared>,
-    kind: WatchKind,
+    key: WatchKey,
 }
 
 impl Subscription {
     pub fn kind(&self) -> &WatchKind {
-        &self.kind
+        &self.key.kind
+    }
+
+    pub fn namespace(&self) -> Option<&str> {
+        self.key.namespace.as_deref()
     }
 }
 
 impl Drop for Subscription {
     fn drop(&mut self) {
         if let Some(shared) = self.shared.upgrade() {
-            shared.unsubscribe(&self.kind);
+            shared.unsubscribe(&self.key);
         }
     }
 }
@@ -196,20 +222,28 @@ impl ClusterHandle {
     }
 
     pub fn subscribe(&self, kind: WatchKind) -> Subscription {
-        self.shared.subscribe(&kind, None);
+        self.subscribe_key(WatchKey::all(kind))
+    }
+
+    pub fn subscribe_in(&self, kind: WatchKind, namespace: Option<String>) -> Subscription {
+        self.subscribe_key(WatchKey { kind, namespace })
+    }
+
+    fn subscribe_key(&self, key: WatchKey) -> Subscription {
+        self.shared.subscribe(&key, None);
         Subscription {
             shared: Arc::downgrade(&self.shared),
-            kind,
+            key,
         }
     }
 
     pub async fn subscribe_custom(&self, kind: CustomKind) -> Result<Subscription> {
         let resource = self.resolve_custom(&kind).await?;
-        let watch_kind = WatchKind::Custom(kind);
-        self.shared.subscribe(&watch_kind, Some(resource));
+        let key = WatchKey::all(WatchKind::Custom(kind));
+        self.shared.subscribe(&key, Some(resource));
         Ok(Subscription {
             shared: Arc::downgrade(&self.shared),
-            kind: watch_kind,
+            key,
         })
     }
 
@@ -218,23 +252,43 @@ impl ClusterHandle {
         K::DynamicType: Eq + std::hash::Hash + Clone,
     {
         let watches = lock(&self.shared.watches);
+        if let Some(all) = watches.get(&WatchKey::all(K::KIND)) {
+            return all.running.as_ref().map(snapshot::<K>).unwrap_or_default();
+        }
         watches
-            .get(&K::KIND)
-            .and_then(|entry| entry.running.as_ref())
-            .map(snapshot::<K>)
-            .unwrap_or_default()
+            .iter()
+            .filter(|(key, _)| key.kind == K::KIND)
+            .filter_map(|(_, entry)| entry.running.as_ref())
+            .flat_map(snapshot::<K>)
+            .collect()
     }
 
     pub fn custom_objects(&self, kind: &CustomKind) -> Vec<Arc<DynamicObject>> {
         let watches = lock(&self.shared.watches);
         watches
-            .get(&WatchKind::Custom(kind.clone()))
+            .get(&WatchKey::all(WatchKind::Custom(kind.clone())))
             .and_then(|entry| entry.running.as_ref())
             .map(custom_snapshot)
             .unwrap_or_default()
     }
 
     pub fn watched_kinds(&self) -> Vec<WatchKind> {
+        let kinds: BTreeSet<WatchKind> = lock(&self.shared.watches)
+            .keys()
+            .map(|key| key.kind.clone())
+            .collect();
+        kinds.into_iter().collect()
+    }
+
+    pub fn cluster_wide_kinds(&self) -> Vec<WatchKind> {
+        lock(&self.shared.watches)
+            .keys()
+            .filter(|key| key.namespace.is_none())
+            .map(|key| key.kind.clone())
+            .collect()
+    }
+
+    pub fn watched_keys(&self) -> Vec<WatchKey> {
         lock(&self.shared.watches).keys().cloned().collect()
     }
 }

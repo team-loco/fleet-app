@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use fleet_core::filter::StatusFilter;
-use fleet_core::resources::{Resource, filter_counts, filter_resources, namespaces_of, sentence};
+use fleet_core::resources::{
+    Resource, filter_counts, filter_resources, namespace_choices, namespaces_of, sentence,
+};
 use fleet_core::time::age;
 use fleet_core::{
     ClusterDetail, ClusterId, ClusterSummary, Command, Counts, ResourceKind, ResourceRef, Seen,
@@ -18,6 +20,7 @@ use crate::kit::{
     Lede, MenuItem, Presence, Select, SelectEvent, Table, TableEvent, chip_label, confirm,
     slide_in, slide_out,
 };
+use crate::prefs;
 use crate::theme::SPACE_3;
 
 const ALL_NAMESPACES: &str = "All namespaces";
@@ -143,10 +146,10 @@ impl ResourcesScreen {
         let subscriptions = vec![
             cx.subscribe(&namespaces, |this, select, _: &SelectEvent, cx| {
                 let label = select.read(cx).selected_label().cloned();
-                this.namespace = label
+                let choice = label
                     .filter(|l| l.as_ref() != ALL_NAMESPACES)
                     .map(|l| l.to_string());
-                this.refresh(cx);
+                this.choose_namespace(choice, cx);
             }),
             cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
                 this.refresh(cx);
@@ -177,20 +180,23 @@ impl ResourcesScreen {
         kind: ResourceKind,
         detail: &ClusterDetail,
         confirm_destructive: bool,
+        namespace: Option<&str>,
         cx: &mut Context<Self>,
     ) {
         let rows = detail.resources(kind);
+        let namespace = namespace.map(str::to_owned);
+        let rescoped = self.namespace != namespace;
+        self.namespace = namespace;
         if self.confirm_destructive != confirm_destructive {
             self.confirm_destructive = confirm_destructive;
             self.refresh_menu(cx);
         }
         let switched = self.kind != kind || self.cluster.as_ref() != Some(&cluster.id);
-        if !switched && self.rows == rows {
+        if !switched && !rescoped && self.rows == rows {
             return;
         }
         if switched {
             self.selected = None;
-            self.namespace = None;
         }
         if let Some((_, namespace, name)) = self.revealed.take_if(|(k, _, _)| *k == kind) {
             self.selected = Some((namespace, name));
@@ -199,9 +205,14 @@ impl ResourcesScreen {
         self.kind = kind;
         self.rows = rows.to_vec();
         self.sentence = sentence(kind, &self.rows);
+        let known = detail
+            .namespaces
+            .iter()
+            .map(|n| n.name.clone())
+            .chain(namespaces_of(&self.rows));
         let mut options: Vec<SharedString> = vec![ALL_NAMESPACES.into()];
         options.extend(
-            namespaces_of(&self.rows)
+            namespace_choices(known, self.namespace.as_deref())
                 .into_iter()
                 .map(SharedString::from),
         );
@@ -216,13 +227,35 @@ impl ResourcesScreen {
         self.refresh(cx);
     }
 
+    fn choose_namespace(&mut self, choice: Option<String>, cx: &mut Context<Self>) {
+        let Some(cluster) = self.cluster.clone() else {
+            return;
+        };
+        prefs::set_namespace(cluster.as_str(), self.kind.name(), choice.as_deref(), cx);
+        self.namespace.clone_from(&choice);
+        self.refresh(cx);
+        cx.emit(ScreenEvent::Command(Command::SelectNamespace(choice)));
+    }
+
     pub fn reveal(
         &mut self,
+        cluster: &ClusterId,
         kind: ResourceKind,
         namespace: String,
         name: String,
         cx: &mut Context<Self>,
     ) {
+        let showing = self.cluster.as_ref() == Some(cluster) && self.kind == kind;
+        let current = if showing {
+            Some(prefs::NamespacePick::of(self.namespace.as_deref()))
+        } else {
+            prefs::namespace_pick(cluster.as_str(), kind.name(), cx)
+        };
+        let elsewhere =
+            |pick: prefs::NamespacePick| pick.choice().is_some_and(|ns| ns != namespace);
+        if current.is_none_or(elsewhere) {
+            prefs::set_namespace(cluster.as_str(), kind.name(), Some(&namespace), cx);
+        }
         if kind == self.kind && self.cluster.is_some() {
             self.selected = Some((namespace, name));
             self.refresh(cx);

@@ -1,6 +1,7 @@
 use fleet_core::pods::{
     Container, Pod, PodFilter, PodQuery, filter_counts, namespaces, nav_counts,
 };
+use fleet_core::resources::{POD_LIST, namespace_choices};
 use fleet_core::{ClusterId, Command, Counts, ResourceRef, Seen, Snapshot, Status};
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, InteractiveElement,
@@ -17,6 +18,7 @@ use crate::kit::{
     KeyValue, Link, LogView, MenuItem, SectionLabel, Select, SelectEvent, Split, StatusGlyph,
     StatusText, Table, TableEvent, Terminal, TextFieldState, chip_label, confirm, swap_in,
 };
+use crate::prefs;
 use crate::theme::{
     ActiveTheme, CONTAINER_SQUARE, CONTAINER_SQUARE_GAP, FONT_MONO, LINE_PROSE, Palette,
     RADIUS_SMALL, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, TEXT_BODY,
@@ -128,8 +130,7 @@ impl PodsScreen {
                 let chosen = ix
                     .checked_sub(1)
                     .and_then(|ix| this.namespaces().get(ix).cloned());
-                this.query.namespace = chosen;
-                this.refresh(cx);
+                this.choose_namespace(chosen, cx);
             }),
             cx.subscribe(&containers, |this, select, SelectEvent::Changed(ix), cx| {
                 let name = select.read(cx).selected_label().map(ToString::to_string);
@@ -174,21 +175,42 @@ impl PodsScreen {
         &mut self,
         cluster: Option<&ClusterId>,
         resource: Option<&ResourceRef>,
+        namespace: Option<&str>,
         cx: &mut Context<Self>,
     ) {
         if self.cluster.as_ref() != cluster {
             self.cluster = cluster.cloned();
-            self.query.namespace = None;
-            self.namespace
-                .update(cx, |select, cx| select.set_selected(0, cx));
             self.selected = None;
         }
+        self.query.namespace = namespace.map(str::to_owned);
         let wanted = resource.filter(|r| self.pods.iter().any(|pod| pod.is(r)));
         if let Some(pod) = wanted {
+            let elsewhere = pod
+                .namespace
+                .as_ref()
+                .filter(|ns| {
+                    self.query
+                        .namespace
+                        .as_ref()
+                        .is_some_and(|chosen| chosen != *ns)
+                })
+                .cloned();
+            if let Some(namespace) = elsewhere {
+                self.choose_namespace(Some(namespace), cx);
+            }
             self.selected = Some(pod.clone());
             self.pick_container(None);
         }
         self.refresh(cx);
+    }
+
+    fn choose_namespace(&mut self, choice: Option<String>, cx: &mut Context<Self>) {
+        if let Some(cluster) = &self.cluster {
+            prefs::set_namespace(cluster.as_str(), POD_LIST, choice.as_deref(), cx);
+        }
+        self.query.namespace.clone_from(&choice);
+        self.refresh(cx);
+        cx.emit(Command::SelectNamespace(choice));
     }
 
     pub fn filter_bar(&self) -> &Entity<FilterBar> {
@@ -212,10 +234,12 @@ impl PodsScreen {
     }
 
     fn namespaces(&self) -> Vec<String> {
-        self.cluster
+        let known = self
+            .cluster
             .as_ref()
             .map(|cluster| namespaces(&self.pods, cluster))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        namespace_choices(known, self.query.namespace.as_deref())
     }
 
     fn selected_pod(&self) -> Option<&Pod> {
@@ -243,8 +267,16 @@ impl PodsScreen {
         };
         let mut options: Vec<SharedString> = vec![ALL_NAMESPACES.into()];
         options.extend(self.namespaces().into_iter().map(SharedString::from));
-        self.namespace
-            .update(cx, |select, cx| select.set_options(options, cx));
+        let selected = self
+            .query
+            .namespace
+            .as_ref()
+            .and_then(|ns| options.iter().position(|o| o.as_ref() == ns))
+            .unwrap_or_default();
+        self.namespace.update(cx, |select, cx| {
+            select.set_options(options, cx);
+            select.set_selected(selected, cx);
+        });
         let chips = filter_counts(&self.cluster_pods())
             .into_iter()
             .map(|(filter, n)| chip_label(filter.label(), n))

@@ -157,7 +157,10 @@ filter.update(cx, |bar, cx| {
 table.update(cx, |t, cx| t.set_highlight(query.words.clone(), cx));
 ```
 
-Screens expose `filter_bar()` so the shell can focus it. `StatusFilter` (All / Needs attention)
+Screens expose `filter_bar()` so the shell can focus it. On namespaced lists the scope picker
+is the namespace: read the pick with `prefs::namespace(cluster, list, default, cx)`, save a change with
+`prefs::set_namespace(..)` and emit `Command::SelectNamespace` so the backend watches only that namespace
+(decision 21). `StatusFilter` (All / Needs attention)
 covers lists whose only chip is "has a problem".
 
 ## ActionMenu (⋯ / Actions)

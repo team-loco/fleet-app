@@ -1,5 +1,6 @@
 use crate::{ClusterId, Status};
 
+pub const DEFAULT_NAMESPACE: &str = "default";
 const EXEC: &str = "exec";
 const SEPARATOR: &str = " · ";
 const AUTO: &str = "auto";
@@ -157,6 +158,12 @@ impl ClusterSettings {
 }
 
 impl ClusterCatalog {
+    pub fn default_namespace(&self, cluster: &ClusterId) -> &str {
+        self.get(cluster)
+            .and_then(|settings| settings.preferences.default_namespace.as_deref())
+            .unwrap_or(DEFAULT_NAMESPACE)
+    }
+
     pub fn get(&self, cluster: &ClusterId) -> Option<&ClusterSettings> {
         self.clusters.iter().find(|c| &c.cluster == cluster)
     }
@@ -215,6 +222,24 @@ mod tests {
             prometheus: None,
             preferences: Preferences::default(),
         }
+    }
+
+    #[test]
+    fn the_default_namespace_is_the_preference_else_default() {
+        let mut configured = settings(Auth::Other("token".into()), false);
+        configured.preferences.default_namespace = Some("loco-system".into());
+        let catalog = ClusterCatalog {
+            sources: 1,
+            clusters: vec![configured],
+        };
+        assert_eq!(
+            catalog.default_namespace(&ClusterId::new("qa-gke")),
+            "loco-system"
+        );
+        assert_eq!(
+            catalog.default_namespace(&ClusterId::new("elsewhere")),
+            DEFAULT_NAMESPACE
+        );
     }
 
     #[test]
