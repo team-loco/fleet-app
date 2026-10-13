@@ -12,6 +12,24 @@ use crate::theme::{
     SPACE_8, TEXT_LABEL, TEXT_SMALL,
 };
 
+#[derive(IntoElement)]
+pub struct BreakAnywhere {
+    text: SharedString,
+}
+
+impl BreakAnywhere {
+    pub fn new(text: impl Into<SharedString>) -> Self {
+        Self { text: text.into() }
+    }
+}
+
+impl RenderOnce for BreakAnywhere {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let cells = self.text.chars().map(|c| div().child(c.to_string()));
+        div().flex().flex_wrap().children(cells)
+    }
+}
+
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
 #[derive(IntoElement)]

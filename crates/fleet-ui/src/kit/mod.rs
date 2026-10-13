@@ -45,7 +45,9 @@ pub use split::Split;
 pub use status::{StatusGlyph, StatusText};
 pub use table::{Align, Column, SortDirection, Table, TableEvent, Width, min_row_width};
 pub use terminal::{Terminal, TerminalEvent};
-pub use text::{Highlighted, Kbd, KeyValue, Link, Rule, SectionHeader, SectionLabel};
+pub use text::{
+    BreakAnywhere, Highlighted, Kbd, KeyValue, Link, Rule, SectionHeader, SectionLabel,
+};
 pub use tooltip::Tooltip;
 pub use vertical::VerticalLabel;
 
