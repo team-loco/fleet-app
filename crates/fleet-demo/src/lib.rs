@@ -1,6 +1,7 @@
 mod add_cluster;
 mod changes;
 mod detail;
+mod flux;
 mod gitops;
 mod home;
 mod lists;
@@ -41,6 +42,7 @@ impl Backend for DemoBackend {
 enum Input {
     Command(Command),
     Settle(simulate::Settle),
+    SettleFlux(flux::Settle),
 }
 
 fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
@@ -52,6 +54,7 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
         return;
     }
     let mut adding = add_cluster::AddClusters::default();
+    let mut flux = flux::Flux::default();
     let (input_tx, input_rx) = mpsc::channel();
     let forward = input_tx.clone();
     let commands = commands.clone();
@@ -77,15 +80,27 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
                 }
                 tracing::debug!(?command, "demo backend received command");
                 workloads.handle(&command);
-                let pending = simulate::apply(&mut state, &command);
-                let changed = pending.is_some();
-                if let Some(pending) = pending {
-                    schedule(&input_tx, pending);
+                if let Command::Flux(key, action) = &command {
+                    let outcome = flux.apply(&mut state, key, *action);
+                    if let Some(pending) = outcome.settle {
+                        schedule(&input_tx, Input::SettleFlux(pending));
+                    }
+                    outcome.changed
+                } else {
+                    let pending = simulate::apply(&mut state, &command);
+                    let changed = pending.is_some();
+                    if let Some(pending) = pending {
+                        schedule(&input_tx, Input::Settle(pending));
+                    }
+                    changed
                 }
-                changed
             }
             Input::Settle(pending) => {
                 simulate::settle(&mut state, &pending);
+                true
+            }
+            Input::SettleFlux(pending) => {
+                flux::settle(&mut state, &pending);
                 true
             }
         };
@@ -99,13 +114,13 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
     }
 }
 
-fn schedule(input: &mpsc::Sender<Input>, pending: simulate::Settle) {
+fn schedule(input: &mpsc::Sender<Input>, next: Input) {
     let input = input.clone();
     let timer = thread::Builder::new()
         .name("fleet-demo-settle".into())
         .spawn(move || {
             thread::sleep(simulate::SETTLE);
-            let _ = input.send(Input::Settle(pending));
+            let _ = input.send(next);
         });
     if let Err(error) = timer {
         tracing::error!(%error, "demo settle timer failed to start");
@@ -177,6 +192,7 @@ pub fn snapshot() -> Snapshot {
         changes: changes::log(),
         details: BTreeMap::from([(ClusterId::new(PROD_US_EAST), detail::prod_us_east())]),
         gitops: gitops::gitops(),
+        flux: flux::objects(),
     }
 }
 

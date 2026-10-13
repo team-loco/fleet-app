@@ -44,6 +44,8 @@ Rule::horizontal()  /  Rule::vertical()   // 1px `line`
 Link::new("rev", "a41e07c").mono().on_click(|_, window, cx| ..)
 Highlighted::new("checkout-api", vec![0..8])  // byte ranges drawn in `acc` (fuzzy match hits)
 Kbd::new("⌘K")
+Prose::new("summary")                     // wrapping sentence with inline mono links
+    .text("checkout-api ").link("a41e07c", |window, cx| ..).inert_link("no-target")
 KeyValue::new()                           // inspector / spec grid, label column 72px muted
     .row("image", "ghcr.io/acme/checkout-api:2.14.0")
     .row("last exit", div().text_color(palette.err).child("1 (Error) · 2m ago"))

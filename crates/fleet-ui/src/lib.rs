@@ -28,5 +28,6 @@ pub fn init(
     assets::register_fonts(cx)?;
     theme::init(forced, cx);
     kit::init(cx);
+    screens::init(cx);
     Ok(())
 }

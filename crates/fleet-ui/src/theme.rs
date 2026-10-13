@@ -28,6 +28,7 @@ pub const RULE: Pixels = px(1.);
 pub const ROW_TABLE_MIN: Pixels = px(24.);
 pub const ROW_TABLE_MAX: Pixels = px(28.);
 pub const ROW_TABLE: Pixels = px(26.);
+pub const ROW_DOCUMENT: Pixels = px(25.);
 pub const ROW_MENU_PAD_Y: Pixels = px(6.);
 pub const ROW_NAV: Pixels = px(26.);
 pub const ROW_CLUSTER: Pixels = px(28.);
@@ -42,6 +43,7 @@ pub const NAV_MIN_WIDTH: Pixels = px(84.);
 pub const PANEL_HEADER: Pixels = px(32.);
 pub const PAGE_HEADER: Pixels = px(44.);
 pub const STATUS_BAR: Pixels = px(26.);
+pub const ASIDE_WIDTH: Pixels = px(300.);
 
 pub const ICON: Pixels = px(11.);
 pub const ICON_BUTTON: Pixels = px(22.);

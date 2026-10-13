@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use anyhow::Context as _;
 use clap::{Parser, ValueEnum};
-use fleet_core::{AddClusterStep, Backend, ClusterId, Command, Page};
+use fleet_core::{AddClusterStep, Backend, ClusterId, Command, FluxKey, FluxKind, Page};
 use fleet_demo::DemoBackend;
 use fleet_kube::LiveBackend;
 use fleet_kube::discovery::DiscoverySources;
@@ -23,6 +23,7 @@ const MIN_WIDTH: f32 = 720.;
 const MIN_HEIGHT: f32 = 480.;
 const SAMPLE_CLUSTER: &str = "prod-us-east";
 const SAMPLE_QUERY: &str = "checkout";
+const SAMPLE_RELEASE_CLUSTER: &str = "staging";
 
 gpui::actions!(fleet, [Quit]);
 
@@ -60,6 +61,9 @@ enum Screen {
     AddCluster,
     AddClusterCheck,
     Workload,
+    Kustomization,
+    Helmrelease,
+    Source,
 }
 
 impl Screen {
@@ -87,8 +91,30 @@ impl Screen {
             Self::AddCluster => vec![Command::OpenAddCluster(AddClusterStep::Pick)],
             Self::AddClusterCheck => vec![Command::OpenAddCluster(AddClusterStep::Check)],
             Self::Workload => vec![sample, Command::OpenResource(fleet_demo::sample_workload())],
+            Self::Kustomization => flux_screen(FluxKey::new(
+                SAMPLE_CLUSTER,
+                FluxKind::Kustomization,
+                "flux-system",
+                "apps-payments",
+            )),
+            Self::Helmrelease => flux_screen(FluxKey::new(
+                SAMPLE_RELEASE_CLUSTER,
+                FluxKind::HelmRelease,
+                "monitoring",
+                "kube-prometheus-stack",
+            )),
+            Self::Source => flux_screen(FluxKey::new(
+                SAMPLE_CLUSTER,
+                FluxKind::GitRepository,
+                "flux-system",
+                "fleet-infra",
+            )),
         }
     }
+}
+
+fn flux_screen(key: FluxKey) -> Vec<Command> {
+    vec![Command::OpenFluxObject(key), Command::ToggleClustersPanel]
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -196,6 +222,9 @@ fn launch(
             Screen::AddClusterCheck => shell_view(updates, commands, screen, window, cx),
             Screen::Gitops => shell_view(updates, commands, screen, window, cx),
             Screen::Workload => shell_view(updates, commands, screen, window, cx),
+            Screen::Kustomization => shell_view(updates, commands, screen, window, cx),
+            Screen::Helmrelease => shell_view(updates, commands, screen, window, cx),
+            Screen::Source => shell_view(updates, commands, screen, window, cx),
         };
         cx.new(|cx| Root::new(view, window, cx))
     })

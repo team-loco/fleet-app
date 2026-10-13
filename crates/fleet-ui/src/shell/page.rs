@@ -38,6 +38,9 @@ impl Shell {
                 .child(self.changes.clone())
                 .into_any_element();
         }
+        if self.state.flux_object.is_some() {
+            return self.flux_object.clone().into_any_element();
+        }
         div()
             .flex()
             .flex_col()
