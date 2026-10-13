@@ -27,6 +27,8 @@ const ENVOY_PORT: u16 = 8443;
 const PROBE_PERIOD: u64 = 5 * SECOND;
 const DESIRED: u32 = 3;
 const CURRENT_READY: u32 = 2;
+const HEALTHY_CPU: u32 = 198;
+const HEALTHY_MEMORY_MIB: u64 = 294;
 
 pub fn target() -> ResourceRef {
     ResourceRef {
@@ -55,6 +57,65 @@ pub fn checkout_api() -> Workload {
         containers: vec![api_container(), envoy_container()],
         events: events(),
     }
+}
+
+pub fn healthy_checkout(
+    cluster: &ClusterId,
+    pods: &[(String, String)],
+    version: Option<&str>,
+) -> Workload {
+    let mut workload = checkout_api();
+    let replicas = u32::try_from(pods.len()).unwrap_or(u32::MAX);
+    let current = version.map(|version| format!(":{version}"));
+    let current_ix = workload
+        .revisions
+        .iter()
+        .position(|r| {
+            current
+                .as_ref()
+                .is_none_or(|tag| r.image.ends_with(tag.as_str()))
+        })
+        .unwrap_or_default();
+    workload.revisions.drain(..current_ix);
+    for (ix, revision) in workload.revisions.iter_mut().enumerate() {
+        revision.current = ix == 0;
+        revision.ready = if revision.current { replicas } else { 0 };
+        revision.replicas = revision.ready;
+    }
+    let image = workload.revisions.first().map(|r| r.image.clone());
+    workload.target.cluster = cluster.clone();
+    if let Some(owner) = workload.managed_by.as_mut() {
+        owner.cluster = cluster.clone();
+    }
+    workload.desired = replicas;
+    workload.stalled = false;
+    workload.pods = pods
+        .iter()
+        .map(|(name, node)| {
+            running_pod(
+                name.clone(),
+                node,
+                HEALTHY_CPU,
+                HEALTHY_MEMORY_MIB,
+                secs(POD_AGE),
+            )
+        })
+        .collect();
+    for container in &mut workload.containers {
+        if container.name == API {
+            if let Some(image) = &image {
+                container.image.clone_from(image);
+            }
+            for var in &mut container.env {
+                var.resolution = match var.resolution {
+                    EnvResolution::MissingKey { .. } => EnvResolution::Resolved,
+                    ref other => other.clone(),
+                };
+            }
+        }
+    }
+    workload.events = Vec::new();
+    workload
 }
 
 fn secs(n: u64) -> Duration {
