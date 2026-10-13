@@ -54,7 +54,7 @@ pub use table::{
     Align, Column, RowActions, SortDirection, TABLE_CONTEXT, Table, TableEvent, Width,
     min_row_width, resized,
 };
-pub use terminal::{TERMINAL_CONTEXT, Terminal, TerminalEvent};
+pub use terminal::{SendBackTab, SendTab, TERMINAL_CONTEXT, Terminal, TerminalEvent};
 pub use text::{
     BreakAnywhere, Highlighted, Kbd, KeyValue, Link, Rule, SectionHeader, SectionLabel,
 };

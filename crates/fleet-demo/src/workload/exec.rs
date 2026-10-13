@@ -3,7 +3,13 @@ use fleet_core::{ExecEvent, ExecRequest};
 const PROMPT: &str = "/ # ";
 const DEBUG_CONTAINER: &str = "debugger-k7q2x";
 const BACKSPACE: u8 = 0x7f;
+const CTRL_C: u8 = 0x03;
 const CTRL_D: u8 = 0x04;
+const ESC: u8 = 0x1b;
+const CSI: u8 = b'[';
+const PRINTABLE_FROM: u8 = 0x20;
+const CSI_FINAL: std::ops::RangeInclusive<u8> = b'@'..=b'~';
+const INTERRUPT: &str = "^C\r\n";
 const ERASE: &str = "\u{8} \u{8}";
 const HISTORY: [(&str, &str); 2] = [
     (
@@ -53,16 +59,43 @@ pub enum Step {
     Exit,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Escape {
+    #[default]
+    None,
+    Started,
+    Csi,
+}
+
 #[derive(Debug, Default)]
 pub struct LineDiscipline {
     line: Vec<u8>,
+    escape: Escape,
 }
 
 impl LineDiscipline {
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<Step> {
         let mut steps = Vec::new();
         for &byte in bytes {
+            match self.escape {
+                Escape::Started if byte == CSI => {
+                    self.escape = Escape::Csi;
+                    continue;
+                }
+                Escape::Started => {
+                    self.escape = Escape::None;
+                    continue;
+                }
+                Escape::Csi => {
+                    if CSI_FINAL.contains(&byte) {
+                        self.escape = Escape::None;
+                    }
+                    continue;
+                }
+                Escape::None => {}
+            }
             match byte {
+                ESC => self.escape = Escape::Started,
                 b'\r' | b'\n' => {
                     let command = String::from_utf8_lossy(&self.line).into_owned();
                     self.line.clear();
@@ -82,6 +115,11 @@ impl LineDiscipline {
                     }
                 }
                 CTRL_D => steps.push(Step::Exit),
+                CTRL_C => {
+                    self.line.clear();
+                    steps.push(Step::Echo(format!("{INTERRUPT}{PROMPT}").into_bytes()));
+                }
+                other if other < PRINTABLE_FROM => {}
                 other => {
                     self.line.push(other);
                     steps.push(Step::Echo(vec![other]));
@@ -155,6 +193,19 @@ mod tests {
             panic!("expected an echo");
         };
         assert_eq!(String::from_utf8_lossy(last), "\r\napp.yaml\r\n/ # ");
+    }
+
+    #[test]
+    fn control_c_drops_the_line_and_keys_without_meaning_are_ignored() {
+        let mut discipline = LineDiscipline::default();
+        discipline.feed(b"whoami\t\x1b[D\x1bOA");
+        let steps = discipline.feed(&[CTRL_C]);
+        assert_eq!(
+            steps,
+            [Step::Echo(format!("{INTERRUPT}{PROMPT}").into_bytes())]
+        );
+        let steps = discipline.feed(b"exit\r");
+        assert_eq!(steps.last(), Some(&Step::Exit));
     }
 
     #[test]

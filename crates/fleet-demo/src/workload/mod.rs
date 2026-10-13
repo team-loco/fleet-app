@@ -130,7 +130,7 @@ impl Workloads {
 
     fn follow_logs(&self, request: &LogRequest) {
         let status = self.lock().pod_status(&request.pod).unwrap_or(Status::Ok);
-        let script = logs::script(status, &request.container, request.previous);
+        let script = logs::script(status, &request.container);
         let request = request.clone();
         spawn("fleet-demo-logs", move || {
             for line in script.initial {
@@ -276,17 +276,16 @@ mod tests {
     }
 
     #[test]
-    fn crashing_pod_previous_logs_end_with_the_exit_marker() {
+    fn crashing_pod_logs_explain_waiting() {
         let workloads = Workloads::new(&crate::snapshot());
         let (sink, rx) = Sink::channel();
         workloads.handle(&Command::StreamLogs(LogRequest {
             pod: pod("checkout-api-7f9c6d-x2lqp"),
             container: data::API.into(),
-            previous: true,
             sink,
         }));
         let lines: Vec<LogLine> = std::iter::from_fn(|| rx.recv_blocking().ok()).collect();
-        assert_eq!(lines, logs::crash_previous());
+        assert_eq!(lines, logs::crash_waiting());
     }
 
     #[test]
@@ -296,7 +295,6 @@ mod tests {
         workloads.handle(&Command::StreamLogs(LogRequest {
             pod: pod("checkout-api-7f9c6d-m8vtn"),
             container: data::API.into(),
-            previous: false,
             sink,
         }));
         let initial = logs::healthy_api().len();

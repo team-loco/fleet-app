@@ -13,8 +13,8 @@ use gpui::{
 use super::{WorkloadScreen, logs_tab_label};
 use crate::kit::status_symbols;
 use crate::kit::{
-    Button, Dock, DockState, DockTab, InputEvent, Level, LogLine, LogView, Terminal, TerminalEvent,
-    TextField, TextFieldState,
+    Button, Dock, DockState, DockTab, InputEvent, Level, LogLine, LogView, Segmented, Terminal,
+    TerminalEvent, TextField, TextFieldState,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, LOG_LINE, Palette, SPACE_3, SPACE_4, SPACE_5, SPACE_6, TEXT_GLYPH,
@@ -30,11 +30,8 @@ const EVENTS_LABEL: &str = "Events";
 const TERMINAL_LABEL: &str = "Terminal";
 const DEBUG: &str = "debug";
 const EXEC: &str = "exec";
-const PREVIOUS: &str = "previous";
 const FOLLOW: &str = "follow";
 const WRAP: &str = "wrap";
-const PREVIOUS_TOOLTIP: &str = "Logs of the container instance before the last restart";
-const NO_PREVIOUS_TOOLTIP: &str = "This container has not restarted";
 const DEBUG_IMAGE: &str = "busybox:1.36";
 const POD_KIND: &str = "Pod";
 
@@ -59,12 +56,8 @@ pub fn subscribe(
 ) -> Vec<Subscription> {
     vec![
         cx.observe(dock, |this, dock, cx| {
-            let (active, open) = {
-                let dock = dock.read(cx);
-                (dock.active(), dock.is_open())
-            };
-            if active == TERMINAL && open {
-                this.ensure_exec(cx);
+            if !dock.read(cx).is_open() {
+                this.close_shell(cx);
             }
             cx.notify();
         }),
@@ -114,10 +107,6 @@ fn pod_ref(workload: &ResourceRef, pod: &str) -> ResourceRef {
     }
 }
 
-pub fn has_previous(pod: &Pod, container: &str) -> bool {
-    pod.container(container).is_some_and(|c| c.restarts > 0)
-}
-
 pub fn needs_debug(pod: &Pod, container: &str) -> bool {
     !pod.container(container).is_some_and(|c| c.ready)
 }
@@ -132,7 +121,6 @@ impl WorkloadScreen {
         else {
             return;
         };
-        self.previous = has_previous(&pod, &container);
         self.request_logs(&pod, container, cx);
     }
 
@@ -142,7 +130,6 @@ impl WorkloadScreen {
         cx.emit(Command::StreamLogs(LogRequest {
             pod: pod_ref(&self.target, &pod.name),
             container,
-            previous: self.previous,
             sink,
         }));
         self.log_task = Some(cx.spawn(async move |this, cx| {
@@ -158,25 +145,32 @@ impl WorkloadScreen {
         }));
     }
 
-    fn toggle_previous(&mut self, cx: &mut Context<Self>) {
-        let (Some(pod), Some(container)) = (self.selected_pod().cloned(), self.container_name())
-        else {
-            return;
-        };
-        self.previous = !self.previous;
-        self.request_logs(&pod, container, cx);
-        cx.notify();
-    }
-
     pub(super) fn show_logs(&mut self, cx: &mut Context<Self>) {
         self.dock.update(cx, |dock, cx| dock.select(LOGS, cx));
     }
 
     pub(super) fn show_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dock.update(cx, |dock, cx| dock.select(TERMINAL, cx));
+        let focus = self.terminal.read(cx).focus_handle(cx);
+        window.focus(&focus, cx);
+    }
+
+    pub(super) fn close_shell(&mut self, cx: &mut Context<Self>) {
+        self.exec = None;
+        self.terminal
+            .update(cx, |terminal, cx| terminal.set_open(false, cx));
+    }
+
+    pub(super) fn discard_shell(&mut self, cx: &mut Context<Self>) {
+        self.close_shell(cx);
+        self.terminal.update(cx, Terminal::clear);
+    }
+
+    fn start_shell(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.ensure_exec(cx);
         let focus = self.terminal.read(cx).focus_handle(cx);
         window.focus(&focus, cx);
+        cx.notify();
     }
 
     fn ensure_exec(&mut self, cx: &mut Context<Self>) {
@@ -201,6 +195,7 @@ impl WorkloadScreen {
         let (output, events) = Sink::channel();
         let command_line = target.command_line();
         self.terminal.update(cx, |terminal, cx| {
+            terminal.clear(cx);
             terminal.note(command_line, cx);
             terminal.set_open(true, cx);
         });
@@ -247,6 +242,7 @@ impl WorkloadScreen {
                 if let Some(session) = self.exec.as_mut() {
                     session.open = false;
                 }
+                cx.notify();
             }
         }
     }
@@ -265,28 +261,11 @@ impl WorkloadScreen {
     fn log_tools(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let follow = self.logs.read(cx).follow();
         let wrap = self.logs.read(cx).wrap();
-        let container = self.container_name().unwrap_or_default();
-        let can_previous = self
-            .selected_pod()
-            .is_some_and(|pod| has_previous(pod, &container));
-        let previous_tip = if can_previous {
-            PREVIOUS_TOOLTIP
-        } else {
-            NO_PREVIOUS_TOOLTIP
-        };
         div()
             .flex()
             .items_center()
             .gap(SPACE_3)
             .child(TextField::search(&self.filter))
-            .child(
-                Button::new("logs-previous", PREVIOUS)
-                    .small()
-                    .selected(self.previous)
-                    .disabled(!can_previous)
-                    .tooltip(previous_tip)
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_previous(cx))),
-            )
             .child(
                 Button::new("logs-follow", FOLLOW)
                     .small()
@@ -305,6 +284,59 @@ impl WorkloadScreen {
                         this.logs.update(cx, |logs, cx| logs.set_wrap(!wrap, cx));
                         cx.notify();
                     })),
+            )
+    }
+
+    fn terminal_tools(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let open = self.exec.as_ref().is_some_and(|session| session.open);
+        let button = if open {
+            Button::new("workload-close-shell", "Close shell")
+                .small()
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.close_shell(cx);
+                    cx.notify();
+                }))
+        } else {
+            Button::new("workload-open-shell", "Open shell")
+                .small()
+                .disabled(self.selected_container().is_none() || self.selected_pod().is_none())
+                .on_click(cx.listener(|this, _, window, cx| this.start_shell(window, cx)))
+        };
+        let names: Vec<String> = self
+            .workload
+            .as_ref()
+            .map(|workload| {
+                workload
+                    .containers
+                    .iter()
+                    .map(|container| container.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let picker = (names.len() > 1).then(|| {
+            names
+                .into_iter()
+                .fold(
+                    Segmented::new("terminal-containers")
+                        .small()
+                        .mono()
+                        .selected(self.container),
+                    Segmented::option,
+                )
+                .on_select(cx.listener(|this, ix: &usize, _, cx| this.select_container(*ix, cx)))
+        });
+        div()
+            .flex()
+            .items_center()
+            .gap(SPACE_3)
+            .children(picker)
+            .child(button)
+            .child(
+                Button::new("workload-copy-terminal", "Copy")
+                    .small()
+                    .on_click(
+                        cx.listener(|this, _, _, cx| this.terminal.update(cx, Terminal::copy)),
+                    ),
             )
     }
 
@@ -329,6 +361,7 @@ impl WorkloadScreen {
             .tab(
                 DockTab::new(TERMINAL_LABEL)
                     .detail(self.terminal_detail())
+                    .tools(self.terminal_tools(cx))
                     .content(self.terminal.clone()),
             )
             .into_any_element()
@@ -446,13 +479,6 @@ mod tests {
                 last_exit: None,
             }],
         }
-    }
-
-    #[test]
-    fn previous_logs_only_exist_after_a_restart() {
-        assert!(has_previous(&pod(false, 14), "api"));
-        assert!(!has_previous(&pod(true, 0), "api"));
-        assert!(!has_previous(&pod(false, 3), "envoy"));
     }
 
     #[test]

@@ -8,8 +8,7 @@ use crate::actions::{
     QuickOpen, Quit, ShowCommands, ShowFluxOwner, ToggleClusterSwitcher, ToggleCommandPalette,
     ToggleDock, ToggleSidebar,
 };
-#[cfg(test)]
-use crate::kit::TERMINAL_CONTEXT;
+use crate::kit::{SendBackTab, SendTab, TERMINAL_CONTEXT};
 use crate::screens::command::PALETTE_CONTEXT;
 use crate::screens::flux_object::{self, FLUX_CONTEXT};
 use crate::screens::workload::{self, KEY_CONTEXT as WORKLOAD_CONTEXT};
@@ -32,11 +31,12 @@ pub enum Group {
     Resource,
     Palette,
     Workload,
+    Terminal,
     Flux,
 }
 
 impl Group {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::General,
         Self::View,
         Self::Navigate,
@@ -44,6 +44,7 @@ impl Group {
         Self::Resource,
         Self::Palette,
         Self::Workload,
+        Self::Terminal,
         Self::Flux,
     ];
 
@@ -56,6 +57,7 @@ impl Group {
             Self::Resource => "Selected resource",
             Self::Palette => "Command palette",
             Self::Workload => "Workload page",
+            Self::Terminal => "Terminal",
             Self::Flux => "Flux object page",
         }
     }
@@ -236,6 +238,25 @@ pub const BINDINGS: &[Binding] = &[
         KeyBinding::new(k, workload::ViewYaml, c)
     })
     .within(WORKLOAD_CONTEXT),
+    Binding::new(
+        &["tab"],
+        "Complete in the shell",
+        Group::Terminal,
+        |k, c| KeyBinding::new(k, SendTab, c),
+    )
+    .within(TERMINAL_CONTEXT),
+    Binding::new(
+        &["shift-tab"],
+        "Send back-tab to the shell",
+        Group::Terminal,
+        |k, c| KeyBinding::new(k, SendBackTab, c),
+    )
+    .within(TERMINAL_CONTEXT),
+    Binding::built_in(
+        &["cmd-c", "cmd-v"],
+        "Copy the transcript, paste into the shell",
+        Group::Terminal,
+    ),
     Binding::new(&["cmd-r"], "Reconcile", Group::Flux, |k, c| {
         KeyBinding::new(k, flux_object::Reconcile, c)
     })

@@ -94,7 +94,6 @@ pub struct WorkloadScreen {
     menu: Entity<ActionMenu>,
     pod: Option<String>,
     container: usize,
-    previous: bool,
     dock: Entity<DockState>,
     logs: Entity<LogView>,
     filter: Entity<TextFieldState>,
@@ -162,7 +161,6 @@ impl WorkloadScreen {
             menu,
             pod: None,
             container: 0,
-            previous: false,
             dock,
             logs,
             filter,
@@ -240,6 +238,7 @@ impl WorkloadScreen {
         self.menu.update(cx, |menu, cx| menu.set_items(items, cx));
         self.workload = Some(workload);
         if pod != self.pod {
+            self.discard_shell(cx);
             self.pod = pod;
             self.follow_logs(cx);
         }
@@ -248,6 +247,7 @@ impl WorkloadScreen {
 
     fn select_pod(&mut self, name: String, cx: &mut Context<Self>) {
         if self.pod.as_ref() != Some(&name) {
+            self.discard_shell(cx);
             self.pod = Some(name);
             self.follow_logs(cx);
         }
@@ -257,6 +257,7 @@ impl WorkloadScreen {
 
     fn select_container(&mut self, ix: usize, cx: &mut Context<Self>) {
         if ix != self.container {
+            self.discard_shell(cx);
             self.container = ix;
             self.follow_logs(cx);
         }
