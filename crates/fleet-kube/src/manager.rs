@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
+use k8s_openapi::apimachinery::pkg::version::Info;
 use kube::Client;
 use kube::api::DynamicObject;
 use kube::core::ApiResource;
@@ -109,7 +110,7 @@ impl Shared {
         };
     }
 
-    fn set_client(&self, client: Option<&Client>) {
+    pub(crate) fn set_client(&self, client: Option<&Client>) {
         *lock(&self.client) = client.cloned();
         let mut watches = lock(&self.watches);
         for (kind, entry) in watches.iter_mut() {
@@ -278,15 +279,7 @@ async fn establish(shared: &Shared) -> Result<Client> {
         shared.settings.connect_timeout,
     )
     .await?;
-    let timeout = shared.settings.check_timeout;
-    let version = tokio::time::timeout(timeout, client.apiserver_version())
-        .await
-        .map_err(|_| Error::Timeout(timeout))??;
-    let nodes = tokio::time::timeout(timeout, probe::sample_nodes(&client)).await;
-    let provider_id = nodes
-        .ok()
-        .and_then(Result::ok)
-        .and_then(|sample| sample.provider_id);
+    let (version, provider_id) = identify(&client, shared.settings.check_timeout).await?;
     let provider = refine_provider(
         shared.context.provider,
         Some(&version.git_version),
@@ -296,6 +289,19 @@ async fn establish(shared: &Shared) -> Result<Client> {
     info.provider = provider;
     info.version = Some(version.git_version);
     Ok(client)
+}
+
+async fn identify(client: &Client, timeout: Duration) -> Result<(Info, Option<String>)> {
+    let (version, nodes) = tokio::join!(
+        tokio::time::timeout(timeout, client.apiserver_version()),
+        tokio::time::timeout(timeout, probe::sample_nodes(client)),
+    );
+    let version = version.map_err(|_| Error::Timeout(timeout))??;
+    let provider_id = nodes
+        .ok()
+        .and_then(Result::ok)
+        .and_then(|sample| sample.provider_id);
+    Ok((version, provider_id))
 }
 
 async fn health_check(shared: &Shared) -> Result<(), Failure> {
@@ -476,6 +482,7 @@ impl ClusterManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::discovery::ContextRef;
 
     fn failure(kind: FailureKind) -> Failure {
         Failure {
@@ -501,5 +508,99 @@ mod tests {
             .kinds
             .insert(WatchKind::Secrets, failure(FailureKind::Forbidden));
         assert!(matches!(health.status(), ConnectionStatus::Degraded(ref f) if f.len() == 1));
+    }
+
+    const ROUND_TRIP: Duration = Duration::from_secs(1);
+    const VERSION: &str = r#"{"major":"1","minor":"36","gitVersion":"v1.36.0","gitCommit":"","gitTreeState":"","buildDate":"","goVersion":"","compiler":"","platform":""}"#;
+    const NODES: &str = r#"{"kind":"NodeList","apiVersion":"v1","metadata":{},"items":[{"metadata":{"name":"n"},"spec":{"providerID":"kind://docker/n"}}]}"#;
+
+    #[tokio::test(start_paused = true)]
+    async fn version_and_node_sample_are_fetched_together() {
+        let (client, traffic) = crate::fake::client(ROUND_TRIP, |_, path| {
+            let body = if path.starts_with("/version") {
+                VERSION
+            } else {
+                NODES
+            };
+            Some((http::StatusCode::OK, body.to_owned()))
+        });
+        let started = Instant::now();
+        let identified = identify(&client, Duration::from_secs(30)).await;
+        assert!(started.elapsed() < ROUND_TRIP * 2);
+        assert_eq!(traffic.peak(), 2);
+        let Ok((version, provider_id)) = identified else {
+            panic!("identify failed");
+        };
+        assert_eq!(version.git_version, "v1.36.0");
+        assert_eq!(provider_id.as_deref(), Some("kind://docker/n"));
+    }
+
+    const HANG_PATIENCE: Duration = Duration::from_secs(60);
+    const FAST_ENOUGH: Duration = Duration::from_secs(10);
+
+    fn kubeconfig(dir: &std::path::Path, name: &str, server: &str) -> KubeContext {
+        let file = dir.join(format!("{name}.yaml"));
+        let text = format!(
+            "apiVersion: v1\nkind: Config\nclusters:\n- name: {name}\n  cluster:\n    server: {server}\ncontexts:\n- name: {name}\n  context:\n    cluster: {name}\n    user: {name}\nusers:\n- name: {name}\n  user:\n    token: abc\n"
+        );
+        assert!(std::fs::write(&file, text).is_ok());
+        KubeContext {
+            id: ContextRef {
+                file,
+                context: name.to_owned(),
+            },
+            cluster: name.to_owned(),
+            user: None,
+            namespace: None,
+            server: Some(server.to_owned()),
+            provider: Provider::Generic,
+            auth: crate::provider::AuthKind::Token,
+            is_current: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_hanging_cluster_does_not_delay_another() {
+        let Ok(dir) = tempfile::tempdir() else {
+            panic!("tempdir");
+        };
+        let Ok(hanging) = tokio::net::TcpListener::bind("127.0.0.1:0").await else {
+            panic!("bind");
+        };
+        let Ok(address) = hanging.local_addr() else {
+            panic!("addr");
+        };
+        let settings = KubeSettings {
+            connect_timeout: HANG_PATIENCE,
+            check_timeout: HANG_PATIENCE,
+            ..KubeSettings::default()
+        };
+        let env = Arc::new(ShellEnv::from_process(String::new()));
+        let (manager, events) = ClusterManager::new(Handle::current(), settings, env);
+        let stuck = kubeconfig(dir.path(), "stuck", &format!("https://{address}"));
+        let refused = kubeconfig(dir.path(), "refused", "https://127.0.0.1:1");
+        let stuck_handle = manager.connect(stuck);
+        let refused_handle = manager.connect(refused.clone());
+        let offline = tokio::time::timeout(FAST_ENOUGH, async {
+            while let Ok(event) = events.recv().await {
+                if let ClusterEvent::Status {
+                    id,
+                    status: ConnectionStatus::Offline(_),
+                } = event
+                    && id == refused.id
+                {
+                    return true;
+                }
+            }
+            false
+        })
+        .await;
+        assert_eq!(offline, Ok(true));
+        assert!(matches!(
+            refused_handle.status(),
+            ConnectionStatus::Offline(_)
+        ));
+        assert_eq!(stuck_handle.status(), ConnectionStatus::Connecting);
+        drop(hanging);
     }
 }

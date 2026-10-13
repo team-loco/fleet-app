@@ -169,27 +169,33 @@ pub fn values(series: &[Series]) -> Vec<f32> {
         .unwrap_or_default()
 }
 
+async fn utilization(
+    handle: &ClusterHandle,
+    target: &PrometheusTarget,
+    range: TimeRange,
+    now: Timestamp,
+) -> Result<Utilization> {
+    let cpu_query = range_query(CPU_QUERY, range, now);
+    let memory_query = range_query(MEMORY_QUERY, range, now);
+    let (cpu, memory) = futures::try_join!(
+        handle.prometheus_range(target, &cpu_query),
+        handle.prometheus_range(target, &memory_query),
+    )?;
+    Ok(Utilization {
+        range,
+        cpu: values(&cpu),
+        memory: values(&memory),
+        cpu_requests: 0.,
+    })
+}
+
 pub async fn prometheus_utilization(
     handle: &ClusterHandle,
     target: &PrometheusTarget,
     now: Timestamp,
 ) -> Result<Vec<Utilization>> {
-    let mut ranges = Vec::new();
-    for range in TimeRange::ALL {
-        let cpu = handle
-            .prometheus_range(target, &range_query(CPU_QUERY, range, now))
-            .await?;
-        let memory = handle
-            .prometheus_range(target, &range_query(MEMORY_QUERY, range, now))
-            .await?;
-        ranges.push(Utilization {
-            range,
-            cpu: values(&cpu),
-            memory: values(&memory),
-            cpu_requests: 0.,
-        });
-    }
-    Ok(ranges)
+    let ranges = TimeRange::ALL.map(|range| utilization(handle, target, range, now));
+    futures::future::try_join_all(ranges).await
 }
 
 #[cfg(test)]
@@ -198,6 +204,29 @@ mod tests {
 
     use super::*;
     use crate::problems::tests::parse;
+
+    const ROUND_TRIP: Duration = Duration::from_secs(1);
+    const EMPTY_MATRIX: &str = r#"{"status":"success","data":{"resultType":"matrix","result":[]}}"#;
+
+    #[tokio::test(start_paused = true)]
+    async fn every_range_query_runs_at_once() {
+        let (client, traffic) = crate::fake::client(ROUND_TRIP, |_, path| {
+            path.contains("/proxy/")
+                .then(|| (http::StatusCode::OK, EMPTY_MATRIX.to_owned()))
+        });
+        let (_manager, handle) = crate::fake::handle(&client);
+        let target = PrometheusTarget {
+            namespace: "monitoring".to_owned(),
+            service: "prometheus".to_owned(),
+            port: 9090,
+            scheme: "http".to_owned(),
+        };
+        let started = tokio::time::Instant::now();
+        let ranges = prometheus_utilization(&handle, &target, Timestamp::UNIX_EPOCH).await;
+        assert!(started.elapsed() < ROUND_TRIP * 2);
+        assert_eq!(ranges.map(|r| r.len()).ok(), Some(TimeRange::ALL.len()));
+        assert!(traffic.peak() >= TimeRange::ALL.len() * 2);
+    }
 
     fn node(name: &str, cpu: &str, memory: &str) -> Arc<Node> {
         parse(json!({

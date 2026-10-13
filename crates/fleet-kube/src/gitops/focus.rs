@@ -115,13 +115,18 @@ async fn follow(
 ) {
     loop {
         if let Ok(client) = handle.client() {
-            if key.kind != FluxKind::Kustomization {
-                let events = events(client.clone(), &key).await;
-                lock(&detail).events = events;
-            }
-            if key.kind == FluxKind::HelmRelease {
-                load_releases(client, &handle, &key, &detail).await;
-            }
+            let history = async {
+                if key.kind != FluxKind::Kustomization {
+                    let events = events(client.clone(), &key).await;
+                    lock(&detail).events = events;
+                }
+            };
+            let releases = async {
+                if key.kind == FluxKind::HelmRelease {
+                    load_releases(client.clone(), &handle, &key, &detail).await;
+                }
+            };
+            tokio::join!(history, releases);
             if changed.try_send(()).is_err() {
                 tracing::trace!("GitOps change already pending");
             }

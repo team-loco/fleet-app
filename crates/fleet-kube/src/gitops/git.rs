@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -7,8 +7,11 @@ use std::time::Duration;
 use fleet_core::changes::{FilePatch, LineChange, PatchLine};
 use fleet_flux::redact;
 use jiff::Timestamp;
-use tokio::process::Command;
+use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::process::{Child, Command};
 use tokio::sync::watch;
+use tokio::task::{Id, JoinSet};
+use tokio::time::Instant;
 
 use crate::manager::lock;
 use crate::task::TaskGuard;
@@ -18,6 +21,10 @@ const FETCH_INTERVAL: Duration = Duration::from_mins(5);
 const COMMIT_LIMIT: usize = 30;
 const MAX_FILES: usize = 50;
 const MAX_FILE_LINES: usize = 400;
+const MAX_LINE_BYTES: usize = 1_000;
+const MAX_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_STDERR_BYTES: usize = 8 * 1024;
+const FETCH_LIMIT: usize = 4;
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 const RECORD: char = '\u{1e}';
@@ -46,6 +53,7 @@ pub struct GitCommit {
     pub time: Timestamp,
     pub subject: String,
     pub files: Vec<FilePatch>,
+    pub truncated: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,9 +67,10 @@ pub enum MirrorState {
 }
 
 type Wanted = BTreeMap<RepoKey, BTreeSet<String>>;
+type States = Arc<Mutex<BTreeMap<RepoKey, MirrorState>>>;
 
 pub struct Mirrors {
-    states: Arc<Mutex<BTreeMap<RepoKey, MirrorState>>>,
+    states: States,
     wanted: watch::Sender<Wanted>,
     _task: TaskGuard,
 }
@@ -71,7 +80,16 @@ impl Mirrors {
         let states = Arc::new(Mutex::new(BTreeMap::new()));
         let (wanted, receiver) = watch::channel(Wanted::new());
         let cache = std::env::home_dir().map(|home| home.join(CACHE_DIR));
-        let task = TaskGuard::spawn(mirror(cache, timeout, receiver, states.clone(), changed));
+        let fetch = move |key: RepoKey| {
+            let cache = cache.clone();
+            async move {
+                match cache {
+                    Some(cache) => sync(&cache, &key, timeout).await,
+                    None => MirrorState::Unavailable(NO_HOME.to_owned()),
+                }
+            }
+        };
+        let task = TaskGuard::spawn(mirror(fetch, receiver, states.clone(), changed));
         Self {
             states,
             wanted,
@@ -94,42 +112,76 @@ impl Mirrors {
     }
 }
 
-async fn mirror(
-    cache: Option<PathBuf>,
-    timeout: Duration,
+struct Attempt {
+    at: Instant,
+    revisions: BTreeSet<String>,
+}
+
+type Finished = (RepoKey, BTreeSet<String>, MirrorState);
+
+async fn mirror<F, Fut>(
+    fetch: F,
     mut wanted: watch::Receiver<Wanted>,
-    states: Arc<Mutex<BTreeMap<RepoKey, MirrorState>>>,
+    states: States,
     changed: async_channel::Sender<()>,
-) {
-    let mut fetched: BTreeMap<RepoKey, tokio::time::Instant> = BTreeMap::new();
+) where
+    F: Fn(RepoKey) -> Fut + Send,
+    Fut: Future<Output = MirrorState> + Send + 'static,
+{
+    let mut attempts: BTreeMap<RepoKey, Attempt> = BTreeMap::new();
+    let mut running: JoinSet<Finished> = JoinSet::new();
+    let mut in_flight: HashMap<Id, RepoKey> = HashMap::new();
     loop {
         let current = wanted.borrow_and_update().clone();
         lock(&states).retain(|key, _| current.contains_key(key));
-        fetched.retain(|key, _| current.contains_key(key));
+        attempts.retain(|key, _| current.contains_key(key));
         for (key, revisions) in &current {
+            if in_flight.len() >= FETCH_LIMIT {
+                break;
+            }
+            if in_flight.values().any(|running| running == key) {
+                continue;
+            }
             let state = lock(&states).get(key).cloned();
-            let expired = fetched
-                .get(key)
-                .is_none_or(|at| at.elapsed() >= FETCH_INTERVAL);
-            if !needs_fetch(state.as_ref(), revisions, expired) {
+            let attempt = attempts.get(key);
+            let expired = attempt.is_none_or(|attempt| attempt.at.elapsed() >= FETCH_INTERVAL);
+            let attempted = attempt.map(|attempt| &attempt.revisions);
+            if !needs_fetch(state.as_ref(), revisions, attempted, expired) {
                 continue;
             }
             if state.is_none() {
                 lock(&states).insert(key.clone(), MirrorState::Fetching);
                 notify(&changed);
             }
-            let next = match &cache {
-                Some(cache) => sync(cache, key, timeout).await,
-                None => MirrorState::Unavailable(NO_HOME.to_owned()),
-            };
-            fetched.insert(key.clone(), tokio::time::Instant::now());
-            lock(&states).insert(key.clone(), next);
-            notify(&changed);
+            let job = fetch(key.clone());
+            let finished = (key.clone(), revisions.clone());
+            let handle = running.spawn(async move {
+                let (key, revisions) = finished;
+                (key, revisions, job.await)
+            });
+            in_flight.insert(handle.id(), key.clone());
         }
         tokio::select! {
             result = wanted.changed() => {
                 if result.is_err() {
                     return;
+                }
+            }
+            Some(joined) = running.join_next_with_id() => {
+                match joined {
+                    Ok((id, (key, revisions, next))) => {
+                        in_flight.remove(&id);
+                        if wanted.borrow().contains_key(&key) {
+                            attempts.insert(key.clone(), Attempt { at: Instant::now(), revisions });
+                            lock(&states).insert(key, next);
+                            notify(&changed);
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(key) = in_flight.remove(&error.id()) {
+                            tracing::warn!(url = %redact::credentials(&key.url), %error, "git mirror fetch stopped");
+                        }
+                    }
                 }
             }
             () = tokio::time::sleep(FETCH_INTERVAL) => {}
@@ -146,6 +198,7 @@ fn notify(changed: &async_channel::Sender<()>) {
 pub fn needs_fetch(
     current: Option<&MirrorState>,
     revisions: &BTreeSet<String>,
+    attempted: Option<&BTreeSet<String>>,
     expired: bool,
 ) -> bool {
     match current {
@@ -154,7 +207,8 @@ pub fn needs_fetch(
         Some(MirrorState::Unavailable(_)) => expired,
         Some(MirrorState::Ready { commits, .. }) => {
             let known = |sha: &String| commits.iter().any(|commit| &commit.sha == sha);
-            expired || !revisions.iter().all(known)
+            let tried = |sha: &String| attempted.is_some_and(|tried| tried.contains(sha));
+            expired || revisions.iter().any(|sha| !known(sha) && !tried(sha))
         }
     }
 }
@@ -206,10 +260,69 @@ async fn fetch_log(dir: &Path, key: &RepoKey, timeout: Duration) -> Result<Vec<G
         timeout,
     )
     .await?;
-    Ok(parse_log(&log))
+    if log.truncated {
+        tracing::info!(url = %redact::credentials(&key.url), limit = MAX_OUTPUT_BYTES, "git log output truncated");
+    }
+    Ok(parse_log(&log.text, log.truncated))
 }
 
-async fn git(dir: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
+struct Captured {
+    text: String,
+    truncated: bool,
+}
+
+async fn read_capped<R: AsyncRead + Unpin>(reader: R, cap: usize) -> (Vec<u8>, bool, R) {
+    let limit = u64::try_from(cap).unwrap_or(u64::MAX).saturating_add(1);
+    let mut limited = reader.take(limit);
+    let mut bytes = Vec::new();
+    if let Err(error) = limited.read_to_end(&mut bytes).await {
+        tracing::debug!(%error, "git output unreadable");
+    }
+    let truncated = bytes.len() > cap;
+    bytes.truncate(cap);
+    (bytes, truncated, limited.into_inner())
+}
+
+async fn read_stderr<R: AsyncRead + Unpin>(reader: R) -> Vec<u8> {
+    let (bytes, truncated, mut rest) = read_capped(reader, MAX_STDERR_BYTES).await;
+    if truncated && let Err(error) = tokio::io::copy(&mut rest, &mut tokio::io::sink()).await {
+        tracing::debug!(%error, "git stderr unreadable");
+    }
+    bytes
+}
+
+async fn capture(mut child: Child, timeout: Duration, what: &str) -> Result<Captured, String> {
+    let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
+        return Err(format!("git {what} has no output pipes"));
+    };
+    let run = async {
+        let out = async {
+            let (bytes, truncated, _) = read_capped(stdout, MAX_OUTPUT_BYTES).await;
+            if truncated && let Err(error) = child.start_kill() {
+                tracing::debug!(%error, "git could not be stopped");
+            }
+            (bytes, truncated)
+        };
+        let ((stdout, truncated), stderr) = tokio::join!(out, read_stderr(stderr));
+        let status = child.wait().await;
+        (stdout, truncated, stderr, status)
+    };
+    let (stdout, truncated, stderr, status) = tokio::time::timeout(timeout, run)
+        .await
+        .map_err(|_| format!("git {what} timed out after {}s", timeout.as_secs()))?;
+    let status = status.map_err(|error| format!("git could not run: {error}"))?;
+    if status.success() || truncated {
+        return Ok(Captured {
+            text: String::from_utf8_lossy(&stdout).into_owned(),
+            truncated,
+        });
+    }
+    Err(redact::credentials(&first_line(&String::from_utf8_lossy(
+        &stderr,
+    ))))
+}
+
+async fn git(dir: &Path, args: &[&str], timeout: Duration) -> Result<Captured, String> {
     let mut command = Command::new(GIT);
     command
         .args(args)
@@ -222,21 +335,10 @@ async fn git(dir: &Path, args: &[&str], timeout: Duration) -> Result<String, Str
     if std::env::var_os("GIT_SSH_COMMAND").is_none() {
         command.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes");
     }
-    let output = tokio::time::timeout(timeout, command.output())
-        .await
-        .map_err(|_| {
-            format!(
-                "git {} timed out after {}s",
-                args.first().copied().unwrap_or_default(),
-                timeout.as_secs()
-            )
-        })?
+    let child = command
+        .spawn()
         .map_err(|error| format!("git could not run: {error}"))?;
-    if output.status.success() {
-        return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(redact::credentials(&first_line(&stderr)))
+    capture(child, timeout, args.first().copied().unwrap_or_default()).await
 }
 
 pub fn first_line(stderr: &str) -> String {
@@ -275,10 +377,16 @@ pub fn mirror_dir(cache: &Path, url: &str) -> PathBuf {
     cache.join(format!("{safe}-{:016x}.git", fnv1a(url)))
 }
 
-pub fn parse_log(text: &str) -> Vec<GitCommit> {
-    text.split(RECORD)
+pub fn parse_log(text: &str, output_truncated: bool) -> Vec<GitCommit> {
+    let records: Vec<&str> = text
+        .split(RECORD)
         .filter(|record| !record.trim().is_empty())
-        .filter_map(|record| {
+        .collect();
+    let last = records.len().saturating_sub(1);
+    records
+        .into_iter()
+        .enumerate()
+        .filter_map(|(ix, record)| {
             let (header, patch) = record.split_once('\n').unwrap_or((record, ""));
             let mut fields = header.split(FIELD);
             let sha = fields.next()?.trim().to_owned();
@@ -287,12 +395,14 @@ pub fn parse_log(text: &str) -> Vec<GitCommit> {
             let subject = fields.next().unwrap_or_default().to_owned();
             let time = Timestamp::from_second(seconds).ok()?;
             let valid = !sha.is_empty() && sha.chars().all(|c| c.is_ascii_hexdigit());
-            valid.then(|| GitCommit {
+            let (files, clipped) = parse_patch(patch);
+            valid.then_some(GitCommit {
                 sha,
                 author,
                 time,
                 subject,
-                files: parse_patch(patch),
+                files,
+                truncated: clipped || (output_truncated && ix == last),
             })
         })
         .collect()
@@ -314,12 +424,27 @@ fn hunk_start(line: &str) -> Option<Cursor> {
     })
 }
 
-pub fn parse_patch(text: &str) -> Vec<FilePatch> {
+fn clip(text: &str) -> (String, bool) {
+    if text.len() <= MAX_LINE_BYTES {
+        return (text.to_owned(), false);
+    }
+    let end = text.floor_char_boundary(MAX_LINE_BYTES);
+    (text.get(..end).unwrap_or_default().to_owned(), true)
+}
+
+pub fn parse_patch(text: &str) -> (Vec<FilePatch>, bool) {
     let mut files: Vec<FilePatch> = Vec::new();
     let mut cursor: Option<Cursor> = None;
+    let mut truncated = false;
+    let mut skipping = false;
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("diff --git ") {
             cursor = None;
+            if files.len() >= MAX_FILES {
+                truncated = true;
+                skipping = true;
+                continue;
+            }
             let path = rest
                 .split_once(" b/")
                 .map_or(rest, |(_, new)| new)
@@ -328,6 +453,9 @@ pub fn parse_patch(text: &str) -> Vec<FilePatch> {
                 path,
                 lines: Vec::new(),
             });
+            continue;
+        }
+        if skipping {
             continue;
         }
         if let Some(start) = hunk_start(line) {
@@ -350,17 +478,20 @@ pub fn parse_patch(text: &str) -> Vec<FilePatch> {
         } else {
             continue;
         };
-        if file.lines.len() < MAX_FILE_LINES {
-            file.lines.push(PatchLine {
-                change,
-                number,
-                text: text.to_owned(),
-                note: None,
-            });
+        if file.lines.len() >= MAX_FILE_LINES {
+            truncated = true;
+            continue;
         }
+        let (text, clipped) = clip(text);
+        truncated |= clipped;
+        file.lines.push(PatchLine {
+            change,
+            number,
+            text,
+            note: None,
+        });
     }
-    files.truncate(MAX_FILES);
-    files
+    (files, truncated)
 }
 
 #[cfg(test)]
@@ -432,7 +563,7 @@ mod tests {
 
     #[test]
     fn log_parses_commits_and_numbered_patch_lines() {
-        let commits = parse_log(LOG);
+        let commits = parse_log(LOG, false);
         assert_eq!(commits.len(), 2);
         let release = &commits[0];
         assert_eq!(release.sha, "3e0ff8ae123b");
@@ -502,6 +633,7 @@ mod tests {
             time: Timestamp::UNIX_EPOCH,
             subject: String::new(),
             files: Vec::new(),
+            truncated: false,
         };
         let ready = MirrorState::Ready {
             commits: vec![commit],
@@ -509,13 +641,225 @@ mod tests {
         };
         let known = BTreeSet::from(["abc".to_owned()]);
         let unknown = BTreeSet::from(["def".to_owned()]);
-        assert!(needs_fetch(None, &known, false));
-        assert!(!needs_fetch(Some(&ready), &known, false));
-        assert!(needs_fetch(Some(&ready), &unknown, false));
-        assert!(needs_fetch(Some(&ready), &known, true));
+        assert!(needs_fetch(None, &known, None, false));
+        assert!(!needs_fetch(Some(&ready), &known, Some(&known), false));
+        assert!(needs_fetch(Some(&ready), &unknown, Some(&known), false));
+        assert!(needs_fetch(Some(&ready), &known, Some(&known), true));
         let failed = MirrorState::Unavailable("auth".to_owned());
-        assert!(!needs_fetch(Some(&failed), &unknown, false));
-        assert!(needs_fetch(Some(&failed), &unknown, true));
+        assert!(!needs_fetch(Some(&failed), &unknown, Some(&known), false));
+        assert!(needs_fetch(Some(&failed), &unknown, Some(&known), true));
+    }
+
+    #[test]
+    fn an_unresolved_revision_waits_for_the_interval() {
+        let ready = MirrorState::Ready {
+            commits: Vec::new(),
+            fetched: Timestamp::UNIX_EPOCH,
+        };
+        let pinned = BTreeSet::from(["old".to_owned()]);
+        let advanced = BTreeSet::from(["old".to_owned(), "new".to_owned()]);
+        assert!(!needs_fetch(Some(&ready), &pinned, Some(&pinned), false));
+        assert!(needs_fetch(Some(&ready), &advanced, Some(&pinned), false));
+        assert!(needs_fetch(Some(&ready), &pinned, Some(&pinned), true));
+    }
+
+    fn key(url: &str) -> RepoKey {
+        RepoKey {
+            url: url.to_owned(),
+            branch: "main".to_owned(),
+        }
+    }
+
+    fn ready() -> MirrorState {
+        MirrorState::Ready {
+            commits: Vec::new(),
+            fetched: Timestamp::UNIX_EPOCH,
+        }
+    }
+
+    struct Fake {
+        states: States,
+        wanted: watch::Sender<Wanted>,
+        calls: Arc<Mutex<Vec<RepoKey>>>,
+        peak: Arc<std::sync::atomic::AtomicUsize>,
+        _task: TaskGuard,
+    }
+
+    fn fake(delay: fn(&RepoKey) -> Duration) -> Fake {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let states: States = Arc::new(Mutex::new(BTreeMap::new()));
+        let (wanted, receiver) = watch::channel(Wanted::new());
+        let (changed, _) = async_channel::unbounded();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let fetch = {
+            let calls = calls.clone();
+            let peak = peak.clone();
+            move |key: RepoKey| {
+                lock(&calls).push(key.clone());
+                let active = active.clone();
+                let peak = peak.clone();
+                let wait = delay(&key);
+                async move {
+                    let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(now, Ordering::SeqCst);
+                    tokio::time::sleep(wait).await;
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    ready()
+                }
+            }
+        };
+        let task = TaskGuard::spawn(mirror(fetch, receiver, states.clone(), changed));
+        Fake {
+            states,
+            wanted,
+            calls,
+            peak,
+            _task: task,
+        }
+    }
+
+    const SLOW: &str = "https://example.test/slow";
+    const FAST: &str = "https://example.test/fast";
+    const FAST_FETCH: Duration = Duration::from_secs(1);
+    const SLOW_FETCH: Duration = Duration::from_secs(100);
+
+    fn by_name(key: &RepoKey) -> Duration {
+        if key.url == SLOW {
+            SLOW_FETCH
+        } else {
+            FAST_FETCH
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_slow_repo_does_not_hold_back_a_fast_one() {
+        let mirrors = fake(by_name);
+        let wanted = Wanted::from([(key(SLOW), BTreeSet::new()), (key(FAST), BTreeSet::new())]);
+        mirrors.wanted.send_replace(wanted);
+        tokio::time::sleep(FAST_FETCH * 2).await;
+        let states = lock(&mirrors.states).clone();
+        assert_eq!(states.get(&key(FAST)), Some(&ready()));
+        assert_eq!(states.get(&key(SLOW)), Some(&MirrorState::Fetching));
+        tokio::time::sleep(SLOW_FETCH).await;
+        assert_eq!(lock(&mirrors.states).get(&key(SLOW)), Some(&ready()));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn fetches_run_together_up_to_the_limit() {
+        let mirrors = fake(|_| FAST_FETCH);
+        let repos = FETCH_LIMIT + 2;
+        let wanted: Wanted = (0..repos)
+            .map(|ix| (key(&format!("https://example.test/{ix}")), BTreeSet::new()))
+            .collect();
+        mirrors.wanted.send_replace(wanted);
+        tokio::time::sleep(FAST_FETCH * 3).await;
+        let states = lock(&mirrors.states).clone();
+        assert_eq!(states.len(), repos);
+        assert!(states.values().all(|state| *state == ready()));
+        assert_eq!(
+            mirrors.peak.load(std::sync::atomic::Ordering::SeqCst),
+            FETCH_LIMIT
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn other_repos_changing_do_not_refetch_an_unresolved_revision() {
+        let mirrors = fake(|_| FAST_FETCH);
+        let pinned = (key(SLOW), BTreeSet::from(["old".to_owned()]));
+        for revision in ["a", "b", "c"] {
+            let advancing = (key(FAST), BTreeSet::from([revision.to_owned()]));
+            mirrors
+                .wanted
+                .send_replace(Wanted::from([pinned.clone(), advancing]));
+            tokio::time::sleep(FAST_FETCH * 2).await;
+        }
+        let calls = lock(&mirrors.calls).clone();
+        let pinned_fetches = calls.iter().filter(|called| **called == key(SLOW)).count();
+        let advancing_fetches = calls.iter().filter(|called| **called == key(FAST)).count();
+        assert_eq!(pinned_fetches, 1);
+        assert_eq!(advancing_fetches, 3);
+    }
+
+    #[test]
+    fn patches_stop_at_file_line_and_byte_budgets() {
+        let many = (0..=MAX_FILES)
+            .map(|ix| format!("diff --git a/f{ix} b/f{ix}\n@@ -1 +1 @@\n+x\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        let (files, truncated) = parse_patch(&many);
+        assert_eq!(files.len(), MAX_FILES);
+        assert!(truncated);
+
+        let mut long = String::from("diff --git a/big b/big\n@@ -1 +1 @@\n");
+        for _ in 0..=MAX_FILE_LINES {
+            long.push_str("+line\n");
+        }
+        let (files, truncated) = parse_patch(&long);
+        assert_eq!(files.first().map(|f| f.lines.len()), Some(MAX_FILE_LINES));
+        assert!(truncated);
+
+        let wide = format!(
+            "diff --git a/w b/w\n@@ -1 +1 @@\n+{}\n",
+            "é".repeat(MAX_LINE_BYTES)
+        );
+        let (files, truncated) = parse_patch(&wide);
+        let text = files
+            .first()
+            .and_then(|f| f.lines.first())
+            .map(|l| l.text.clone())
+            .unwrap_or_default();
+        assert!(text.len() <= MAX_LINE_BYTES && !text.is_empty());
+        assert!(truncated);
+
+        let (_, small) = parse_patch("diff --git a/s b/s\n@@ -1 +1 @@\n+ok\n");
+        assert!(!small);
+    }
+
+    #[test]
+    fn truncated_output_marks_its_last_commit() {
+        let commits = parse_log(LOG, true);
+        let marks: Vec<bool> = commits.iter().map(|c| c.truncated).collect();
+        assert_eq!(marks, [false, true]);
+    }
+
+    #[tokio::test]
+    async fn endless_output_is_cut_at_the_budget() {
+        let Ok(child) = Command::new("yes")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+        else {
+            panic!("spawn yes");
+        };
+        let captured = capture(child, Duration::from_secs(30), "yes").await;
+        let Ok(captured) = captured else {
+            panic!("capture failed");
+        };
+        assert!(captured.truncated);
+        assert_eq!(captured.text.len(), MAX_OUTPUT_BYTES);
+    }
+
+    #[tokio::test]
+    async fn noisy_stderr_is_bounded() {
+        let Ok(child) = Command::new("sh")
+            .args(["-c", "head -c 1000000 /dev/zero | tr '\\0' x >&2; exit 1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+        else {
+            panic!("spawn sh");
+        };
+        let captured = capture(child, Duration::from_secs(30), "sh").await;
+        let Err(reason) = captured else {
+            panic!("failure expected");
+        };
+        assert_eq!(reason.len(), MAX_STDERR_BYTES);
     }
 
     #[test]

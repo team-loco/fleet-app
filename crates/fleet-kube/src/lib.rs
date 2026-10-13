@@ -9,6 +9,8 @@ pub mod detail;
 pub mod discovery;
 pub mod error;
 pub mod failure;
+#[cfg(test)]
+mod fake;
 pub mod flux;
 pub mod gitops;
 pub mod inspect;

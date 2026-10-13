@@ -1081,8 +1081,10 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
         sources,
         store,
     } = backend;
-    let env = Arc::new(capture(&user_shell(), settings.shell_env_timeout).await);
-    let discovery = scan(&sources).await;
+    let shell = user_shell();
+    let (env, discovery) =
+        tokio::join!(capture(&shell, settings.shell_env_timeout), scan(&sources));
+    let env = Arc::new(env);
     let (mut _watcher, mut discovery_events) = watch_kubeconfigs(&sources, &discovery, &settings);
     let runtime = tokio::runtime::Handle::current();
     let (fetched, fetched_events) = async_channel::unbounded();

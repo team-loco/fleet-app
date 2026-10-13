@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use futures::future::join_all;
 use k8s_openapi::api::authentication::v1::SelfSubjectReview;
 use k8s_openapi::api::authorization::v1::{
     ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
@@ -227,23 +228,21 @@ pub fn prometheus_target(service: &Service) -> Option<PrometheusTarget> {
     })
 }
 
+async fn prometheus_in(client: &Client, namespace: &str) -> Option<PrometheusTarget> {
+    let api: Api<Service> = Api::namespaced(client.clone(), namespace);
+    let services = api.list(&ListParams::default()).await.ok()?;
+    let mut found: Vec<PrometheusTarget> = services
+        .items
+        .iter()
+        .filter_map(prometheus_target)
+        .collect();
+    found.sort_by_key(|target| target.service.len());
+    found.into_iter().next()
+}
+
 pub async fn find_prometheus(client: &Client) -> Option<PrometheusTarget> {
-    for namespace in PROMETHEUS_NAMESPACES {
-        let api: Api<Service> = Api::namespaced(client.clone(), namespace);
-        let Ok(services) = api.list(&ListParams::default()).await else {
-            continue;
-        };
-        let mut found: Vec<PrometheusTarget> = services
-            .items
-            .iter()
-            .filter_map(prometheus_target)
-            .collect();
-        found.sort_by_key(|target| target.service.len());
-        if let Some(target) = found.into_iter().next() {
-            return Some(target);
-        }
-    }
-    None
+    let lookups = PROMETHEUS_NAMESPACES.map(|namespace| prometheus_in(client, namespace));
+    join_all(lookups).await.into_iter().flatten().next()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

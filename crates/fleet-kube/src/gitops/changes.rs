@@ -14,6 +14,7 @@ use super::convert::{Parsed, elapsed};
 use super::git::{GitCommit, MirrorState, RepoKey};
 
 const AS_COMMITTED: &str = "Source change as committed.";
+const TRUNCATED: &str = "Source change as committed; the diff is too large to show in full.";
 const LANE_SHORT_MAX: usize = 4;
 const LANE_SEPARATOR: char = '-';
 const DEFAULT_BRANCH: &str = "master";
@@ -248,7 +249,12 @@ fn commit(
         rollout,
         views: vec![Rendering {
             kind: ViewKind::Source,
-            note: AS_COMMITTED.to_owned(),
+            note: if commit.truncated {
+                TRUNCATED
+            } else {
+                AS_COMMITTED
+            }
+            .to_owned(),
             files: commit.files.clone(),
         }],
     })
@@ -435,6 +441,7 @@ mod tests {
                     .unwrap_or(Timestamp::UNIX_EPOCH),
                 subject: "Release v6.15.0".to_owned(),
                 files: Vec::new(),
+                truncated: false,
             },
             GitCommit {
                 sha: "1111111aaaa".to_owned(),
@@ -444,6 +451,7 @@ mod tests {
                     .unwrap_or(Timestamp::UNIX_EPOCH),
                 subject: "older".to_owned(),
                 files: Vec::new(),
+                truncated: false,
             },
         ];
         let repo = Repo {
