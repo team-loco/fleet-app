@@ -1,0 +1,26 @@
+{
+  "apiVersion": "source.toolkit.fluxcd.io/v1",
+  "kind": "GitRepository",
+  "metadata": {
+    "name": "fleet-infra",
+    "namespace": "flux-system",
+    "generation": 2
+  },
+  "spec": {
+    "interval": "1m",
+    "url": "ssh://git@github.com/acme/fleet-infra"
+  },
+  "status": {
+    "observedGeneration": 2,
+    "conditions": [
+      {
+        "type": "Ready",
+        "status": "False",
+        "reason": "GitOperationFailed",
+        "message": "authentication required",
+        "observedGeneration": 2,
+        "lastTransitionTime": "2026-10-12T18:11:00Z"
+      }
+    ]
+  }
+}

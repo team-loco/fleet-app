@@ -1,0 +1,52 @@
+{
+  "apiVersion": "kustomize.toolkit.fluxcd.io/v1",
+  "kind": "Kustomization",
+  "metadata": {
+    "name": "apps-payments",
+    "namespace": "flux-system",
+    "generation": 2
+  },
+  "spec": {
+    "interval": "5m",
+    "path": "./apps/payments",
+    "prune": true,
+    "sourceRef": {
+      "kind": "GitRepository",
+      "name": "fleet-infra"
+    },
+    "dependsOn": [
+      {
+        "name": "infra-controllers",
+        "readyExpr": "dep.status.observedGeneration == dep.metadata.generation"
+      }
+    ]
+  },
+  "status": {
+    "observedGeneration": 2,
+    "lastAppliedRevision": "main@sha1:a41e07c",
+    "lastAttemptedRevision": "main@sha1:a41e07c",
+    "lastHandledReconcileAt": "2026-10-12T18:11:00Z",
+    "conditions": [
+      {
+        "type": "Ready",
+        "status": "True",
+        "reason": "ReconciliationSucceeded",
+        "message": "Applied revision main@sha1:a41e07c",
+        "observedGeneration": 2,
+        "lastTransitionTime": "2026-10-12T18:11:00Z"
+      }
+    ],
+    "inventory": {
+      "entries": [
+        {
+          "id": "payments_checkout-api_apps_Deployment",
+          "v": "v1"
+        },
+        {
+          "id": "_payments__Namespace",
+          "v": "v1"
+        }
+      ]
+    }
+  }
+}
