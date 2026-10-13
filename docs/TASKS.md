@@ -7,7 +7,7 @@ Spec column points at `design/`.
 
 | id | unit | spec | owner | branch | status |
 |---|---|---|---|---|---|
-| P0 | workspace, mise tasks, lefthook, CI, fleet-core contract, theme tokens, window shell (strip, two panels, page header, status bar) on demo data | HANDOFF.md, Nav, StatusBar | | | todo |
+| P0 | workspace, mise tasks, lefthook, CI, fleet-core contract, theme tokens, window shell (strip, two panels, page header, status bar) on demo data | HANDOFF.md, Nav, StatusBar | claude | p0-scaffold | done (#2) |
 
 ## Phase 1 — foundations (parallel)
 

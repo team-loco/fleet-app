@@ -1,0 +1,22 @@
+[package]
+name = "fleet-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+loco = ["fleet-core/loco"]
+
+[dependencies]
+async-channel.workspace = true
+fleet-core.workspace = true
+gpui.workspace = true
+gpui-component.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

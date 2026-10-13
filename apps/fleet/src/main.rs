@@ -1,0 +1,142 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use anyhow::Context as _;
+use clap::{Parser, ValueEnum};
+use fleet_core::{Backend, ClusterId, Command, Page};
+use fleet_demo::DemoBackend;
+use fleet_ui::actions::{ToggleClustersPanel, ToggleResourcesPanel};
+use fleet_ui::theme::{Appearance, TRAFFIC_LIGHT_X, TRAFFIC_LIGHT_Y};
+use fleet_ui::{Root, Shell, assets};
+use gpui::{
+    App, AppContext as _, Bounds, KeyBinding, Size, TitlebarOptions, WindowBounds, WindowOptions,
+    point, px, size,
+};
+use tracing_subscriber::EnvFilter;
+
+const WINDOW_WIDTH: f32 = 1440.;
+const WINDOW_HEIGHT: f32 = 900.;
+const MIN_WIDTH: f32 = 720.;
+const MIN_HEIGHT: f32 = 480.;
+const SAMPLE_CLUSTER: &str = "prod-us-east";
+
+gpui::actions!(fleet, [Quit]);
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "fleet",
+    about = "Watch many Kubernetes clusters at once",
+    version
+)]
+struct Args {
+    #[arg(long)]
+    demo: bool,
+    #[arg(long, value_enum, default_value_t = Screen::Fleet)]
+    screen: Screen,
+    #[arg(long, value_enum)]
+    appearance: Option<AppearanceArg>,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum Screen {
+    Fleet,
+    Cluster,
+    Collapsed,
+}
+
+impl Screen {
+    fn commands(self) -> Vec<Command> {
+        let sample = Command::SelectCluster(Some(ClusterId::new(SAMPLE_CLUSTER)));
+        match self {
+            Self::Fleet => vec![Command::SelectPage(Page::Overview)],
+            Self::Cluster => vec![sample],
+            Self::Collapsed => vec![
+                sample,
+                Command::ToggleClustersPanel,
+                Command::ToggleResourcesPanel,
+            ],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum AppearanceArg {
+    Dark,
+    Light,
+}
+
+impl From<AppearanceArg> for Appearance {
+    fn from(arg: AppearanceArg) -> Self {
+        match arg {
+            AppearanceArg::Dark => Self::Dark,
+            AppearanceArg::Light => Self::Light,
+        }
+    }
+}
+
+fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .init();
+    let args = Args::parse();
+    if !args.demo {
+        tracing::info!("live backend not available yet, serving demo data");
+    }
+    let (update_tx, update_rx) = async_channel::unbounded();
+    let (command_tx, command_rx) = async_channel::unbounded();
+    Box::new(DemoBackend).start(update_tx, command_rx);
+
+    let forced = args.appearance.map(Appearance::from);
+    let initial = args.screen.commands();
+    let failure = Rc::new(RefCell::new(None));
+    let failed = failure.clone();
+    gpui_platform::application()
+        .with_assets(assets::Assets)
+        .run(move |cx: &mut App| {
+            if let Err(error) = launch(cx, forced, update_rx, command_tx, initial) {
+                failed.replace(Some(error));
+                cx.quit();
+            }
+        });
+    failure.take().map_or(Ok(()), Err)
+}
+
+fn launch(
+    cx: &mut App,
+    forced: Option<Appearance>,
+    updates: async_channel::Receiver<fleet_core::Update>,
+    commands: async_channel::Sender<Command>,
+    initial: Vec<Command>,
+) -> anyhow::Result<()> {
+    fleet_ui::init(forced, cx)?;
+    cx.bind_keys([
+        KeyBinding::new("cmd-shift-b", ToggleClustersPanel, None),
+        KeyBinding::new("cmd-b", ToggleResourcesPanel, None),
+        KeyBinding::new("cmd-q", Quit, None),
+    ]);
+    cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.on_window_closed(|cx, _| cx.quit()).detach();
+
+    let window_size = size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT));
+    let bounds = Bounds::centered(None, window_size, cx);
+    let options = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        titlebar: Some(TitlebarOptions {
+            title: None,
+            appears_transparent: true,
+            traffic_light_position: Some(point(TRAFFIC_LIGHT_X, TRAFFIC_LIGHT_Y)),
+        }),
+        window_min_size: Some(Size {
+            width: px(MIN_WIDTH),
+            height: px(MIN_HEIGHT),
+        }),
+        ..WindowOptions::default()
+    };
+    cx.open_window(options, |window, cx| {
+        let shell = cx.new(|cx| Shell::new(updates, commands, initial, window, cx));
+        cx.new(|cx| Root::new(shell, window, cx))
+    })
+    .context("opening the Fleet window")?;
+    cx.activate(true);
+    Ok(())
+}

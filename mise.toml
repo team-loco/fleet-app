@@ -13,3 +13,49 @@ helm = "4.3.0"
 
 [settings]
 cargo.binstall = true
+
+[tasks.build]
+description = "Build the workspace"
+run = "cargo build --workspace"
+
+[tasks.run]
+description = "Run Fleet against your kubeconfig"
+run = "cargo run -p fleet"
+
+[tasks.demo]
+description = "Run Fleet on the design's sample data"
+run = "cargo run -p fleet -- --demo"
+
+[tasks."run:loco"]
+description = "Run Fleet with Loco support on sample data"
+run = "cargo run -p fleet --features loco -- --demo"
+
+[tasks.fmt]
+description = "Check formatting"
+run = "cargo fmt --all --check"
+
+[tasks.lint]
+description = "Clippy with warnings denied, with and without Loco"
+run = [
+  "cargo clippy --workspace --all-targets -- -D warnings",
+  "cargo clippy --workspace --all-targets --features fleet/loco -- -D warnings",
+]
+
+[tasks.test]
+description = "Run tests with and without Loco"
+run = [
+  "cargo nextest run --workspace --no-tests=pass",
+  "cargo nextest run --workspace --no-tests=pass --features fleet/loco",
+]
+
+[tasks.typos]
+description = "Spell check"
+run = "typos"
+
+[tasks.deny]
+description = "Check licenses, advisories and sources"
+run = "cargo deny check licenses bans sources"
+
+[tasks.check]
+description = "Everything a PR needs"
+depends = ["fmt", "lint", "test", "typos", "deny"]
