@@ -111,6 +111,7 @@ pub enum Screen {
     Namespaces,
     Events,
     Resources,
+    ResourceInspector,
     Gitops,
     Compare,
     ClusterSettings,
@@ -152,6 +153,16 @@ impl Screen {
             Self::Namespaces => vec![sample, Command::SelectPage(Page::Namespaces)],
             Self::Events => vec![sample, Command::SelectPage(Page::Events)],
             Self::Resources => vec![sample, Command::SelectPage(Page::Deployments)],
+            Self::ResourceInspector => {
+                let object = preset.object_or(SAMPLE_NAMESPACE, "checkout-api-config");
+                let target = ResourceRef {
+                    cluster,
+                    kind: "ConfigMap".into(),
+                    namespace: Some(object.namespace),
+                    name: object.name,
+                };
+                vec![Command::OpenResource(target)]
+            }
             Self::Gitops => vec![Command::SelectPage(Page::GitOps)],
             Self::Compare => vec![Command::Compare(preset.deployment())],
             Self::ClusterSettings => vec![Command::ShowClusterSettings(cluster)],
@@ -241,6 +252,7 @@ pub fn root_view(
         Screen::Namespaces => shell_view(store, screen, preset, window, cx),
         Screen::Events => shell_view(store, screen, preset, window, cx),
         Screen::Resources => shell_view(store, screen, preset, window, cx),
+        Screen::ResourceInspector => shell_view(store, screen, preset, window, cx),
         Screen::AddCluster => shell_view(store, screen, preset, window, cx),
         Screen::AddClusterCheck => shell_view(store, screen, preset, window, cx),
         Screen::Gitops => shell_view(store, screen, preset, window, cx),

@@ -93,6 +93,10 @@ impl RenderOnce for Modal {
                 ),
             );
         let panel = div()
+            .debug_selector({
+                let id = self.id.to_string();
+                move || id.clone()
+            })
             .id(self.id)
             .w(self.width)
             .max_w(viewport.width - SPACE_8 * BOTH_SIDES)

@@ -104,6 +104,9 @@ pub const CHECKBOX_TICK: Pixels = px(10.);
 
 pub const KV_LABEL: Pixels = px(72.);
 pub const INSPECTOR: Pixels = px(360.);
+pub const INSPECTOR_MIN: Pixels = px(280.);
+pub const INSPECTOR_MAX: Pixels = px(900.);
+pub const CODE_HEIGHT: Pixels = px(400.);
 pub const DOCK_HEIGHT: Pixels = px(250.);
 pub const DOCK_BAR: Pixels = px(30.);
 pub const SPLITTER: Pixels = px(5.);

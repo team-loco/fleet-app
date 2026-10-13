@@ -11,8 +11,8 @@ use fleet_ui::{NewWindowRequest, Root, Shell, Store, assets::Assets};
 use gpui::{
     AnyView, AnyWindowHandle, App, AppContext, Bounds, Entity, HeadlessAppContext, Keystroke,
     Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput,
-    PlatformTextSystem, Point, Size, TestAppContext, TestDispatcher, VisualTestContext, Window, px,
-    size,
+    PlatformTextSystem, Point, ScrollDelta, ScrollWheelEvent, Size, TestAppContext, TestDispatcher,
+    VisualTestContext, Window, px, size,
 };
 use image::RgbaImage;
 
@@ -96,6 +96,7 @@ enum Step {
         count: usize,
     },
     Hover(Point<Pixels>),
+    Scroll(Point<Pixels>, Point<Pixels>),
     Drag {
         from: Point<Pixels>,
         to: Point<Pixels>,
@@ -152,6 +153,16 @@ fn apply(step: &Step, window: &mut Window, cx: &mut App) -> anyhow::Result<()> {
                 window.dispatch_event(mouse_down(*at, *button, count), cx);
                 window.dispatch_event(mouse_up(*at, *button, count), cx);
             }
+        }
+        Step::Scroll(position, delta) => {
+            window.dispatch_event(
+                PlatformInput::ScrollWheel(ScrollWheelEvent {
+                    position: *position,
+                    delta: ScrollDelta::Pixels(*delta),
+                    ..ScrollWheelEvent::default()
+                }),
+                cx,
+            );
         }
         Step::Hover(position) => {
             window.dispatch_event(mouse_move(*position, None), cx);
@@ -346,6 +357,13 @@ impl Ui {
             from,
             to: from + by,
         })
+    }
+
+    pub fn scroll(&mut self, selector: &'static str, delta: Point<Pixels>) -> anyhow::Result<()> {
+        let bounds = self
+            .bounds(selector)
+            .ok_or_else(|| anyhow!("no element {selector:?}"))?;
+        self.run(Step::Scroll(bounds.center(), delta))
     }
 
     pub fn save_png(&self, path: &Path) -> anyhow::Result<()> {

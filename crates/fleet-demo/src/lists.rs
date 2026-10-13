@@ -959,6 +959,7 @@ const CHECKOUT_KEYS: &[&str] = &["STRIPE_API_KEY", "DATABASE_URL"];
 const APP_KEYS: &[&str] = &["DATABASE_URL", "API_TOKEN"];
 const CREDENTIAL_KEYS: &[&str] = &["username", "password"];
 const CONFIG_KEYS: &[&str] = &["app.yaml", "logging.yaml"];
+const CHECKOUT_CONFIG: &str = "  app.yaml: |\n    server:\n      port: 8080\n      host: 0.0.0.0\n      readTimeout: 30s\n      writeTimeout: 30s\n    telemetry:\n      endpoint: https://otel-collector.monitoring.svc.cluster.local:4318/v1/traces?service=checkout-api&environment=production&region=us-east-1\n      enabled: true\n      service: checkout-api\n      region: us-east-1\n      environment: production\n      sampling: 1.0\n    database:\n      host: payments-db.payments.svc.cluster.local\n      port: 5432\n      name: checkout\n      sslMode: require\n      maxConnections: 20\n      connectTimeout: 10s\n    retries:\n      attempts: 3\n      initialDelay: 100ms\n      maxDelay: 5s\n    health:\n      path: /healthz\n      interval: 10s";
 const ROOT_CA_KEYS: &[&str] = &["ca.crt"];
 const CHECKOUT: &str = "checkout-api";
 
@@ -1325,9 +1326,13 @@ fn configmaps() -> Vec<Resource> {
     let roots = NAMESPACES
         .iter()
         .map(|ns| keyed(kind, ns, "kube-root-ca.crt", None, ROOT_CA_KEYS));
-    let apps = DEPLOYMENTS
-        .iter()
-        .map(|d| keyed(kind, d.ns, &format!("{}-config", d.name), None, CONFIG_KEYS));
+    let apps = DEPLOYMENTS.iter().map(|d| {
+        let mut resource = keyed(kind, d.ns, &format!("{}-config", d.name), None, CONFIG_KEYS);
+        if d.name == CHECKOUT {
+            resource.yaml = resource.yaml.replace("  app.yaml: ••••••", CHECKOUT_CONFIG);
+        }
+        resource
+    });
     let extras = EXTRA_CONFIGMAPS
         .iter()
         .map(|(ns, name, keys)| keyed(kind, ns, name, None, keys));

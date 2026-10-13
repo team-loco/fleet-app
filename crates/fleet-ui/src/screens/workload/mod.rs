@@ -14,9 +14,9 @@ use gpui::{
 
 use crate::kit::status_symbols;
 use crate::kit::{
-    ActionMenu, CodeView, Column, ConfirmDialog, DockState, KeyValue, Link, LogView, MenuItem,
-    PageHeader, Rule, SectionHeader, SectionLabel, Segmented, StatusText, Table, TableEvent,
-    Terminal, TextFieldState, Toast, Width, confirm, min_row_width, slide_in, toast,
+    ActionMenu, CodeView, Column, ConfirmDialog, DockState, InspectorPane, KeyValue, Link, LogView,
+    MenuItem, PageHeader, Rule, SectionHeader, SectionLabel, Segmented, StatusText, Table,
+    TableEvent, Terminal, TextFieldState, Toast, Width, confirm, min_row_width, slide_in, toast,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, LINE_PROSE, Palette, RADIUS, ROW_TABLE, RULE, SPACE_1, SPACE_2,
@@ -469,12 +469,12 @@ impl WorkloadScreen {
                     .text_color(palette.mute)
                     .child(YAML_NOTE),
             );
-        div()
+        let content = div()
             .id("workload-yaml")
             .flex()
             .flex_col()
             .flex_none()
-            .w(YAML_INSPECTOR_WIDTH)
+            .w_full()
             .h_full()
             .overflow_y_scroll()
             .border_l(RULE)
@@ -487,6 +487,9 @@ impl WorkloadScreen {
                     .py(SPACE_5)
                     .child(CodeView::new("workload-yaml-code", yaml).yaml()),
             )
+            .into_any_element();
+        InspectorPane::new(INSPECTOR_ID, content)
+            .width(YAML_INSPECTOR_WIDTH)
             .into_any_element()
     }
 
@@ -519,12 +522,12 @@ impl WorkloadScreen {
         let env = self
             .selected_container()
             .map(|spec| env_section(&spec.env, &palette));
-        div()
+        let content = div()
             .id("inspector")
             .flex()
             .flex_col()
             .flex_none()
-            .w(INSPECTOR_WIDTH)
+            .w_full()
             .h_full()
             .overflow_y_scroll()
             .border_l(RULE)
@@ -533,7 +536,8 @@ impl WorkloadScreen {
             .text_size(TEXT_BODY)
             .child(header)
             .children(spec)
-            .children(env)
+            .children(env);
+        InspectorPane::new(INSPECTOR_ID, content).width(INSPECTOR_WIDTH)
     }
 
     fn spec(&self, spec: &ContainerSpec, palette: &Palette) -> impl IntoElement {

@@ -376,6 +376,10 @@ CodeView::new("spec", yaml_text).yaml()     // line numbers, horizontal scroll, 
     .without_copy()
 ```
 
+Every code view has Soft wrap and Expand controls. Scrolling stays inside the view in both axes;
+line numbers stay fixed when scrolling horizontally and follow their lines vertically. Expand
+opens YAML across the window; Esc or × returns focus to the page.
+
 YAML highlighting is deliberately minimal: keys `acc`, comments and punctuation `mute`, values `fg`.
 
 ```rust
@@ -424,6 +428,11 @@ Inspector::new("node-inspector", "ip-10-4-31-12")
     .section(Some("Conditions"), conditions)
     .width(px(480.))                       // default `theme::INSPECTOR` (360)
 ```
+
+Drag the left edge to resize between `theme::INSPECTOR_MIN` and `INSPECTOR_MAX`; double-click
+resets to the builder width. Width is saved per inspector id in the existing app settings (`settings.json` in the Fleet data
+dir). Custom panel layouts use `InspectorPane::new("kind", content).width(initial_width)` to get
+the same behavior.
 
 Inspectors that come and go animate with `Presence` (keep it in the screen) and the slide helpers:
 
