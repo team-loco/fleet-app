@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kustomization apps-payments — prod-us-east</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.hv:hover{background:var(--hover)}
+.mi:hover{background:var(--hover)}
+</style>
+</helmet>
+<div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--editor);width:100%;height:900px;display:flex;flex-direction:column;overflow:hidden">
+  <div style="flex:1;min-height:0;display:flex;flex-wrap:wrap">
+    <div style="flex:0 0 auto;display:flex"><dc-import name="Nav" theme="{{theme}}" mode="cluster" active="kustomizations" clusters="{{ false }}" hint-size="224px,874px"></dc-import></div>
+    <div style="flex:999 1 560px;min-width:0;height:874px;display:flex;flex-wrap:wrap">
+      <div style="flex:999 1 520px;min-width:0;height:100%;overflow:auto">
+        <div style="padding:16px 16px 14px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <h1 style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600">apps-payments</h1>
+            <span style="font-size:12.5px;color:{{st.c}}">{{st.label}}</span>
+            <span style="flex:1"></span>
+            <button onClick="{{reconcile}}" style="height:24px;padding:0 10px;border:1px solid var(--acc);border-radius:3px;background:var(--acc);color:var(--onacc);font-family:inherit;font-size:12px;font-weight:500;display:flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap">Reconcile<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;opacity:.75">⌘R</span></button>
+            <div style="position:relative">
+              <button aria-label="More actions" aria-expanded="{{menuOpen}}" onClick="{{toggleMenu}}" style="height:24px;width:28px;border:1px solid var(--line2);border-radius:3px;background:{{menuBg}};color:var(--fg2);font-family:inherit;font-size:13px;cursor:pointer;padding:0">⋯</button>
+              <sc-if value="{{menuOpen}}" hint-placeholder-val="{{ false }}">
+                <div role="menu" style="position:absolute;right:0;top:30px;width:320px;background:var(--panel);border:1px solid var(--line2);border-radius:4px;box-shadow:0 12px 32px var(--shadow);padding:4px;z-index:5">
+                  <sc-for list="{{menu}}" as="m" hint-placeholder-count="4">
+                    <button role="menuitem" class="mi" style="display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:10px;row-gap:1px;width:100%;padding:6px 8px;border:0;border-radius:3px;background:transparent;text-align:left;font-family:inherit;cursor:pointer;color:var(--fg)">
+                      <span style="font-size:12.5px">{{m.label}}</span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">{{m.key}}</span>
+                      <span style="font-size:11.5px;color:var(--mute);grid-column:1 / 3">{{m.desc}}</span>
+                    </button>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+          <p style="margin:0;font-size:13px;line-height:1.5;color:var(--fg2)">{{st.pre}}<a href="Workload.dc.html" style="color:var(--acc);text-decoration:none;font-family:'IBM Plex Mono',monospace;font-size:12.5px">checkout-api</a>{{st.post}}</p>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--mute)">applied <a href="Changes.dc.html" style="color:var(--acc);text-decoration:none">a41e07c</a> 3h ago · last healthy <a href="Changes.dc.html" style="color:var(--acc);text-decoration:none">7c2d9e0</a> 1d ago</div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;padding:14px 16px 6px">
+          <h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Managed objects</h2>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">11</span>
+          <span style="flex:1"></span>
+          <div role="group" aria-label="Filter" style="display:flex;border:1px solid var(--line2);border-radius:3px;overflow:hidden">
+            <sc-for list="{{invFilters}}" as="f" hint-placeholder-count="3">
+              <button aria-pressed="{{f.pressed}}" onClick="{{f.pick}}" style="height:20px;padding:0 8px;border:0;font-family:inherit;font-size:11.5px;cursor:pointer;{{f.style}}">{{f.label}}</button>
+            </sc-for>
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+          <div style="min-width:640px;border-top:1px solid var(--line)">
+            <sc-for list="{{inventory}}" as="o" hint-placeholder-count="11">
+              <a class="hv" href="{{o.href}}" style="display:grid;grid-template-columns:14px 170px minmax(200px,1fr) minmax(160px,1fr);column-gap:12px;align-items:center;height:25px;padding:0 16px;border-bottom:1px solid var(--line);text-decoration:none;color:var(--fg);font-size:12.5px">
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:{{o.c}}">{{o.g}}</span>
+                <span style="color:var(--mute)">{{o.kind}}</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{o.name}}</span>
+                <span style="color:{{o.dc}};font-family:'IBM Plex Mono',monospace;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{o.detail}}</span>
+              </a>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:baseline;gap:8px;padding:16px 16px 6px">
+          <h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">History</h2>
+        </div>
+        <div style="overflow-x:auto;padding-bottom:16px">
+          <div style="min-width:640px;border-top:1px solid var(--line)">
+            <sc-for list="{{history}}" as="h" hint-placeholder-count="5">
+              <div style="display:grid;grid-template-columns:40px 14px 70px minmax(0,1fr) 34px;column-gap:12px;align-items:center;height:25px;padding:0 16px;border-bottom:1px solid var(--line);font-family:'IBM Plex Mono',monospace;font-size:12px">
+                <span style="color:var(--mute)">{{h.age}}</span>
+                <span style="color:{{h.c}};font-size:10.5px">{{h.g}}</span>
+                <span style="color:var(--acc)">{{h.rev}}</span>
+                <span style="color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{h.msg}}</span>
+                <span style="color:var(--mute);text-align:right">{{h.n}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+
+      <aside aria-label="Related" style="flex:1 1 300px;min-width:0;height:100%;overflow:auto;border-left:1px solid var(--line);background:var(--panel);font-size:12.5px">
+        <div style="padding:14px 12px 6px;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Other clusters</div>
+        <sc-for list="{{peers}}" as="p" hint-placeholder-count="4">
+          <div style="display:grid;grid-template-columns:12px 96px 64px minmax(0,1fr);column-gap:8px;align-items:center;height:24px;padding:0 12px;font-family:'IBM Plex Mono',monospace;font-size:12px">
+            <span style="color:{{p.c}};font-size:10.5px">{{p.g}}</span>
+            <span style="font-family:'IBM Plex Sans',sans-serif;font-size:12.5px">{{p.cluster}}</span>
+            <span style="color:var(--acc)">{{p.rev}}</span>
+            <span style="color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{p.note}}</span>
+          </div>
+        </sc-for>
+        <div style="padding:6px 12px 14px;color:var(--fg2);line-height:1.5;border-bottom:1px solid var(--line)">Healthy elsewhere at the same revision. <a href="Changes.dc.html" style="color:var(--acc);text-decoration:none">Compare rendered output →</a></div>
+
+        <div style="padding:14px 12px 6px;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Depends on</div>
+        <div style="padding:0 12px 14px;font-family:'IBM Plex Mono',monospace;font-size:12px;display:flex;flex-direction:column;gap:4px;border-bottom:1px solid var(--line)">
+          <span><span style="color:var(--ok);font-size:10.5px">●</span> infra-controllers</span>
+          <span><span style="color:var(--ok);font-size:10.5px">●</span> infra-configs</span>
+        </div>
+
+        <div style="padding:14px 12px 6px;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Spec</div>
+        <dl style="margin:0;padding:0 12px 14px;display:grid;grid-template-columns:64px minmax(0,1fr);row-gap:4px;column-gap:8px;font-family:'IBM Plex Mono',monospace;font-size:11.5px">
+          <dt style="color:var(--mute)">source</dt><dd style="margin:0;word-break:break-all">fleet-infra · main</dd>
+          <dt style="color:var(--mute)">path</dt><dd style="margin:0;word-break:break-all">apps/payments/overlays/prod-us-east</dd>
+          <dt style="color:var(--mute)">every</dt><dd style="margin:0">10m · timeout 5m · prune</dd>
+        </dl>
+      </aside>
+    </div>
+  </div>
+  <dc-import name="StatusBar" theme="{{theme}}" left="EKS · us-east-1 · v1.31.2 · flux v2.4.0" agent="4s ago" hint-size="100%,26px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"menu":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { reconciling: false, inv: 'all', menu: !!props.menu };
+  }
+  vars() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    const D = '--editor:#111317;--panel:#15181D;--chrome:#1A1D22;--raise:#20242A;--hover:#1D2127;--line:#262A30;--line2:#323740;--guide:#2A2E35;--fg:#DCDFE4;--fg2:#B3B9C3;--mute:#8E96A3;--sep:#4C525C;--sel:#1F2C40;--selfg:#F2F6FC;--selline:#3A5A8C;--acc:#74ADFF;--onacc:#0C1220;--ok:#48C78E;--warn:#E8B04B;--err:#F26D6D;--sus:#9AA2AE;--okbg:rgba(72,199,142,.10);--errbg:rgba(242,109,109,.11);--warnbg:rgba(232,176,75,.10);--accbg:rgba(116,173,255,.12);--addbg:rgba(72,199,142,.12);--delbg:rgba(242,109,109,.13);--addfg:#7FDDB2;--delfg:#FF9C9C;--shadow:rgba(0,0,0,.5);color-scheme:dark;';
+    const L = '--editor:#FFFFFF;--panel:#F6F7F8;--chrome:#EEEFF1;--raise:#E9EBEE;--hover:#F1F2F4;--line:#E1E3E7;--line2:#CFD3D9;--guide:#E4E6EA;--fg:#1D2027;--fg2:#3B414B;--mute:#5F6774;--sep:#A5ABB5;--sel:#DCE7FA;--selfg:#0D2850;--selline:#8DB0EA;--acc:#1F5FD1;--onacc:#FFFFFF;--ok:#167A4C;--warn:#935800;--err:#C53030;--sus:#6B7280;--okbg:rgba(22,122,76,.08);--errbg:rgba(197,48,48,.07);--warnbg:rgba(147,88,0,.08);--accbg:rgba(31,95,209,.08);--addbg:rgba(22,122,76,.10);--delbg:rgba(197,48,48,.09);--addfg:#0F5E3A;--delfg:#A12626;--shadow:rgba(20,24,32,.18);color-scheme:light;';
+    return { theme: t, vars: t === 'light' ? L : D };
+  }
+  renderVals() {
+    const v = this.vars();
+    const C = { ok: 'var(--ok)', err: 'var(--err)', warn: 'var(--warn)', sus: 'var(--sus)', prog: 'var(--acc)' };
+    const G = { ok: '●', err: '✕', warn: '▲', sus: '‖', prog: '◐' };
+    const st = this.state.reconciling
+      ? { label: '◐ Reconciling', c: 'var(--acc)', pre: 'Applying a41e07c, then waiting up to 5m for ', post: ' to become ready.' }
+      : { label: '✕ Failing', c: 'var(--err)', pre: '', post: ' did not become ready within the 5m health check. Retrying in 1m48s.' };
+    const O = (s, kind, name, detail, changed, href) => ({ s, changed: !!changed, g: G[s], c: C[s], kind, name, detail, dc: s === 'err' ? 'var(--err)' : 'var(--mute)', href: href || '#' });
+    const allInv = [
+      O('err', 'Deployment', 'payments/checkout-api', '2/3 ready', true, 'Workload.dc.html'),
+      O('ok', 'Deployment', 'payments/payments-worker', '2/2 ready'),
+      O('ok', 'StatefulSet', 'payments/payments-db', '1/1 ready'),
+      O('ok', 'Service', 'payments/checkout-api', 'ClusterIP'),
+      O('ok', 'ConfigMap', 'payments/checkout-api-config-8d7k2', '', true),
+      O('ok', 'ExternalSecret', 'payments/stripe', 'synced 4m ago'),
+      O('ok', 'HorizontalPodAutoscaler', 'payments/checkout-api', '3 of 3–12'),
+      O('ok', 'PodDisruptionBudget', 'payments/checkout-api', ''),
+      O('ok', 'ServiceAccount', 'payments/checkout-api', ''),
+      O('ok', 'NetworkPolicy', 'payments/default-deny', ''),
+      O('ok', 'Namespace', 'payments', '')
+    ];
+    const inv = this.state.inv;
+    const inventory = allInv.filter((o) => inv === 'all' || (inv === 'bad' ? o.s !== 'ok' : o.changed));
+    const invFilters = [['all', 'All'], ['bad', 'Unhealthy'], ['changed', 'Changed in a41e07c']].map((f) => ({
+      label: f[1], pressed: f[0] === inv ? 'true' : 'false',
+      style: f[0] === inv ? 'background:var(--sel);color:var(--selfg);' : 'background:transparent;color:var(--fg2);',
+      pick: () => this.setState({ inv: f[0] })
+    }));
+    const H = (age, s, rev, msg, n) => ({ age, g: G[s], c: C[s], rev, msg, n: n ? '×' + n : '' });
+    const history = (this.state.reconciling ? [H('now', 'prog', 'a41e07c', 'reconcile requested')] : []).concat([
+      H('4m', 'err', 'a41e07c', 'health check timed out: checkout-api', '18'),
+      H('3h', 'ok', 'a41e07c', 'applied · checkout-api, checkout-api-config configured'),
+      H('1d', 'ok', '7c2d9e0', 'applied · no changes', '142')
+    ]);
+    const P = (s, cluster, rev, note) => ({ g: G[s], c: C[s], cluster, rev, note });
+    const menuOpen = this.state.menu;
+    return {
+      theme: v.theme, vars: v.vars, st, inventory, invFilters, history,
+      menuOpen, menuBg: menuOpen ? 'var(--sel)' : 'transparent',
+      toggleMenu: () => this.setState({ menu: !menuOpen }),
+      reconcile: () => this.setState({ reconciling: true, menu: false }),
+      menu: [
+        { label: 'Fetch git, then reconcile', key: '⇧⌘R', desc: 'Pull fleet-infra now instead of waiting for the next poll.' },
+        { label: 'Suspend', key: '', desc: 'Stop Flux applying changes here until resumed.' },
+        { label: 'Diff cluster against git', key: '⌘D', desc: 'What the next reconcile would change.' },
+        { label: 'View YAML', key: '⌘Y', desc: 'Read-only. Edits belong in fleet-infra.' }
+      ],
+      peers: [
+        P('ok', 'staging', 'a41e07c', 'ready'),
+        P('ok', 'dev-kind', 'a41e07c', 'ready'),
+        P('sus', 'prod-eu-west', '7c2d9e0', 'suspended 2d')
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

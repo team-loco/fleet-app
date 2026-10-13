@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Loco builds — prod-us-east</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.hv:hover{background:var(--hover)}
+</style>
+</helmet>
+<div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--editor);width:100%;height:900px;display:flex;flex-direction:column;overflow:hidden">
+  <div style="flex:1;min-height:0;display:flex;flex-wrap:wrap">
+    <div style="flex:0 0 auto;display:flex"><dc-import name="Nav" theme="{{theme}}" mode="cluster" active="loco-builds" hint-size="360px,874px"></dc-import></div>
+    <div style="flex:999 1 560px;min-width:0;height:874px;display:flex;flex-direction:column">
+      <div style="height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line)">
+        <h1 style="margin:0;font-size:14px;font-weight:600">Builds</h1>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">loco-builds · pool=builds · kept 24h</span>
+      </div>
+      <div style="flex:none;max-height:300px;overflow:auto">
+        <div style="min-width:820px">
+          <div style="display:grid;grid-template-columns:14px 84px 120px 130px 104px 62px 64px minmax(0,1fr);column-gap:12px;align-items:center;height:24px;padding:0 16px;border-bottom:1px solid var(--line);font-size:11.5px;color:var(--mute)">
+            <span></span><span>Build</span><span>Service</span><span>Workspace</span><span>Phase</span><span>Started</span><span>Took</span><span>Image</span>
+          </div>
+          <sc-for list="{{builds}}" as="b" hint-placeholder-count="5">
+            <button class="hv" onClick="{{b.pick}}" aria-pressed="{{b.selected}}" style="display:grid;grid-template-columns:14px 84px 120px 130px 104px 62px 64px minmax(0,1fr);column-gap:12px;align-items:center;width:100%;height:28px;padding:0 16px;border:0;border-bottom:1px solid var(--line);text-align:left;font-family:inherit;font-size:12.5px;color:var(--fg);cursor:pointer;{{b.style}}">
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:{{b.c}}">{{b.g}}</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--fg2)">{{b.id}}</span>
+              <span style="font-weight:500">{{b.svc}}</span>
+              <span style="color:var(--mute)">{{b.ws}}</span>
+              <span style="color:{{b.c}}">{{b.phase}}</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--mute)">{{b.at}}</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--fg2)">{{b.took}}</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{b.image}}</span>
+            </button>
+          </sc-for>
+        </div>
+      </div>
+      <div style="flex:1;min-height:0;display:flex;flex-direction:column;border-top:1px solid var(--line)">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding:10px 16px;border-bottom:1px solid var(--line);font-size:12.5px">
+          <span style="font-weight:600">{{cur.svc}} · {{cur.id}}</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{cur.job}}</span>
+          <span style="flex:1"></span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--fg2)">fetch <span style="color:{{cur.fc}}">{{cur.fg}}</span>  buildkit <span style="color:{{cur.kc}}">{{cur.kg}}</span></span>
+          <sc-if value="{{cur.canCancel}}" hint-placeholder-val="{{ false }}"><button style="height:22px;padding:0 8px;border:1px solid var(--line2);border-radius:3px;background:transparent;color:var(--fg2);font-family:inherit;font-size:12px;cursor:pointer">Cancel build</button></sc-if>
+        </div>
+        <div style="flex:1;min-height:0;overflow:auto;padding:6px 0;font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:19px">
+          <sc-for list="{{cur.log}}" as="l" hint-placeholder-count="10">
+            <div style="padding:0 16px;white-space:pre;color:{{l.c}};{{l.bg}}">{{l.t}}</div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+  <dc-import name="StatusBar" theme="{{theme}}" left="EKS · us-east-1 · v1.31.2" agent="4s ago" hint-size="100%,26px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { sel: 0 };
+  }
+  vars() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    const D = '--editor:#111317;--panel:#15181D;--chrome:#1A1D22;--raise:#20242A;--hover:#1D2127;--line:#262A30;--line2:#323740;--guide:#2A2E35;--fg:#DCDFE4;--fg2:#B3B9C3;--mute:#8E96A3;--sep:#4C525C;--sel:#1F2C40;--selfg:#F2F6FC;--selline:#3A5A8C;--acc:#74ADFF;--onacc:#0C1220;--ok:#48C78E;--warn:#E8B04B;--err:#F26D6D;--sus:#9AA2AE;--okbg:rgba(72,199,142,.10);--errbg:rgba(242,109,109,.11);--warnbg:rgba(232,176,75,.10);--accbg:rgba(116,173,255,.12);--addbg:rgba(72,199,142,.12);--delbg:rgba(242,109,109,.13);--addfg:#7FDDB2;--delfg:#FF9C9C;--shadow:rgba(0,0,0,.5);color-scheme:dark;';
+    const L = '--editor:#FFFFFF;--panel:#F6F7F8;--chrome:#EEEFF1;--raise:#E9EBEE;--hover:#F1F2F4;--line:#E1E3E7;--line2:#CFD3D9;--guide:#E4E6EA;--fg:#1D2027;--fg2:#3B414B;--mute:#5F6774;--sep:#A5ABB5;--sel:#DCE7FA;--selfg:#0D2850;--selline:#8DB0EA;--acc:#1F5FD1;--onacc:#FFFFFF;--ok:#167A4C;--warn:#935800;--err:#C53030;--sus:#6B7280;--okbg:rgba(22,122,76,.08);--errbg:rgba(197,48,48,.07);--warnbg:rgba(147,88,0,.08);--accbg:rgba(31,95,209,.08);--addbg:rgba(22,122,76,.10);--delbg:rgba(197,48,48,.09);--addfg:#0F5E3A;--delfg:#A12626;--shadow:rgba(20,24,32,.18);color-scheme:light;';
+    return { theme: t, vars: t === 'light' ? L : D };
+  }
+  renderVals() {
+    const v = this.vars();
+    const PH = { Failed: ['✕', 'var(--err)'], Succeeded: ['●', 'var(--ok)'], Running: ['◐', 'var(--acc)'], Canceled: ['○', 'var(--mute)'] };
+    const list = [
+      { id: '0192f3a1', svc: 'frontend', ws: 'acme / web', phase: 'Failed', at: '21:13', took: '1m48s', image: '—', fetch: 'ok', kit: 'err' },
+      { id: '0192f3c7', svc: 'docs', ws: 'acme / web', phase: 'Running', at: '21:14', took: '0m42s', image: 'building…', fetch: 'ok', kit: 'prog' },
+      { id: '0192f39c', svc: 'checkout', ws: 'acme / payments', phase: 'Succeeded', at: '21:07', took: '2m11s', image: 'sha256:9e1c…44d0 · cache 81%', fetch: 'ok', kit: 'ok' },
+      { id: '0192f388', svc: 'auth', ws: 'acme / payments', phase: 'Succeeded', at: '20:52', took: '0m58s', image: 'sha256:51ab…0f2e · cache 96%', fetch: 'ok', kit: 'ok' },
+      { id: '0192f301', svc: 'api', ws: 'beta / core', phase: 'Canceled', at: '20:31', took: '0m12s', image: '—', fetch: 'ok', kit: 'off' }
+    ];
+    const builds = list.map((b, i) => ({ ...b, g: PH[b.phase][0], c: PH[b.phase][1],
+      selected: i === this.state.sel ? 'true' : 'false',
+      style: i === this.state.sel ? 'background:var(--sel);box-shadow:inset 0 0 0 1px var(--selline);' : 'background:transparent;',
+      pick: () => this.setState({ sel: i }) }));
+    const b = list[this.state.sel];
+    const st = (s) => s === 'ok' ? ['●', 'var(--ok)'] : (s === 'err' ? ['✕', 'var(--err)'] : (s === 'prog' ? ['◐', 'var(--acc)'] : ['○', 'var(--mute)']));
+    const T = (t, kind) => ({ t, c: kind === 'err' ? 'var(--err)' : (kind === 'dim' ? 'var(--mute)' : 'var(--fg)'), bg: kind === 'err' ? 'background:var(--errbg);' : '' });
+    let log;
+    if (b.phase === 'Failed') {
+      log = [
+        T('fetch: source 0192f3a1.tar.gz (2.4 MiB) ok', 'dim'),
+        T('#1 [internal] load build definition from Dockerfile'),
+        T('#2 [internal] load metadata for docker.io/oven/bun:1.2-alpine'),
+        T('#3 importing cache manifest from loco-registry:5000/acme/frontend:cache'),
+        T('#4 [1/5] FROM docker.io/oven/bun:1.2-alpine  CACHED', 'dim'),
+        T('#5 [2/5] COPY package.json bun.lock ./  CACHED', 'dim'),
+        T('#6 [3/5] RUN bun install --frozen-lockfile'),
+        T('#6 1.204 error: lockfile had changes, but lockfile is frozen', 'err'),
+        T('#6 ERROR: process "/bin/sh -c bun install --frozen-lockfile" did not complete successfully: exit code: 1', 'err'),
+        T('ERROR: failed to solve: exit code: 1', 'err')
+      ];
+    } else if (b.phase === 'Running') {
+      log = [T('fetch: source 0192f3c7.tar.gz (880 KiB) ok', 'dim'), T('#1 [internal] load build definition from Dockerfile'), T('#4 [2/4] RUN npm ci'), T('#4 38.2 added 412 packages in 37s')];
+    } else if (b.phase === 'Canceled') {
+      log = [T('fetch: source 0192f301.tar.gz ok', 'dim'), T('canceled by loco builds cancel', 'dim')];
+    } else {
+      log = [T('fetch: source ok', 'dim'), T('#9 exporting to image'), T('#9 pushing layers to loco-registry:5000/acme/' + b.svc), T('#9 DONE ' + b.took)];
+    }
+    const f = st(b.fetch), k = st(b.kit);
+    const cur = { svc: b.svc, id: b.id, job: 'job/build-' + b.id + ' · node ip-10-4-40-7', fg: f[0], fc: f[1], kg: k[0], kc: k[1], canCancel: b.phase === 'Running', log };
+    return { theme: v.theme, vars: v.vars, builds, cur };
+  }
+}
+</script>
+</body>
+</html>

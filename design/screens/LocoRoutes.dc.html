@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Loco routes — prod-us-east</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.hv:hover{background:var(--hover)}
+</style>
+</helmet>
+<div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--editor);width:100%;height:900px;display:flex;flex-direction:column;overflow:hidden">
+  <div style="flex:1;min-height:0;display:flex;flex-wrap:wrap">
+    <div style="flex:0 0 auto;display:flex"><dc-import name="Nav" theme="{{theme}}" mode="cluster" active="loco-routes" hint-size="360px,874px"></dc-import></div>
+    <div style="flex:999 1 560px;min-width:0;height:874px;display:flex;flex-direction:column">
+      <div style="height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line)">
+        <h1 style="margin:0;font-size:14px;font-weight:600">Routes</h1>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">Gateway loco-system/eg · Envoy 3/3 · HTTP/3 on</span>
+      </div>
+      <div style="flex:1;min-height:0;overflow:auto">
+        <section>
+          <div style="padding:14px 16px 6px"><h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Listeners</h2></div>
+          <div style="overflow-x:auto">
+            <div style="min-width:820px;border-top:1px solid var(--line)">
+              <div style="display:grid;grid-template-columns:14px 140px 170px 70px 60px minmax(0,1fr);column-gap:12px;align-items:center;height:24px;padding:0 16px;border-bottom:1px solid var(--line);font-size:11.5px;color:var(--mute)">
+                <span></span><span>Listener</span><span>Hostname</span><span>Port</span><span>Routes</span><span>TLS</span>
+              </div>
+              <sc-for list="{{listeners}}" as="l" hint-placeholder-count="3">
+                <div class="hv" style="display:grid;grid-template-columns:14px 140px 170px 70px 60px minmax(0,1fr);column-gap:12px;align-items:center;height:26px;padding:0 16px;border-bottom:1px solid var(--line);font-family:'IBM Plex Mono',monospace;font-size:12px">
+                  <span style="font-size:10.5px;color:var(--ok)">●</span>
+                  <span>{{l.name}}</span>
+                  <span style="color:var(--fg2)">{{l.host}}</span>
+                  <span style="color:var(--fg2)">{{l.port}}</span>
+                  <span style="color:var(--fg2)">{{l.routes}}</span>
+                  <span style="color:var(--mute)">{{l.tls}}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </section>
+
+        <section style="padding-bottom:16px">
+          <div style="display:flex;align-items:center;gap:10px;padding:18px 16px 6px">
+            <h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">HTTPRoutes</h2>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">44 · <span style="color:var(--warn)">▲ 2</span></span>
+            <span style="flex:1"></span>
+            <div role="group" aria-label="Filter" style="display:flex;border:1px solid var(--line2);border-radius:3px;overflow:hidden">
+              <sc-for list="{{filters}}" as="f" hint-placeholder-count="2">
+                <button aria-pressed="{{f.pressed}}" onClick="{{f.pick}}" style="height:22px;padding:0 9px;border:0;font-family:inherit;font-size:12px;cursor:pointer;{{f.style}}">{{f.label}}</button>
+              </sc-for>
+            </div>
+          </div>
+          <div style="overflow-x:auto">
+            <div style="min-width:820px;border-top:1px solid var(--line)">
+              <div style="display:grid;grid-template-columns:14px 210px minmax(180px,1fr) 64px minmax(200px,1.2fr);column-gap:12px;align-items:center;height:24px;padding:0 16px;border-bottom:1px solid var(--line);font-size:11.5px;color:var(--mute)">
+                <span></span><span>Host</span><span>Backend</span><span>Ready</span><span>Status</span>
+              </div>
+              <sc-for list="{{routes}}" as="r" hint-placeholder-count="8">
+                <a class="hv" href="LocoApps.dc.html" style="display:grid;grid-template-columns:14px 210px minmax(180px,1fr) 64px minmax(200px,1.2fr);column-gap:12px;align-items:center;height:26px;padding:0 16px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--fg);text-decoration:none">
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:{{r.c}}">{{r.g}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px">{{r.host}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{r.backend}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:{{r.ec}}">{{r.eps}}</span>
+                  <span style="color:{{r.sc}};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{r.status}}</span>
+                </a>
+              </sc-for>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+  <dc-import name="StatusBar" theme="{{theme}}" left="EKS · us-east-1 · v1.31.2" agent="4s ago" hint-size="100%,26px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { only: 'all' };
+  }
+  vars() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    const D = '--editor:#111317;--panel:#15181D;--chrome:#1A1D22;--raise:#20242A;--hover:#1D2127;--line:#262A30;--line2:#323740;--guide:#2A2E35;--fg:#DCDFE4;--fg2:#B3B9C3;--mute:#8E96A3;--sep:#4C525C;--sel:#1F2C40;--selfg:#F2F6FC;--selline:#3A5A8C;--acc:#74ADFF;--onacc:#0C1220;--ok:#48C78E;--warn:#E8B04B;--err:#F26D6D;--sus:#9AA2AE;--okbg:rgba(72,199,142,.10);--errbg:rgba(242,109,109,.11);--warnbg:rgba(232,176,75,.10);--accbg:rgba(116,173,255,.12);--addbg:rgba(72,199,142,.12);--delbg:rgba(242,109,109,.13);--addfg:#7FDDB2;--delfg:#FF9C9C;--shadow:rgba(0,0,0,.5);color-scheme:dark;';
+    const L = '--editor:#FFFFFF;--panel:#F6F7F8;--chrome:#EEEFF1;--raise:#E9EBEE;--hover:#F1F2F4;--line:#E1E3E7;--line2:#CFD3D9;--guide:#E4E6EA;--fg:#1D2027;--fg2:#3B414B;--mute:#5F6774;--sep:#A5ABB5;--sel:#DCE7FA;--selfg:#0D2850;--selline:#8DB0EA;--acc:#1F5FD1;--onacc:#FFFFFF;--ok:#167A4C;--warn:#935800;--err:#C53030;--sus:#6B7280;--okbg:rgba(22,122,76,.08);--errbg:rgba(197,48,48,.07);--warnbg:rgba(147,88,0,.08);--accbg:rgba(31,95,209,.08);--addbg:rgba(22,122,76,.10);--delbg:rgba(197,48,48,.09);--addfg:#0F5E3A;--delfg:#A12626;--shadow:rgba(20,24,32,.18);color-scheme:light;';
+    return { theme: t, vars: t === 'light' ? L : D };
+  }
+  renderVals() {
+    const v = this.vars();
+    const R = (s, host, backend, eps, status) => ({ s, g: s === 'ok' ? '●' : '▲', c: s === 'ok' ? 'var(--ok)' : 'var(--warn)', host, backend, eps, status, ec: eps.indexOf('0/') === 0 ? 'var(--warn)' : 'var(--fg2)', sc: s === 'ok' ? 'var(--mute)' : 'var(--warn)' });
+    const all = [
+      R('warn', 'checkout.onloco.app', 'ws-0192c3e7/checkout:8080', '0/2', 'Accepted · no ready endpoints (app failing) → 503'),
+      R('warn', 'old-landing.onloco.app', 'ws-0192c3f1/old-landing:8080', '—', 'ResolvedRefs=False · BackendNotFound'),
+      R('ok', 'auth.onloco.app', 'ws-0192c3e7/auth:8080', '3/3', 'Accepted'),
+      R('ok', 'checkout-worker', 'ws-0192c3e7/checkout-worker:8080', '2/2', 'private · no hostname'),
+      R('ok', 'frontend.onloco.app', 'ws-0192c3f1/frontend:3000', '4/4', 'Accepted'),
+      R('ok', 'frontend-staging.onloco.app', 'ws-0192c3f1/frontend-staging:3000', '1/2', 'Accepted · rolling out'),
+      R('ok', 'api.beta.dev', 'ws-0192d0aa/api:8080', '2/2', 'Accepted · custom domain'),
+      R('ok', 'obs.loco.build', 'observability/observability-proxy:8080', '1/1', 'Accepted · platform listener')
+    ];
+    const only = this.state.only;
+    const routes = all.filter((r) => only === 'all' || r.s !== 'ok');
+    const filters = [['all', 'All'], ['bad', 'Problems']].map((f) => ({
+      label: f[1], pressed: f[0] === only ? 'true' : 'false',
+      style: f[0] === only ? 'background:var(--sel);color:var(--selfg);' : 'background:transparent;color:var(--fg2);',
+      pick: () => this.setState({ only: f[0] })
+    }));
+    return {
+      theme: v.theme, vars: v.vars, routes, filters,
+      listeners: [
+        { name: 'https-apps-0', host: '*.onloco.app', port: '443 · h3', routes: '41', tls: 'loco-core-tls · Let’s Encrypt · renews in 61d' },
+        { name: 'http-apps-0', host: '*.onloco.app', port: '80', routes: '41', tls: 'redirect → https' },
+        { name: 'https-platform', host: '*.loco.build', port: '443 · h3', routes: '3', tls: 'loco-core-tls · renews in 61d' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

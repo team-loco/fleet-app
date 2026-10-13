@@ -1,0 +1,62 @@
+{
+  "v": 3,
+  "attachments": {},
+  "createdOnFiles": {"at": "2026-10-13T04:16:00Z", "v": 1},
+  "title": "Shoal — multi-cluster Kubernetes desktop",
+  "launch": {"view": "canvas", "page": "v2"},
+  "pages": [
+    {"id": "v2", "name": "v2 — flows"},
+    {"id": "v1", "name": "v1"}
+  ],
+  "boards": {
+    "LocoPlatform.dc.html": {"x": 0, "y": -1600, "w": 1440, "h": 900, "title": "Loco · Platform — agent, controllers, Envoy", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "LocoApps.dc.html": {"x": 1520, "y": -1600, "w": 1440, "h": 900, "title": "Loco · Applications — why is checkout down?", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "LocoBuilds.dc.html": {"x": 3040, "y": -1600, "w": 1440, "h": 900, "title": "Loco · Builds — buildkit jobs", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "LocoRoutes.dc.html": {"x": 4560, "y": -1600, "w": 1440, "h": 900, "title": "Loco · Routes — Gateway listeners + HTTPRoutes", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "Fleet.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "title": "1 · Fleet — what needs attention?", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "Command.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 900, "title": "2 · ⌘K — jump to checkout-api", "expand": "fill", "page": "v2"},
+    "Workload.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 900, "title": "3 · Deployment — why is it crashing?", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "Kustomization.dc.html": {"x": 4560, "y": 0, "w": 1440, "h": 900, "title": "4 · Kustomization — what deployed this?", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "Changes.dc.html": {"x": 6080, "y": 0, "w": 1440, "h": 900, "title": "5 · Changes — which commit, and why only us-east?", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "AddCluster.dc.html": {"x": 0, "y": 1300, "w": 1440, "h": 900, "title": "1 · Pick contexts from kubeconfig", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "AddClusterCheck.dc.html": {"x": 1520, "y": 1300, "w": 1440, "h": 900, "title": "2 · Connection checks, then add", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "Flux.dc.html": {"x": 0, "y": 2600, "w": 1440, "h": 900, "title": "GitOps — sync state across the fleet", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "FleetLight.dc.html": {"x": 1520, "y": 2600, "w": 1440, "h": 900, "title": "Fleet — light", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "KustomizationLight.dc.html": {"x": 3040, "y": 2600, "w": 1440, "h": 900, "title": "Kustomization — light", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "ChangesLight.dc.html": {"x": 4560, "y": 2600, "w": 1440, "h": 900, "title": "Changes — light", "expand": "fill", "is_interactive": true, "page": "v2"},
+    "StatusBar.dc.html": {"x": 0, "y": 3900, "w": 1440, "h": 26, "title": "Component · status bar", "page": "v2"},
+    "Nav.dc.html": {"x": 1520, "y": 3900, "w": 360, "h": 874, "title": "Component · clusters + resources", "page": "v2"},
+    "AppIcon.dc.html": {"x": 1960, "y": 3900, "w": 1200, "h": 640, "title": "macOS app icon", "page": "v2"},
+
+    "Main.dc.html": {"expand": "fill", "h": 900, "is_interactive": true, "title": "Cluster overview — dark", "w": 1440, "x": 0, "y": 0, "page": "v1"},
+    "MainLight.dc.html": {"expand": "fill", "h": 900, "is_interactive": true, "title": "Cluster overview — light", "w": 1440, "x": 1520, "y": 0, "page": "v1"},
+    "Pods.dc.html": {"expand": "fill", "h": 900, "is_interactive": true, "title": "Pods · details · logs & shell — dark", "w": 1440, "x": 80, "y": 1020, "page": "v1"},
+    "PodsLight.dc.html": {"expand": "fill", "h": 900, "is_interactive": true, "title": "Pods · details · logs & shell — light", "w": 1440, "x": 1520, "y": 1020, "page": "v1"},
+    "Catalog.dc.html": {"expand": "fill", "h": 900, "is_interactive": true, "title": "Catalog · all clusters — dark", "w": 1440, "x": 0, "y": 2040, "page": "v1"},
+    "CatalogLight.dc.html": {"expand": "fill", "h": 900, "is_interactive": true, "title": "Catalog · all clusters — light", "w": 1440, "x": 1520, "y": 2040, "page": "v1"},
+    "Compare.dc.html": {"expand": "fill", "h": 900, "is_interactive": true, "title": "Compare across clusters — dark", "w": 1440, "x": 0, "y": 3060, "page": "v1"},
+    "CompareLight.dc.html": {"expand": "fill", "h": 900, "is_interactive": true, "title": "Compare across clusters — light", "w": 1440, "x": 1520, "y": 3060, "page": "v1"},
+    "Palette.dc.html": {"expand": "fill", "h": 900, "title": "Command palette ⌘K — dark", "w": 1440, "x": 0, "y": 4080, "page": "v1"},
+    "PaletteLight.dc.html": {"expand": "fill", "h": 900, "title": "Command palette ⌘K — light", "w": 1440, "x": 1520, "y": 4080, "page": "v1"},
+    "Sidebar.dc.html": {"h": 834, "title": "Component · hotbar + nav", "w": 268, "x": 0, "y": 5100, "page": "v1"},
+    "Titlebar.dc.html": {"h": 40, "title": "Component · title bar", "w": 1440, "x": 348, "y": 5100, "page": "v1"}
+  },
+  "order": [
+    "LocoPlatform.dc.html", "LocoApps.dc.html", "LocoBuilds.dc.html", "LocoRoutes.dc.html",
+    "Fleet.dc.html", "Command.dc.html", "Workload.dc.html", "Kustomization.dc.html", "Changes.dc.html",
+    "AddCluster.dc.html", "AddClusterCheck.dc.html",
+    "Flux.dc.html", "FleetLight.dc.html", "KustomizationLight.dc.html", "ChangesLight.dc.html",
+    "StatusBar.dc.html", "Nav.dc.html", "AppIcon.dc.html",
+    "Main.dc.html", "MainLight.dc.html", "Pods.dc.html", "PodsLight.dc.html", "Catalog.dc.html", "CatalogLight.dc.html",
+    "Compare.dc.html", "CompareLight.dc.html", "Palette.dc.html", "PaletteLight.dc.html", "Sidebar.dc.html", "Titlebar.dc.html"
+  ],
+  "notes": {
+    "title": {"kind": "title1", "maxW": 2960, "text": "Shoal — multi-cluster Kubernetes, native desktop (GPUI)", "w": 240, "x": 0, "y": -300, "page": "v1"},
+    "lo": {"kind": "title1", "maxW": 6000, "text": "Loco — first-class (built with the loco flag)", "x": 0, "y": -1900, "page": "v2"},
+    "f1": {"kind": "title1", "maxW": 7520, "text": "Flow 1 — Triage: fleet → workload → Flux → the commit that caused it", "x": 0, "y": -300, "page": "v2"},
+    "f2": {"kind": "title1", "maxW": 2960, "text": "Flow 2 — Add a cluster", "x": 0, "y": 1000, "page": "v2"},
+    "lt": {"kind": "title1", "maxW": 6000, "text": "GitOps across the fleet · light appearance", "x": 0, "y": 2300, "page": "v2"},
+    "cp": {"kind": "title1", "maxW": 3160, "text": "Shared components · app icon", "x": 0, "y": 3600, "page": "v2"}
+  },
+  "designSystems": []
+}

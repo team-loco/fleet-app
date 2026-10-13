@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Command palette</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div style="{{vars}}position:relative;width:100%;min-height:900px;overflow:hidden;font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--bg)">
+  <dc-import name="Main" theme="{{theme}}" hint-size="100%,900px"></dc-import>
+  <div style="position:absolute;inset:0;{{scrim}}"></div>
+  <div role="dialog" aria-label="Command palette" style="position:absolute;top:84px;left:50%;transform:translateX(-50%);width:640px;max-width:calc(100% - 32px);background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:0 24px 60px rgba(0,0,0,.35);overflow:hidden;display:flex;flex-direction:column">
+    <label style="display:flex;align-items:center;gap:10px;height:48px;padding:0 14px;border-bottom:1px solid var(--line)">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" style="color:var(--mute)"><circle cx="7" cy="7" r="4.25"/><path d="m10.25 10.25 3.25 3.25"/></svg>
+      <span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Search</span>
+      <input value="checkout" style="flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--fg);font-family:inherit;font-size:15px">
+      <kbd style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--fg2);background:var(--raise);border:1px solid var(--line2);border-radius:4px;padding:1px 5px">esc</kbd>
+    </label>
+    <div role="group" aria-label="Scope" style="display:flex;flex-wrap:wrap;gap:6px;padding:10px 14px;border-bottom:1px solid var(--line)">
+      <button aria-pressed="true" style="height:24px;padding:0 10px;border-radius:12px;border:1px solid var(--acc);background:var(--accbg);color:var(--fg);font-family:inherit;font-size:12px;cursor:pointer">All clusters</button>
+      <button aria-pressed="false" style="height:24px;padding:0 10px;border-radius:12px;border:1px solid var(--line2);background:transparent;color:var(--fg2);font-family:inherit;font-size:12px;cursor:pointer">prod-us-east</button>
+      <button aria-pressed="false" style="height:24px;padding:0 10px;border-radius:12px;border:1px solid var(--line2);background:transparent;color:var(--fg2);font-family:inherit;font-size:12px;cursor:pointer">Resources</button>
+      <button aria-pressed="false" style="height:24px;padding:0 10px;border-radius:12px;border:1px solid var(--line2);background:transparent;color:var(--fg2);font-family:inherit;font-size:12px;cursor:pointer">Actions</button>
+    </div>
+    <div style="padding:6px;display:flex;flex-direction:column;max-height:520px;overflow:auto">
+      <div style="padding:8px 10px 4px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)">Resources · 4 clusters</div>
+      <sc-for list="{{resources}}" as="r" hint-placeholder-count="5">
+        <a href="{{r.href}}" style="display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:6px;text-decoration:none;color:var(--fg);{{r.style}}">
+          <span style="width:52px;flex:none;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">{{r.kind}}</span>
+          <span style="flex:1;min-width:0;font-family:'IBM Plex Mono',monospace;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:var(--acc);font-weight:500">checkout</span>{{r.rest}}</span>
+          <span style="font-size:12px;color:var(--mute);white-space:nowrap">{{r.ns}}</span>
+          <span style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--fg2);white-space:nowrap"><span style="width:8px;height:8px;border-radius:2px;background:{{r.bg}}"></span>{{r.cluster}}</span>
+          <span style="width:8px;height:8px;border-radius:50%;background:{{r.c}}"></span>
+        </a>
+      </sc-for>
+      <div style="padding:12px 10px 4px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)">Actions</div>
+      <sc-for list="{{actions}}" as="a" hint-placeholder-count="5">
+        <a href="{{a.href}}" style="display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:6px;text-decoration:none;color:var(--fg)">
+          <span style="width:52px;flex:none;font-family:'IBM Plex Mono',monospace;font-size:11px;color:{{a.kc}}">{{a.kind}}</span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{a.label}}</span>
+          <kbd style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--fg2);{{a.kbdStyle}}">{{a.key}}</kbd>
+        </a>
+      </sc-for>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:16px;padding:8px 14px;border-top:1px solid var(--line);background:var(--panel2);font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">
+      <span>↑↓ move</span><span>↵ open</span><span>⌘↵ open in split</span><span>⇥ scope</span><span style="flex:1"></span><span>9 results · 38 ms</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  resolveTheme() {
+    const t = this.props.theme ?? 'system';
+    if (t === 'dark' || t === 'light') return t;
+    try { return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { return 'dark'; }
+  }
+  themeVars(t) {
+    const d = { bg:'#0D0F12', chrome:'#0B0D10', panel:'#13161B', panel2:'#111419', raise:'#1C2129', line:'#252A33', line2:'#2C323C', fg:'#D7DCE3', fg2:'#B9C0CB', mute:'#8B93A1', sep:'#4B5260', sel:'#1D2A3F', selfg:'#FFFFFF', acc:'#6AA6FF', onacc:'#0B0D10', ok:'#3FC58A', warn:'#F0B24A', err:'#FF6B6B', ai:'#B48CFF', track:'#1F242C', hover:'#171B21', okbg:'rgba(63,197,138,.13)', errbg:'rgba(255,107,107,.13)', warnbg:'rgba(240,178,74,.12)', accbg:'rgba(106,166,255,.14)' };
+    const l = { bg:'#F6F7F9', chrome:'#ECEEF2', panel:'#FFFFFF', panel2:'#FAFBFC', raise:'#F0F2F5', line:'#DDE1E7', line2:'#CDD2DA', fg:'#1B1F26', fg2:'#3A414C', mute:'#5E6673', sep:'#A3AAB5', sel:'#DCE8FB', selfg:'#0B2A57', acc:'#2563D9', onacc:'#FFFFFF', ok:'#17784B', warn:'#9A5B00', err:'#C93434', ai:'#7C4DDB', track:'#E6E9EE', hover:'#F1F3F6', okbg:'rgba(23,120,75,.10)', errbg:'rgba(201,52,52,.09)', warnbg:'rgba(154,91,0,.10)', accbg:'rgba(37,99,217,.10)' };
+    const m = t === 'light' ? l : d;
+    return Object.keys(m).map((k) => '--' + k + ':' + m[k] + ';').join('') + 'color-scheme:' + t + ';';
+  }
+  renderVals() {
+    const theme = this.resolveTheme();
+    const kbd = 'background:var(--raise);border:1px solid var(--line2);border-radius:4px;padding:1px 5px;';
+    return {
+      theme,
+      vars: this.themeVars(theme),
+      scrim: theme === 'light' ? 'background:rgba(20,24,32,.28);' : 'background:rgba(4,5,7,.62);',
+      resources: [
+        { kind: 'pod', rest: '-api-7f9c6d-x2lqp', ns: 'payments', cluster: 'prod-us-east', bg: '#2F5D9E', c: 'var(--err)', href: 'Pods.dc.html', style: 'background:var(--sel);' },
+        { kind: 'deploy', rest: '-api', ns: 'payments', cluster: 'prod-us-east', bg: '#2F5D9E', c: 'var(--warn)', href: 'Compare.dc.html', style: '' },
+        { kind: 'deploy', rest: '-api', ns: 'payments', cluster: 'prod-eu-west', bg: '#6A4C9C', c: 'var(--ok)', href: 'Compare.dc.html', style: '' },
+        { kind: 'deploy', rest: '-api', ns: 'payments', cluster: 'staging', bg: '#2E7D62', c: 'var(--ok)', href: 'Compare.dc.html', style: '' },
+        { kind: 'svc', rest: '-api', ns: 'payments', cluster: 'prod-us-east', bg: '#2F5D9E', c: 'var(--ok)', href: 'Main.dc.html', style: '' }
+      ],
+      actions: [
+        { kind: 'logs', kc: 'var(--acc)', label: 'Stream logs from all checkout-api pods in prod-us-east', key: '⌘L', kbdStyle: kbd, href: 'Pods.dc.html' },
+        { kind: 'compare', kc: 'var(--acc)', label: 'Compare deploy/checkout-api across clusters', key: '⌘⇧D', kbdStyle: kbd, href: 'Compare.dc.html' },
+        { kind: 'forward', kc: 'var(--acc)', label: 'Port-forward svc/checkout-api 8080 → 80', key: '', kbdStyle: '', href: 'Main.dc.html' },
+        { kind: 'rollout', kc: 'var(--warn)', label: 'Restart rollout deploy/checkout-api (prod-us-east)…', key: '', kbdStyle: '', href: 'Main.dc.html' },
+        { kind: 'ask', kc: 'var(--ai)', label: 'Ask: why is checkout-api crashlooping in prod-us-east?', key: '⌘I', kbdStyle: kbd, href: 'Pods.dc.html' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

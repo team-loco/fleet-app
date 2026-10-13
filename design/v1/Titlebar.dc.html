@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Title bar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<header style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--chrome);height:40px;width:100%;box-sizing:border-box;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:0 12px">
+  <div style="display:flex;gap:8px;align-items:center;padding-right:8px">
+    <button aria-label="Close window" style="width:12px;height:12px;border-radius:50%;background:#FF5F57;border:0;padding:0"></button>
+    <button aria-label="Minimize window" style="width:12px;height:12px;border-radius:50%;background:#FEBC2E;border:0;padding:0"></button>
+    <button aria-label="Zoom window" style="width:12px;height:12px;border-radius:50%;background:#28C840;border:0;padding:0"></button>
+  </div>
+  <sc-if value="{{isCluster}}" hint-placeholder-val="{{ true }}">
+    <nav aria-label="Context" style="display:flex;align-items:center;gap:2px;min-width:0;white-space:nowrap">
+      <button style="display:flex;align-items:center;gap:7px;height:28px;padding:0 8px;border-radius:6px;background:transparent;border:0;color:var(--fg);font-family:inherit;font-size:13px;font-weight:500;cursor:pointer">
+        <span style="width:8px;height:8px;border-radius:50%;background:var(--ok)"></span>prod-us-east
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--mute)"><path d="m4 6 4 4 4-4"/></svg>
+      </button>
+      <span style="color:var(--sep)" aria-hidden="true">/</span>
+      <button style="display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:6px;background:transparent;border:0;color:var(--fg2);font-family:inherit;font-size:13px;cursor:pointer">all namespaces
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--mute)"><path d="m4 6 4 4 4-4"/></svg>
+      </button>
+      <span style="color:var(--sep)" aria-hidden="true">/</span>
+      <span style="padding:0 8px;color:var(--mute)">{{crumb}}</span>
+    </nav>
+  </sc-if>
+  <sc-if value="{{isCatalog}}" hint-placeholder-val="{{ false }}">
+    <nav aria-label="Context" style="display:flex;align-items:center;gap:8px;white-space:nowrap;padding:0 8px">
+      <span style="font-weight:500">Catalog</span>
+      <span style="color:var(--sep)" aria-hidden="true">/</span>
+      <span style="color:var(--mute)">{{crumb}}</span>
+    </nav>
+  </sc-if>
+  <div style="flex:1;display:flex;justify-content:center;min-width:0">
+    <a href="Palette.dc.html" style="display:flex;align-items:center;gap:8px;width:100%;max-width:440px;height:28px;box-sizing:border-box;padding:0 6px 0 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--mute);text-decoration:none;font-size:12.5px">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.25 10.25 3.25 3.25"/></svg>
+      <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Search all clusters, resources, actions</span>
+      <kbd style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--fg2);background:var(--raise);border:1px solid var(--line2);border-radius:4px;padding:1px 5px">⌘K</kbd>
+    </a>
+  </div>
+  <div style="display:flex;align-items:center;gap:4px">
+    <button style="display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line2);background:var(--panel);color:var(--fg);font-family:inherit;font-size:12.5px;cursor:pointer">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true" style="color:var(--ai)"><path d="M8 1.5c.4 3.2 1.3 4.1 4.5 4.5-3.2.4-4.1 1.3-4.5 4.5-.4-3.2-1.3-4.1-4.5-4.5 3.2-.4 4.1-1.3 4.5-4.5z"/></svg>Ask
+    </button>
+    <button aria-label="Toggle light or dark appearance" style="width:32px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;border:0;background:transparent;color:var(--fg2);cursor:pointer">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5v11a5.5 5.5 0 0 0 0-11z" fill="currentColor"/></svg>
+    </button>
+    <button aria-label="Notifications, 3 unread" style="position:relative;width:32px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;border:0;background:transparent;color:var(--fg2);cursor:pointer">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11V7a4 4 0 0 1 8 0v4l1 1.5H3z"/><path d="M6.5 14h3"/></svg>
+      <span style="position:absolute;top:5px;right:7px;width:6px;height:6px;border-radius:50%;background:var(--err)"></span>
+    </button>
+    <button aria-label="Account" style="width:26px;height:26px;border-radius:50%;border:1px solid var(--line2);background:var(--raise);color:var(--fg2);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="6" r="2.75"/><path d="M2.75 14c.8-2.6 2.8-3.75 5.25-3.75s4.45 1.15 5.25 3.75"/></svg>
+    </button>
+  </div>
+</header>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"crumb":{"editor":"text","default":"Overview"},"mode":{"editor":"enum","options":["cluster","catalog"],"default":"cluster"},"$preview":{"width":1440,"height":40}}'>
+class Component extends DCLogic {
+  resolveTheme() {
+    const t = this.props.theme ?? 'system';
+    if (t === 'dark' || t === 'light') return t;
+    try { return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { return 'dark'; }
+  }
+  themeVars(t) {
+    const d = { bg:'#0D0F12', chrome:'#0B0D10', panel:'#13161B', panel2:'#111419', raise:'#1C2129', line:'#252A33', line2:'#2C323C', fg:'#D7DCE3', fg2:'#B9C0CB', mute:'#8B93A1', sep:'#4B5260', sel:'#1D2A3F', selfg:'#FFFFFF', acc:'#6AA6FF', onacc:'#0B0D10', ok:'#3FC58A', warn:'#F0B24A', err:'#FF6B6B', ai:'#B48CFF', track:'#1F242C', hover:'#171B21', okbg:'rgba(63,197,138,.13)', errbg:'rgba(255,107,107,.13)', warnbg:'rgba(240,178,74,.12)', accbg:'rgba(106,166,255,.14)' };
+    const l = { bg:'#F6F7F9', chrome:'#ECEEF2', panel:'#FFFFFF', panel2:'#FAFBFC', raise:'#F0F2F5', line:'#DDE1E7', line2:'#CDD2DA', fg:'#1B1F26', fg2:'#3A414C', mute:'#5E6673', sep:'#A3AAB5', sel:'#DCE8FB', selfg:'#0B2A57', acc:'#2563D9', onacc:'#FFFFFF', ok:'#17784B', warn:'#9A5B00', err:'#C93434', ai:'#7C4DDB', track:'#E6E9EE', hover:'#F1F3F6', okbg:'rgba(23,120,75,.10)', errbg:'rgba(201,52,52,.09)', warnbg:'rgba(154,91,0,.10)', accbg:'rgba(37,99,217,.10)' };
+    const m = t === 'light' ? l : d;
+    return Object.keys(m).map((k) => '--' + k + ':' + m[k] + ';').join('') + 'color-scheme:' + t + ';';
+  }
+  renderVals() {
+    const mode = this.props.mode ?? 'cluster';
+    return { vars: this.themeVars(this.resolveTheme()), crumb: this.props.crumb ?? 'Overview', isCluster: mode === 'cluster', isCatalog: mode === 'catalog' };
+  }
+}
+</script>
+</body>
+</html>

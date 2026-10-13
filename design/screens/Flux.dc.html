@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GitOps — Flux across the fleet</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.hv:hover{background:var(--hover)}
+.cell:hover{box-shadow:inset 0 0 0 1px var(--selline)}
+</style>
+</helmet>
+<div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--editor);width:100%;height:900px;display:flex;flex-direction:column;overflow:hidden">
+  <div style="flex:1;min-height:0;display:flex;flex-wrap:wrap">
+    <div style="flex:0 0 auto;display:flex"><dc-import name="Nav" theme="{{theme}}" mode="fleet" active="gitops" hint-size="360px,874px"></dc-import></div>
+    <div style="flex:999 1 560px;min-width:0;height:874px;display:flex;flex-direction:column">
+      <div style="height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid var(--line);font-size:12.5px;overflow:hidden">
+        <h1 style="margin:0;font-size:14px;font-weight:600">GitOps</h1>
+        <span style="flex:1"></span>
+        <div role="group" aria-label="Show" style="display:flex;border:1px solid var(--line2);border-radius:3px;overflow:hidden">
+          <sc-for list="{{filters}}" as="f" hint-placeholder-count="4">
+            <button aria-pressed="{{f.pressed}}" onClick="{{f.pick}}" style="height:22px;padding:0 9px;border:0;font-family:inherit;font-size:12px;cursor:pointer;white-space:nowrap;{{f.style}}">{{f.label}}</button>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="flex:1;min-height:0;overflow:auto">
+        <section aria-labelledby="h-src">
+          <div style="display:flex;align-items:baseline;gap:8px;padding:14px 16px 6px">
+            <h2 id="h-src" style="margin:0;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Sources</h2>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">fetched by source-controller on each cluster</span>
+          </div>
+          <div style="overflow-x:auto">
+            <div style="min-width:960px;border-top:1px solid var(--line)">
+              <sc-for list="{{sources}}" as="s" hint-placeholder-count="3">
+                <div class="hv" style="display:grid;grid-template-columns:120px 230px minmax(200px,1fr) 64px 150px 56px 80px;column-gap:12px;align-items:center;height:26px;padding:0 16px;border-bottom:1px solid var(--line);font-size:12.5px">
+                  <span style="color:var(--mute)">{{s.kind}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px">{{s.name}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{s.url}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--fg2)">{{s.ref}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--acc)">{{s.rev}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{s.age}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ok)">{{s.on}}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </section>
+
+        <section aria-labelledby="h-matrix">
+          <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:14px;padding:18px 16px 6px">
+            <h2 id="h-matrix" style="margin:0;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Sync state</h2>
+            <span style="display:flex;gap:12px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">
+              <span><span style="color:var(--ok)">●</span> ready</span><span><span style="color:var(--acc)">◐</span> progressing</span><span><span style="color:var(--warn)">▲</span> retrying</span><span><span style="color:var(--err)">✕</span> failed</span><span><span style="color:var(--sus)">‖</span> suspended</span><span>– not deployed</span><span style="color:var(--fg2)">dim rev = behind HEAD</span>
+            </span>
+          </div>
+          <div style="overflow-x:auto">
+            <div style="min-width:960px;border-top:1px solid var(--line)">
+              <div style="display:grid;grid-template-columns:minmax(220px,1fr) repeat(4,minmax(150px,1fr));align-items:center;height:28px;border-bottom:1px solid var(--line);font-size:12px;color:var(--mute)">
+                <span style="padding:0 16px">Object</span>
+                <span style="padding:0 10px;border-left:1px solid var(--line)">dev-kind</span>
+                <span style="padding:0 10px;border-left:1px solid var(--line)">staging</span>
+                <span style="padding:0 10px;border-left:1px solid var(--line)">prod-us-east</span>
+                <span style="padding:0 10px;border-left:1px solid var(--line)">prod-eu-west</span>
+              </div>
+              <sc-for list="{{groups}}" as="g" hint-placeholder-count="2">
+                <div>
+                  <div style="display:flex;align-items:center;gap:8px;height:26px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line);font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">{{g.label}}<span style="font-family:'IBM Plex Mono',monospace;font-weight:400;letter-spacing:0">{{g.count}}</span></div>
+                  <sc-for list="{{g.rows}}" as="r" hint-placeholder-count="5">
+                    <div style="display:grid;grid-template-columns:minmax(220px,1fr) repeat(4,minmax(150px,1fr));align-items:stretch;border-bottom:1px solid var(--line)">
+                      <div style="display:flex;flex-direction:column;justify-content:center;gap:1px;padding:0 16px;height:38px">
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px">{{r.name}}</span>
+                        <span style="font-size:11.5px;color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{r.sub}}</span>
+                      </div>
+                      <sc-for list="{{r.cells}}" as="c" hint-placeholder-count="4">
+                        <a class="cell" href="{{c.href}}" style="display:flex;flex-direction:column;justify-content:center;gap:1px;padding:0 10px;border-left:1px solid var(--line);text-decoration:none;min-width:0;{{c.bg}}">
+                          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;white-space:nowrap"><span style="color:{{c.c}};font-size:10.5px">{{c.g}}</span> <span style="color:{{c.rc}}">{{c.rev}}</span></span>
+                          <span style="font-size:11.5px;color:{{c.nc}};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{c.note}}</span>
+                        </a>
+                      </sc-for>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </section>
+
+        <section aria-labelledby="h-ctrl" style="padding-bottom:16px">
+          <div style="display:flex;align-items:baseline;gap:8px;padding:18px 16px 6px">
+            <h2 id="h-ctrl" style="margin:0;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Controllers</h2>
+          </div>
+          <div style="overflow-x:auto">
+            <div style="min-width:960px;border-top:1px solid var(--line)">
+              <sc-for list="{{controllers}}" as="k" hint-placeholder-count="4">
+                <div style="display:grid;grid-template-columns:140px 90px minmax(0,1fr) 200px;column-gap:12px;align-items:center;height:26px;padding:0 16px;border-bottom:1px solid var(--line);font-size:12.5px">
+                  <span>{{k.cluster}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:{{k.vc}}">{{k.ver}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--fg2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="color:var(--ok)">●</span> source <span style="color:var(--ok)">●</span> kustomize <span style="color:var(--ok)">●</span> helm <span style="color:var(--ok)">●</span> notification <span style="color:{{k.ic}}">{{k.ig}}</span> image-automation</span>
+                  <span style="font-size:12px;color:{{k.nc}}">{{k.note}}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+  <dc-import name="StatusBar" theme="{{theme}}" left="flux 72/75 ready" hint-size="100%,26px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { show: 'all' };
+  }
+  vars() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    const D = '--editor:#111317;--panel:#15181D;--chrome:#1A1D22;--raise:#20242A;--hover:#1D2127;--line:#262A30;--line2:#323740;--guide:#2A2E35;--fg:#DCDFE4;--fg2:#B3B9C3;--mute:#8E96A3;--sep:#4C525C;--sel:#1F2C40;--selfg:#F2F6FC;--selline:#3A5A8C;--acc:#74ADFF;--onacc:#0C1220;--ok:#48C78E;--warn:#E8B04B;--err:#F26D6D;--sus:#9AA2AE;--okbg:rgba(72,199,142,.10);--errbg:rgba(242,109,109,.11);--warnbg:rgba(232,176,75,.10);--accbg:rgba(116,173,255,.12);--addbg:rgba(72,199,142,.12);--delbg:rgba(242,109,109,.13);--addfg:#7FDDB2;--delfg:#FF9C9C;--shadow:rgba(0,0,0,.5);color-scheme:dark;';
+    const L = '--editor:#FFFFFF;--panel:#F6F7F8;--chrome:#EEEFF1;--raise:#E9EBEE;--hover:#F1F2F4;--line:#E1E3E7;--line2:#CFD3D9;--guide:#E4E6EA;--fg:#1D2027;--fg2:#3B414B;--mute:#5F6774;--sep:#A5ABB5;--sel:#DCE7FA;--selfg:#0D2850;--selline:#8DB0EA;--acc:#1F5FD1;--onacc:#FFFFFF;--ok:#167A4C;--warn:#935800;--err:#C53030;--sus:#6B7280;--okbg:rgba(22,122,76,.08);--errbg:rgba(197,48,48,.07);--warnbg:rgba(147,88,0,.08);--accbg:rgba(31,95,209,.08);--addbg:rgba(22,122,76,.10);--delbg:rgba(197,48,48,.09);--addfg:#0F5E3A;--delfg:#A12626;--shadow:rgba(20,24,32,.18);color-scheme:light;';
+    return { theme: t, vars: t === 'light' ? L : D };
+  }
+  renderVals() {
+    const v = this.vars();
+    const C = { ok: 'var(--ok)', err: 'var(--err)', warn: 'var(--warn)', sus: 'var(--sus)', prog: 'var(--acc)', none: 'var(--sep)' };
+    const G = { ok: '●', err: '✕', warn: '▲', sus: '‖', prog: '◐', none: '–' };
+    const BG = { err: 'background:var(--errbg);', warn: 'background:var(--warnbg);' };
+    const c = (s, rev, note, behind, href) => ({ s, behind: !!behind, g: G[s], c: C[s], rev: rev || '', note: note || '', rc: behind ? 'var(--mute)' : 'var(--fg)', nc: s === 'err' ? 'var(--err)' : 'var(--mute)', bg: BG[s] || '', href: href || '#' });
+    const ok = (rev, note) => c('ok', rev, note || 'ready');
+    const none = () => c('none', '', 'not deployed');
+    const ks = [
+      { name: 'infra-controllers', sub: './infrastructure/controllers', cells: [ok('a41e07c'), ok('a41e07c'), ok('a41e07c'), ok('a41e07c')] },
+      { name: 'infra-configs', sub: 'dependsOn infra-controllers', cells: [ok('a41e07c'), ok('a41e07c'), ok('a41e07c'), ok('a41e07c')] },
+      { name: 'apps-payments', sub: './apps/payments/overlays/<cluster>', cells: [ok('a41e07c', 'ready · 3h'), ok('a41e07c', 'ready · 3h'), c('err', 'a41e07c', 'health check failed', false, 'Kustomization.dc.html'), c('sus', '7c2d9e0', 'suspended 2d · 2 behind', true, 'Kustomization.dc.html')] },
+      { name: 'apps-web', sub: './apps/web/overlays/<cluster>', cells: [ok('a41e07c'), ok('a41e07c'), ok('a41e07c'), ok('a41e07c')] },
+      { name: 'apps-search', sub: './apps/search/overlays/<cluster>', cells: [none(), c('prog', 'a41e07c', 'waiting on search-indexer-0'), ok('a41e07c'), ok('a41e07c')] },
+      { name: 'apps-ml', sub: './apps/ml', cells: [none(), none(), ok('a41e07c', 'ready · 1 pod pending'), none()] }
+    ];
+    const hr = [
+      { name: 'ingress-nginx', sub: 'ingress-nginx · chart 4.11.2', cells: [ok('4.11.2'), ok('4.11.2'), ok('4.11.2'), ok('4.11.2')] },
+      { name: 'cert-manager', sub: 'cert-manager · jetstack', cells: [ok('v1.15.3'), ok('v1.15.3'), ok('v1.15.3'), ok('v1.15.3')] },
+      { name: 'kube-prometheus-stack', sub: 'monitoring · prometheus-community', cells: [ok('61.9.0', 'ready', true), c('warn', '62.7.0', 'upgrade retry 2/3 · timeout', false, 'Changes.dc.html'), ok('61.9.0', 'ready', true), ok('61.9.0', 'ready', true)] },
+      { name: 'external-secrets', sub: 'external-secrets · 0.10.4', cells: [ok('0.10.4'), ok('0.10.4'), ok('0.10.4'), ok('0.10.4')] },
+      { name: 'karpenter', sub: 'kube-system · EKS only', cells: [none(), none(), ok('1.0.6'), ok('1.0.6')] }
+    ];
+    const show = this.state.show;
+    const outOfSync = (r) => r.cells.some((x) => x.s !== 'ok' && x.s !== 'none' || x.behind);
+    const groups = [];
+    if (show === 'all' || show === 'ks' || show === 'oos') {
+      const rows = show === 'oos' ? ks.filter(outOfSync) : ks;
+      if (rows.length) groups.push({ label: 'Kustomizations', count: rows.length + ' of 12', rows });
+    }
+    if (show === 'all' || show === 'hr' || show === 'oos') {
+      const rows = show === 'oos' ? hr.filter(outOfSync) : hr;
+      if (rows.length) groups.push({ label: 'HelmReleases', count: rows.length + ' of 9', rows });
+    }
+    const filters = [['all', 'All'], ['ks', 'Kustomizations'], ['hr', 'HelmReleases'], ['oos', 'Out of sync']].map((f) => ({
+      label: f[1], pressed: f[0] === show ? 'true' : 'false',
+      style: f[0] === show ? 'background:var(--sel);color:var(--selfg);' : 'background:transparent;color:var(--fg2);',
+      pick: () => this.setState({ show: f[0] })
+    }));
+    return {
+      theme: v.theme, vars: v.vars, groups, filters,
+      sources: [
+        { kind: 'GitRepository', name: 'flux-system/fleet-infra', url: 'ssh://git@github.com/acme/fleet-infra', ref: 'main', rev: 'a41e07c', age: '4m', on: '● 4/4' },
+        { kind: 'HelmRepository', name: 'flux-system/prometheus-community', url: 'https://prometheus-community.github.io/helm-charts', ref: '—', rev: 'index 2026-10-12', age: '12m', on: '● 4/4' },
+        { kind: 'OCIRepository', name: 'flux-system/ingress-nginx', url: 'oci://ghcr.io/acme/charts/ingress-nginx', ref: '4.11.x', rev: '4.11.2', age: '12m', on: '● 4/4' }
+      ],
+      controllers: [
+        { cluster: 'dev-kind', ver: 'v2.3.0', vc: 'var(--warn)', ig: '–', ic: 'var(--sep)', note: '▲ v2.4.0 available', nc: 'var(--warn)' },
+        { cluster: 'staging', ver: 'v2.4.0', vc: 'var(--fg)', ig: '●', ic: 'var(--ok)', note: 'healthy', nc: 'var(--mute)' },
+        { cluster: 'prod-us-east', ver: 'v2.4.0', vc: 'var(--fg)', ig: '●', ic: 'var(--ok)', note: 'healthy', nc: 'var(--mute)' },
+        { cluster: 'prod-eu-west', ver: 'v2.4.0', vc: 'var(--fg)', ig: '●', ic: 'var(--ok)', note: 'healthy', nc: 'var(--mute)' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

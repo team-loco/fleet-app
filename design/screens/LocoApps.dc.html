@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Loco applications — prod-us-east</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.hv:hover{background:var(--hover)}
+</style>
+</helmet>
+<div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--editor);width:100%;height:900px;display:flex;flex-direction:column;overflow:hidden">
+  <div style="flex:1;min-height:0;display:flex;flex-wrap:wrap">
+    <div style="flex:0 0 auto;display:flex"><dc-import name="Nav" theme="{{theme}}" mode="cluster" active="loco-apps" hint-size="360px,874px"></dc-import></div>
+    <div style="flex:999 1 560px;min-width:0;height:874px;display:flex;flex-wrap:wrap">
+
+      <div style="flex:999 1 440px;min-width:0;height:100%;display:flex;flex-direction:column;border-right:1px solid var(--line)">
+        <div style="height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line)">
+          <h1 style="margin:0;font-size:14px;font-weight:600">Applications</h1>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">214</span>
+          <span style="flex:1"></span>
+          <div role="group" aria-label="Filter" style="display:flex;border:1px solid var(--line2);border-radius:3px;overflow:hidden">
+            <sc-for list="{{filters}}" as="f" hint-placeholder-count="2">
+              <button aria-pressed="{{f.pressed}}" onClick="{{f.pick}}" style="height:22px;padding:0 9px;border:0;font-family:inherit;font-size:12px;cursor:pointer;{{f.style}}">{{f.label}}</button>
+            </sc-for>
+          </div>
+        </div>
+        <div style="flex:1;min-height:0;overflow:auto">
+          <sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+            <div>
+              <div style="display:flex;align-items:baseline;gap:10px;height:26px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line)">
+                <span style="font-size:12.5px;font-weight:600;line-height:26px">{{g.name}}</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">{{g.ns}}</span>
+              </div>
+              <sc-for list="{{g.apps}}" as="a" hint-placeholder-count="3">
+                <button class="hv" onClick="{{a.pick}}" aria-pressed="{{a.selected}}" style="display:grid;grid-template-columns:14px minmax(100px,1fr) 84px 56px 64px;column-gap:10px;align-items:center;width:100%;height:28px;padding:0 16px;border:0;border-bottom:1px solid var(--line);text-align:left;font-family:inherit;font-size:12.5px;color:var(--fg);cursor:pointer;{{a.style}}">
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:{{a.c}}">{{a.g}}</span>
+                  <span style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{a.name}}</span>
+                  <span style="color:var(--mute)">{{a.env}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:{{a.rc}}">{{a.replicas}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{a.rev}}</span>
+                </button>
+              </sc-for>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="flex:1 1 440px;min-width:0;height:100%;overflow:auto">
+        <div style="padding:14px 16px 12px;display:flex;flex-direction:column;gap:6px;border-bottom:1px solid var(--line)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <h2 style="margin:0;font-size:16px;font-weight:600">{{sel.name}}</h2>
+            <span style="font-size:12.5px;color:{{sel.c}}">{{sel.g}} {{sel.phase}}</span>
+            <span style="flex:1"></span>
+            <button style="height:24px;padding:0 10px;border:1px solid var(--line2);border-radius:3px;background:transparent;color:var(--fg2);font-family:inherit;font-size:12px;cursor:pointer">Logs</button>
+            <button aria-label="More actions" style="height:24px;width:28px;border:1px solid var(--line2);border-radius:3px;background:transparent;color:var(--fg2);font-family:inherit;font-size:13px;cursor:pointer;padding:0">⋯</button>
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--mute)">{{sel.workspace}} · {{sel.env}} · us-east · {{sel.host}}</div>
+          <sc-if value="{{sel.hasProblem}}" hint-placeholder-val="{{ true }}">
+            <div style="margin-top:6px;padding:8px 10px;border-radius:3px;background:var(--errbg);box-shadow:inset 0 0 0 1px var(--err);font-size:12.5px;line-height:1.5">
+              <div>{{sel.problem}}</div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{sel.reason}}</div>
+            </div>
+          </sc-if>
+        </div>
+
+        <div style="padding:12px 16px 4px;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Deployment</div>
+        <dl style="margin:0;padding:0 16px 12px;display:grid;grid-template-columns:110px minmax(0,1fr);row-gap:5px;column-gap:12px;font-size:12.5px;border-bottom:1px solid var(--line)">
+          <dt style="color:var(--mute)">Image</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;word-break:break-all">{{sel.image}}</dd>
+          <dt style="color:var(--mute)">Deployment</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px">{{sel.dep}}</dd>
+          <dt style="color:var(--mute)">Placement</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px">{{sel.placement}}</dd>
+          <dt style="color:var(--mute)">Resources</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px">{{sel.res}}</dd>
+          <dt style="color:var(--mute)">Health check</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px">{{sel.hc}}</dd>
+        </dl>
+
+        <div style="padding:12px 16px 4px;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Created by the controller</div>
+        <div style="border-bottom:1px solid var(--line)">
+          <sc-for list="{{sel.objects}}" as="o" hint-placeholder-count="6">
+            <div class="hv" style="display:grid;grid-template-columns:14px 120px minmax(0,1fr);column-gap:10px;align-items:center;height:24px;padding:0 16px;font-size:12.5px">
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:{{o.c}}">{{o.g}}</span>
+              <span style="color:var(--mute)">{{o.kind}}</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:{{o.dc}};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{o.detail}}</span>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="padding:12px 16px 4px;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Route</div>
+        <div style="padding:0 16px 16px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--fg2);line-height:1.7">{{sel.route}} <a href="LocoRoutes.dc.html" style="color:var(--acc);text-decoration:none;font-family:'IBM Plex Sans',sans-serif">→</a></div>
+      </div>
+    </div>
+  </div>
+  <dc-import name="StatusBar" theme="{{theme}}" left="EKS · us-east-1 · v1.31.2" agent="4s ago" hint-size="100%,26px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { sel: 'checkout', only: 'all' };
+  }
+  vars() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    const D = '--editor:#111317;--panel:#15181D;--chrome:#1A1D22;--raise:#20242A;--hover:#1D2127;--line:#262A30;--line2:#323740;--guide:#2A2E35;--fg:#DCDFE4;--fg2:#B3B9C3;--mute:#8E96A3;--sep:#4C525C;--sel:#1F2C40;--selfg:#F2F6FC;--selline:#3A5A8C;--acc:#74ADFF;--onacc:#0C1220;--ok:#48C78E;--warn:#E8B04B;--err:#F26D6D;--sus:#9AA2AE;--okbg:rgba(72,199,142,.10);--errbg:rgba(242,109,109,.11);--warnbg:rgba(232,176,75,.10);--accbg:rgba(116,173,255,.12);--addbg:rgba(72,199,142,.12);--delbg:rgba(242,109,109,.13);--addfg:#7FDDB2;--delfg:#FF9C9C;--shadow:rgba(0,0,0,.5);color-scheme:dark;';
+    const L = '--editor:#FFFFFF;--panel:#F6F7F8;--chrome:#EEEFF1;--raise:#E9EBEE;--hover:#F1F2F4;--line:#E1E3E7;--line2:#CFD3D9;--guide:#E4E6EA;--fg:#1D2027;--fg2:#3B414B;--mute:#5F6774;--sep:#A5ABB5;--sel:#DCE7FA;--selfg:#0D2850;--selline:#8DB0EA;--acc:#1F5FD1;--onacc:#FFFFFF;--ok:#167A4C;--warn:#935800;--err:#C53030;--sus:#6B7280;--okbg:rgba(22,122,76,.08);--errbg:rgba(197,48,48,.07);--warnbg:rgba(147,88,0,.08);--accbg:rgba(31,95,209,.08);--addbg:rgba(22,122,76,.10);--delbg:rgba(197,48,48,.09);--addfg:#0F5E3A;--delfg:#A12626;--shadow:rgba(20,24,32,.18);color-scheme:light;';
+    return { theme: t, vars: t === 'light' ? L : D };
+  }
+  renderVals() {
+    const v = this.vars();
+    const PH = { Ready: ['●', 'var(--ok)'], Failed: ['✕', 'var(--err)'], Deploying: ['◐', 'var(--acc)'] };
+    const A = (id, name, env, phase, replicas, rev, ws) => ({ id, name, env, phase, replicas, rev, ws });
+    const data = [
+      { name: 'acme / payments', ns: 'ws-0192c3e7', apps: [
+        A('checkout', 'checkout', 'production', 'Failed', '0/2', 'r14', 'acme / payments'),
+        A('checkout-worker', 'checkout-worker', 'production', 'Ready', '2/2', 'r9', 'acme / payments'),
+        A('auth', 'auth', 'production', 'Ready', '3/3', 'r31', 'acme / payments')
+      ] },
+      { name: 'acme / web', ns: 'ws-0192c3f1', apps: [
+        A('frontend', 'frontend', 'production', 'Ready', '4/4', 'r22', 'acme / web'),
+        A('frontend-stg', 'frontend', 'staging', 'Deploying', '1/2', 'r7', 'acme / web'),
+        A('docs', 'docs', 'production', 'Deploying', '1/1', 'r3', 'acme / web')
+      ] },
+      { name: 'beta / core', ns: 'ws-0192d0aa', apps: [
+        A('api', 'api', 'production', 'Ready', '2/2', 'r21 → r22', 'beta / core'),
+        A('jobs', 'jobs', 'production', 'Ready', '1/1', 'r5', 'beta / core')
+      ] }
+    ];
+    const only = this.state.only;
+    const groups = data.map((g) => ({
+      name: g.name, ns: g.ns,
+      apps: g.apps.filter((a) => only === 'all' || a.phase !== 'Ready' || a.rev.indexOf('→') >= 0).map((a) => {
+        const on = a.id === this.state.sel;
+        return { ...a, g: PH[a.phase][0], c: PH[a.phase][1], rc: a.phase === 'Ready' ? 'var(--fg2)' : PH[a.phase][1],
+          selected: on ? 'true' : 'false',
+          style: on ? 'background:var(--sel);box-shadow:inset 0 0 0 1px var(--selline);' : 'background:transparent;',
+          pick: () => this.setState({ sel: a.id }) };
+      })
+    })).filter((g) => g.apps.length);
+    const filters = [['all', 'All'], ['issues', 'Not ready']].map((f) => ({
+      label: f[1], pressed: f[0] === only ? 'true' : 'false',
+      style: f[0] === only ? 'background:var(--sel);color:var(--selfg);' : 'background:transparent;color:var(--fg2);',
+      pick: () => this.setState({ only: f[0] })
+    }));
+    const O = (s, kind, detail) => ({ g: s === 'err' ? '✕' : (s === 'warn' ? '▲' : '●'), c: s === 'err' ? 'var(--err)' : (s === 'warn' ? 'var(--warn)' : 'var(--ok)'), kind, detail, dc: s === 'ok' ? 'var(--fg2)' : (s === 'err' ? 'var(--err)' : 'var(--warn)') });
+    const all = [].concat(...data.map((g) => g.apps));
+    const a = all.find((x) => x.id === this.state.sel) || all[0];
+    const ns = data.find((g) => g.apps.indexOf(a) >= 0).ns;
+    const host = a.env === 'staging' ? a.name + '-staging.onloco.app' : a.name + '.onloco.app';
+    const isChk = a.id === 'checkout';
+    const sel = {
+      name: a.name, env: a.env, workspace: a.ws, host, phase: a.phase, g: PH[a.phase][0], c: PH[a.phase][1],
+      hasProblem: isChk,
+      problem: 'The image runs as root. Loco runs containers as a non-root user; use an image that sets a non-root USER.',
+      reason: 'Degraded · CreateContainerConfigError · since 6m',
+      image: 'loco-registry:5000/acme/' + a.name + '@sha256:9e1c…44d0',
+      dep: isChk ? '0192f4b2 · 6m ago · build 0192f3a1' : '0192e8c0 · 2d ago',
+      placement: isChk ? 'rev 14 desired · rev 14 applied by agent' : 'rev ' + a.rev.replace('r', '') + ' applied',
+      res: 'cpu 500m · mem 512Mi · 2–6 replicas · scale at 70% cpu',
+      hc: 'GET /healthz · every 10s · timeout 3s · fail after 3',
+      objects: [
+        O(isChk ? 'err' : 'ok', 'Deployment', ns + '/' + a.name + ' · ' + a.replicas + ' ready'),
+        O('ok', 'Service', ns + '/' + a.name + ' · :8080'),
+        O('ok', 'HTTPRoute', ns + '/' + a.name + ' · Accepted'),
+        O('ok', 'Secret', ns + '/' + a.name + '-env · revision 6'),
+        O('ok', 'ServiceAccount', ns + '/' + a.name),
+        O('ok', 'NetworkPolicy', ns + ' · workspace isolation + gateway ingress')
+      ],
+      route: host + ' → Gateway eg · https-apps-0 → ' + ns + '/' + a.name + ':8080'
+    };
+    return { theme: v.theme, vars: v.vars, groups, filters, sel };
+  }
+}
+</script>
+</body>
+</html>

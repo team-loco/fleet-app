@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Go to anything</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div style="{{vars}}position:relative;width:100%;height:900px;overflow:hidden;font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--editor)">
+  <dc-import name="Fleet" theme="{{theme}}" hint-size="100%,900px"></dc-import>
+  <div style="position:absolute;inset:0;{{scrim}}"></div>
+  <div role="dialog" aria-label="Go to anything" style="position:absolute;top:64px;left:50%;transform:translateX(-50%);width:680px;max-width:calc(100% - 32px);background:var(--panel);border:1px solid var(--line2);border-radius:4px;box-shadow:0 18px 48px var(--shadow);overflow:hidden;display:flex;flex-direction:column">
+    <label style="display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;border-bottom:1px solid var(--line)">
+      <span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Query</span>
+      <input value="checkout" style="flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--fg);font-family:'IBM Plex Mono',monospace;font-size:14px">
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">11 matches · 6 clusters</span>
+    </label>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;padding:6px 12px;border-bottom:1px solid var(--line);font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">
+      <span><span style="color:var(--fg2)">@</span>cluster</span>
+      <span><span style="color:var(--fg2)">ns:</span>namespace</span>
+      <span><span style="color:var(--fg2)">k:</span>kind</span>
+      <span><span style="color:var(--fg2)">l:</span>label=value</span>
+      <span><span style="color:var(--fg2)">&gt;</span>command</span>
+    </div>
+    <div role="listbox" aria-label="Results" style="display:flex;flex-direction:column;padding:4px 0;max-height:560px;overflow:auto">
+      <div style="padding:6px 12px 4px;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Resources</div>
+      <sc-for list="{{resources}}" as="r" hint-placeholder-count="6">
+        <a role="option" aria-selected="{{r.selected}}" href="{{r.href}}" style="display:grid;grid-template-columns:52px minmax(0,1fr) 92px 104px 132px;column-gap:12px;align-items:center;height:28px;padding:0 12px;text-decoration:none;color:var(--fg);font-size:12.5px;{{r.style}}">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">{{r.kind}}</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:var(--acc)">{{r.hit}}</span>{{r.rest}}</span>
+          <span style="color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{r.ns}}</span>
+          <span style="color:var(--fg2);white-space:nowrap">{{r.cluster}}</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:{{r.c}};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{r.status}}</span>
+        </a>
+      </sc-for>
+      <div style="padding:10px 12px 4px;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Commands</div>
+      <sc-for list="{{commands}}" as="a" hint-placeholder-count="4">
+        <a role="option" aria-selected="false" href="{{a.href}}" style="display:flex;align-items:center;gap:12px;height:28px;padding:0 12px;text-decoration:none;color:var(--fg);font-size:12.5px">
+          <span style="width:52px;flex:none;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">&gt;</span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{a.label}}</span>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">{{a.key}}</span>
+        </a>
+      </sc-for>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:16px;padding:6px 12px;border-top:1px solid var(--line);background:var(--chrome);font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">
+      <span>↑↓ move</span><span>↵ open</span><span>⌘↵ open in split</span><span>⌥↵ open in new window</span><span style="flex:1"></span><span>esc</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  vars() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    const D = '--editor:#111317;--panel:#15181D;--chrome:#1A1D22;--raise:#20242A;--hover:#1D2127;--line:#262A30;--line2:#323740;--guide:#2A2E35;--fg:#DCDFE4;--fg2:#B3B9C3;--mute:#8E96A3;--sep:#4C525C;--sel:#1F2C40;--selfg:#F2F6FC;--selline:#3A5A8C;--acc:#74ADFF;--onacc:#0C1220;--ok:#48C78E;--warn:#E8B04B;--err:#F26D6D;--sus:#9AA2AE;--okbg:rgba(72,199,142,.10);--errbg:rgba(242,109,109,.11);--warnbg:rgba(232,176,75,.10);--accbg:rgba(116,173,255,.12);--addbg:rgba(72,199,142,.12);--delbg:rgba(242,109,109,.13);--addfg:#7FDDB2;--delfg:#FF9C9C;--shadow:rgba(0,0,0,.5);color-scheme:dark;';
+    const L = '--editor:#FFFFFF;--panel:#F6F7F8;--chrome:#EEEFF1;--raise:#E9EBEE;--hover:#F1F2F4;--line:#E1E3E7;--line2:#CFD3D9;--guide:#E4E6EA;--fg:#1D2027;--fg2:#3B414B;--mute:#5F6774;--sep:#A5ABB5;--sel:#DCE7FA;--selfg:#0D2850;--selline:#8DB0EA;--acc:#1F5FD1;--onacc:#FFFFFF;--ok:#167A4C;--warn:#935800;--err:#C53030;--sus:#6B7280;--okbg:rgba(22,122,76,.08);--errbg:rgba(197,48,48,.07);--warnbg:rgba(147,88,0,.08);--accbg:rgba(31,95,209,.08);--addbg:rgba(22,122,76,.10);--delbg:rgba(197,48,48,.09);--addfg:#0F5E3A;--delfg:#A12626;--shadow:rgba(20,24,32,.18);color-scheme:light;';
+    return { theme: t, vars: t === 'light' ? L : D };
+  }
+  renderVals() {
+    const v = this.vars();
+    const R = (kind, hit, rest, ns, cluster, status, c, href, sel) => ({ kind, hit, rest, ns, cluster, status, c, href: href || '#', selected: sel ? 'true' : 'false', style: sel ? 'background:var(--sel);box-shadow:inset 0 0 0 1px var(--selline);' : '' });
+    return {
+      theme: v.theme,
+      vars: v.vars,
+      scrim: v.theme === 'light' ? 'background:rgba(20,24,32,.22);' : 'background:rgba(4,5,7,.55);',
+      resources: [
+        R('deploy', 'checkout', '-api', 'payments', 'prod-us-east', '✕ 2/3 ready', 'var(--err)', 'Workload.dc.html', true),
+        R('pod', 'checkout', '-api-7f9c6d-x2lqp', 'payments', 'prod-us-east', '✕ CrashLoopBackOff', 'var(--err)', 'Workload.dc.html'),
+        R('deploy', 'checkout', '-api', 'payments', 'prod-eu-west', '● 3/3 · 2.13.4', 'var(--ok)'),
+        R('deploy', 'checkout', '-api', 'payments', 'staging', '● 2/2', 'var(--ok)'),
+        R('deploy', 'checkout', '-api', 'payments', 'dev-kind', '● 1/1', 'var(--ok)'),
+        R('svc', 'checkout', '-api', 'payments', 'prod-us-east', 'ClusterIP :80', 'var(--mute)'),
+        R('secret', 'checkout', '-api-env', 'payments', 'prod-us-east', 'Opaque · 4 keys', 'var(--mute)')
+      ],
+      commands: [
+        { label: 'Logs: follow all checkout-api pods on prod-us-east', key: '⌘L', href: 'Workload.dc.html' },
+        { label: 'Compare deploy/checkout-api across clusters', key: '⌘⇧D', href: '#' },
+        { label: 'Show Flux owner of deploy/checkout-api', key: '⌘⇧G', href: 'Kustomization.dc.html' },
+        { label: 'Port-forward svc/checkout-api 8080 → 80', key: '', href: '#' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

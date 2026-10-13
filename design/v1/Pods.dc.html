@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pods — prod-us-east</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:var(--acc)}
+.tr:hover{background:var(--hover)}
+</style>
+</helmet>
+<div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--bg);width:100%;min-height:900px;display:flex;flex-direction:column">
+  <dc-import name="Titlebar" theme="{{theme}}" crumb="Workloads / Pods" mode="cluster" hint-size="100%,40px"></dc-import>
+  <div style="flex:1;display:flex;flex-wrap:wrap;min-height:834px">
+    <div style="flex:1 1 268px;display:flex">
+      <dc-import name="Sidebar" theme="{{theme}}" active="pods" mode="cluster" hint-size="268px,834px"></dc-import>
+    </div>
+    <main style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+
+      <div style="padding:14px 20px 12px;display:flex;flex-direction:column;gap:12px;border-bottom:1px solid var(--line)">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px">
+          <h1 style="margin:0;font-size:18px;font-weight:600;display:flex;align-items:baseline;gap:8px">Pods <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:400;color:var(--mute)">412</span></h1>
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+            <label style="display:flex;align-items:center;gap:8px;height:28px;width:260px;max-width:100%;box-sizing:border-box;padding:0 10px;border:1px solid var(--line2);border-radius:6px;background:var(--panel);color:var(--mute)">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.25 10.25 3.25 3.25"/></svg>
+              <span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Filter pods</span>
+              <input placeholder="Filter by name, label, node…" style="flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--fg);font-family:inherit;font-size:12.5px">
+            </label>
+            <button style="display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line2);background:var(--panel);color:var(--fg);font-family:inherit;font-size:12.5px;cursor:pointer">Namespace: all
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--mute)"><path d="m4 6 4 4 4-4"/></svg>
+            </button>
+            <button aria-label="Create resource" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;border:1px solid var(--line2);background:var(--panel);color:var(--fg);cursor:pointer">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+            </button>
+          </div>
+        </div>
+        <div role="group" aria-label="Status filter" style="display:flex;flex-wrap:wrap;gap:6px">
+          <sc-for list="{{filters}}" as="f" hint-placeholder-count="4">
+            <button aria-pressed="{{f.pressed}}" onClick="{{f.pick}}" style="display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;font-family:inherit;font-size:12px;cursor:pointer;{{f.style}}"><span style="width:6px;height:6px;border-radius:50%;background:{{f.c}}"></span>{{f.label}}<span style="font-family:'IBM Plex Mono',monospace;color:var(--mute)">{{f.n}}</span></button>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="flex:1;display:flex;flex-wrap:wrap;min-height:0">
+        <div style="flex:999 1 480px;min-width:0;overflow:auto;max-height:480px">
+          <div style="min-width:640px">
+            <div style="display:grid;grid-template-columns:minmax(220px,2fr) 100px 72px 64px 48px 150px;column-gap:14px;padding:0 20px;height:30px;align-items:center;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--mute);border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg)">
+              <span>Name</span><span>Namespace</span><span>Ctrs</span><span style="text-align:right">Restarts</span><span>Age</span><span>Status</span>
+            </div>
+            <sc-for list="{{rows}}" as="p" hint-placeholder-count="12">
+              <button class="tr" onClick="{{p.pick}}" aria-pressed="{{p.selected}}" style="display:grid;grid-template-columns:minmax(220px,2fr) 100px 72px 64px 48px 150px;column-gap:14px;padding:0 20px;height:30px;align-items:center;width:100%;border:0;border-bottom:1px solid var(--line);text-align:left;font-family:inherit;font-size:12.5px;color:var(--fg);cursor:pointer;{{p.rowStyle}}">
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{p.n}}</span>
+                <span style="color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{p.ns}}</span>
+                <span style="display:flex;gap:3px"><sc-for list="{{p.dots}}" as="d" hint-placeholder-count="1"><span style="width:8px;height:8px;border-radius:2px;background:{{d}}"></span></sc-for></span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;text-align:right;{{p.rStyle}}">{{p.r}}</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--mute)">{{p.age}}</span>
+                <span style="display:flex;align-items:center;gap:6px;color:{{p.c}};font-weight:500;white-space:nowrap"><span style="width:6px;height:6px;border-radius:50%;background:{{p.c}}"></span>{{p.st}}</span>
+              </button>
+            </sc-for>
+          </div>
+        </div>
+
+        <aside aria-label="Pod details" style="flex:1 1 360px;min-width:0;max-height:480px;overflow:auto;border-left:1px solid var(--line);background:var(--panel2);display:flex;flex-direction:column">
+          <div style="padding:14px 16px 12px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;align-items:flex-start;gap:8px">
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
+                <span style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)">Pod</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500;word-break:break-all">{{sel.n}}</span>
+              </div>
+              <span style="flex:none;display:flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:11px;font-size:11.5px;font-weight:500;color:{{sel.c}};background:{{sel.cbg}}">{{sel.st}}</span>
+            </div>
+            <div role="toolbar" aria-label="Pod actions" style="display:flex;flex-wrap:wrap;gap:6px">
+              <button onClick="{{showLogs}}" style="display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;border-radius:6px;border:1px solid var(--line2);background:var(--panel);color:var(--fg);font-family:inherit;font-size:12px;cursor:pointer"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg>Logs</button>
+              <button onClick="{{showShell}}" style="display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;border-radius:6px;border:1px solid var(--line2);background:var(--panel);color:var(--fg);font-family:inherit;font-size:12px;cursor:pointer"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.75" y="2.5" width="12.5" height="11" rx="1.5"/><path d="m4.5 6 2 2-2 2M8.5 10.5h3"/></svg>Shell</button>
+              <button style="display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;border-radius:6px;border:1px solid var(--line2);background:var(--panel);color:var(--fg);font-family:inherit;font-size:12px;cursor:pointer"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 2.5l3 3L6 13H3v-3z"/></svg>YAML</button>
+              <button style="display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;border-radius:6px;border:1px solid var(--line2);background:var(--panel);color:var(--fg);font-family:inherit;font-size:12px;cursor:pointer"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8h10M9.5 5l3 3-3 3"/></svg>Forward</button>
+              <button aria-label="Delete pod" style="display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;border:1px solid var(--line2);background:var(--panel);color:var(--err);cursor:pointer"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.5h11M6 4.5V3h4v1.5M4 4.5l.75 9h6.5l.75-9"/></svg></button>
+            </div>
+          </div>
+          <dl style="margin:0;padding:12px 16px;display:grid;grid-template-columns:110px minmax(0,1fr);row-gap:7px;column-gap:12px;font-size:12.5px;border-bottom:1px solid var(--line)">
+            <dt style="color:var(--mute)">Namespace</dt><dd style="margin:0">{{sel.ns}}</dd>
+            <dt style="color:var(--mute)">Node</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:12px">{{sel.node}}</dd>
+            <dt style="color:var(--mute)">Pod IP</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:12px">{{sel.ip}}</dd>
+            <dt style="color:var(--mute)">Controlled by</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--acc)">{{sel.ctrl}}</dd>
+            <dt style="color:var(--mute)">QoS</dt><dd style="margin:0">{{sel.qos}}</dd>
+            <dt style="color:var(--mute)">Created</dt><dd style="margin:0">{{sel.age}} ago</dd>
+          </dl>
+          <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line)">
+            <span style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)">Labels</span>
+            <div style="display:flex;flex-wrap:wrap;gap:4px">
+              <sc-for list="{{sel.labels}}" as="lb" hint-placeholder-count="3"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:2px 6px;border-radius:4px;background:var(--raise);color:var(--fg2)">{{lb}}</span></sc-for>
+            </div>
+          </div>
+          <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px">
+            <span style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)">Containers</span>
+            <sc-for list="{{sel.ctrs}}" as="k" hint-placeholder-count="2">
+              <div style="border:1px solid var(--line);border-radius:6px;padding:10px 12px;background:var(--panel);display:flex;flex-direction:column;gap:5px">
+                <div style="display:flex;align-items:center;gap:8px;font-weight:500"><span style="width:8px;height:8px;border-radius:2px;background:{{k.c}}"></span><span style="flex:1">{{k.name}}</span><span style="font-size:12px;color:{{k.c}}">{{k.state}}</span></div>
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--fg2);word-break:break-all">{{k.image}}</div>
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{k.meta}}</div>
+              </div>
+            </sc-for>
+          </div>
+        </aside>
+      </div>
+
+      <section aria-label="Dock" style="height:262px;flex:none;border-top:1px solid var(--line);background:var(--chrome);display:flex;flex-direction:column;min-width:0">
+        <div style="display:flex;align-items:center;gap:2px;height:34px;padding:0 8px;border-bottom:1px solid var(--line);overflow-x:auto">
+          <div role="tablist" aria-label="Dock tabs" style="display:flex;gap:2px">
+            <button role="tab" aria-selected="{{isLogs}}" onClick="{{showLogs}}" style="display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:6px;border:0;font-family:inherit;font-size:12px;cursor:pointer;white-space:nowrap;{{logsTab}}"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg>Logs · {{sel.short}}</button>
+            <button role="tab" aria-selected="{{isShell}}" onClick="{{showShell}}" style="display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:6px;border:0;font-family:inherit;font-size:12px;cursor:pointer;white-space:nowrap;{{shellTab}}"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.75" y="2.5" width="12.5" height="11" rx="1.5"/><path d="m4.5 6 2 2-2 2M8.5 10.5h3"/></svg>Shell · {{sel.short}}</button>
+          </div>
+          <button aria-label="New terminal" style="width:26px;height:26px;display:flex;align-items:center;justify-content:center;border:0;border-radius:6px;background:transparent;color:var(--mute);cursor:pointer"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg></button>
+          <div style="flex:1"></div>
+          <sc-if value="{{isLogs}}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap">
+              <button style="display:flex;align-items:center;gap:5px;height:24px;padding:0 8px;border-radius:5px;border:1px solid var(--line2);background:var(--panel);color:var(--fg);font-family:'IBM Plex Mono',monospace;font-size:11.5px;cursor:pointer">{{sel.c0}}<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
+              <button aria-pressed="true" style="height:24px;padding:0 8px;border-radius:5px;border:0;background:var(--sel);color:var(--selfg);font-family:inherit;font-size:12px;cursor:pointer">Follow</button>
+              <button aria-pressed="true" style="height:24px;padding:0 8px;border-radius:5px;border:0;background:var(--sel);color:var(--selfg);font-family:inherit;font-size:12px;cursor:pointer">Timestamps</button>
+              <button aria-pressed="false" style="height:24px;padding:0 8px;border-radius:5px;border:0;background:transparent;color:var(--fg2);font-family:inherit;font-size:12px;cursor:pointer">Previous container</button>
+              <button aria-label="Download logs" style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;border:0;border-radius:5px;background:transparent;color:var(--fg2);cursor:pointer"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M4.75 7.5 8 10.75l3.25-3.25M3 13.5h10"/></svg></button>
+            </div>
+          </sc-if>
+        </div>
+        <sc-if value="{{isLogs}}" hint-placeholder-val="{{ true }}">
+          <div style="flex:1;overflow:auto;padding:8px 14px;font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:19px">
+            <sc-for list="{{logs}}" as="l" hint-placeholder-count="8">
+              <div style="display:flex;gap:14px;white-space:pre"><span style="color:var(--mute)">{{l.ts}}</span><span style="color:{{l.c}};width:40px;flex:none">{{l.lvl}}</span><span style="color:var(--fg)">{{l.msg}}</span></div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{isShell}}" hint-placeholder-val="{{ false }}">
+          <div style="flex:1;overflow:auto;padding:8px 14px;font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:19px">
+            <sc-for list="{{shell}}" as="s" hint-placeholder-count="6">
+              <div style="white-space:pre-wrap;color:{{s.c}}">{{s.t}}</div>
+            </sc-for>
+            <div style="display:flex;align-items:center;gap:0;color:var(--fg)">{{prompt}}<span style="width:7px;height:15px;background:var(--fg);margin-left:2px"></span></div>
+          </div>
+        </sc-if>
+      </section>
+    </main>
+  </div>
+  <footer style="height:26px;box-sizing:border-box;border-top:1px solid var(--line);background:var(--chrome);display:flex;align-items:center;gap:16px;padding:0 12px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute);overflow:hidden;white-space:nowrap">
+    <span style="display:flex;align-items:center;gap:6px"><span style="width:7px;height:7px;border-radius:50%;background:var(--ok)"></span>connected</span>
+    <span>~/.kube/eks/prod.yaml</span>
+    <span style="flex:1"></span>
+    <span>3 port-forwards</span><span>watching 412 pods</span><span>⌘J dock</span>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { sel: 0, tab: 'logs', filter: 'all' };
+  }
+  resolveTheme() {
+    const t = this.props.theme ?? 'system';
+    if (t === 'dark' || t === 'light') return t;
+    try { return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { return 'dark'; }
+  }
+  themeVars(t) {
+    const d = { bg:'#0D0F12', chrome:'#0B0D10', panel:'#13161B', panel2:'#111419', raise:'#1C2129', line:'#252A33', line2:'#2C323C', fg:'#D7DCE3', fg2:'#B9C0CB', mute:'#8B93A1', sep:'#4B5260', sel:'#1D2A3F', selfg:'#FFFFFF', acc:'#6AA6FF', onacc:'#0B0D10', ok:'#3FC58A', warn:'#F0B24A', err:'#FF6B6B', ai:'#B48CFF', track:'#1F242C', hover:'#171B21', okbg:'rgba(63,197,138,.13)', errbg:'rgba(255,107,107,.13)', warnbg:'rgba(240,178,74,.12)', accbg:'rgba(106,166,255,.14)' };
+    const l = { bg:'#F6F7F9', chrome:'#ECEEF2', panel:'#FFFFFF', panel2:'#FAFBFC', raise:'#F0F2F5', line:'#DDE1E7', line2:'#CDD2DA', fg:'#1B1F26', fg2:'#3A414C', mute:'#5E6673', sep:'#A3AAB5', sel:'#DCE8FB', selfg:'#0B2A57', acc:'#2563D9', onacc:'#FFFFFF', ok:'#17784B', warn:'#9A5B00', err:'#C93434', ai:'#7C4DDB', track:'#E6E9EE', hover:'#F1F3F6', okbg:'rgba(23,120,75,.10)', errbg:'rgba(201,52,52,.09)', warnbg:'rgba(154,91,0,.10)', accbg:'rgba(37,99,217,.10)' };
+    const m = t === 'light' ? l : d;
+    return Object.keys(m).map((k) => '--' + k + ':' + m[k] + ';').join('') + 'color-scheme:' + t + ';';
+  }
+  renderVals() {
+    const theme = this.resolveTheme();
+    const S = {
+      Running: ['var(--ok)', 'var(--okbg)', 'running'],
+      CrashLoopBackOff: ['var(--err)', 'var(--errbg)', 'failed'],
+      Pending: ['var(--warn)', 'var(--warnbg)', 'pending'],
+      ContainerCreating: ['var(--warn)', 'var(--warnbg)', 'pending'],
+      'Running · not ready': ['var(--warn)', 'var(--warnbg)', 'running']
+    };
+    const pods = [
+      { n:'checkout-api-7f9c6d-x2lqp', ns:'payments', st:'CrashLoopBackOff', r:14, age:'3h', node:'ip-10-4-12-87.ec2.internal', ip:'10.4.13.22', ctrl:'ReplicaSet/checkout-api-7f9c6d', qos:'Burstable', labels:['app=checkout-api','pod-template-hash=7f9c6d','version=2.14.0'], ctrs:[['api','ghcr.io/acme/checkout-api:2.14.0','CrashLoopBackOff','restarts 14 · exit 1 · :8080'],['envoy','envoyproxy/envoy:v1.31.2','Running','restarts 0 · :9901']] },
+      { n:'checkout-api-7f9c6d-m8vtn', ns:'payments', st:'Running', r:0, age:'3h', node:'ip-10-4-14-201.ec2.internal', ip:'10.4.15.9', ctrl:'ReplicaSet/checkout-api-7f9c6d', qos:'Burstable', labels:['app=checkout-api','version=2.14.0'], ctrs:[['api','ghcr.io/acme/checkout-api:2.14.0','Running','restarts 0 · :8080'],['envoy','envoyproxy/envoy:v1.31.2','Running','restarts 0 · :9901']] },
+      { n:'checkout-api-7f9c6d-q4zhk', ns:'payments', st:'Running', r:0, age:'3h', node:'ip-10-4-22-63.ec2.internal', ip:'10.4.23.140', ctrl:'ReplicaSet/checkout-api-7f9c6d', qos:'Burstable', labels:['app=checkout-api','version=2.14.0'], ctrs:[['api','ghcr.io/acme/checkout-api:2.14.0','Running','restarts 0 · :8080'],['envoy','envoyproxy/envoy:v1.31.2','Running','restarts 0 · :9901']] },
+      { n:'payments-worker-5d8b-7hx2c', ns:'payments', st:'Running', r:1, age:'2d', node:'ip-10-4-12-87.ec2.internal', ip:'10.4.13.57', ctrl:'ReplicaSet/payments-worker-5d8b', qos:'Guaranteed', labels:['app=payments-worker'], ctrs:[['worker','ghcr.io/acme/payments-worker:1.9.3','Running','restarts 1']] },
+      { n:'payments-db-0', ns:'payments', st:'Running', r:0, age:'34d', node:'ip-10-4-30-5.ec2.internal', ip:'10.4.31.18', ctrl:'StatefulSet/payments-db', qos:'Guaranteed', labels:['app=payments-db','role=primary'], ctrs:[['postgres','postgres:16.4','Running','restarts 0 · :5432']] },
+      { n:'web-frontend-84d6f-2xk9p', ns:'web', st:'Running', r:0, age:'21m', node:'ip-10-4-22-63.ec2.internal', ip:'10.4.23.77', ctrl:'ReplicaSet/web-frontend-84d6f', qos:'Burstable', labels:['app=web-frontend'], ctrs:[['web','ghcr.io/acme/web-frontend:5.2.1','Running','restarts 0 · :3000']] },
+      { n:'web-frontend-84d6f-c7v3n', ns:'web', st:'Running', r:0, age:'21m', node:'ip-10-4-14-201.ec2.internal', ip:'10.4.15.62', ctrl:'ReplicaSet/web-frontend-84d6f', qos:'Burstable', labels:['app=web-frontend'], ctrs:[['web','ghcr.io/acme/web-frontend:5.2.1','Running','restarts 0 · :3000']] },
+      { n:'search-indexer-0', ns:'search', st:'Running · not ready', r:2, age:'6d', node:'ip-10-4-30-5.ec2.internal', ip:'10.4.31.44', ctrl:'StatefulSet/search-indexer', qos:'Burstable', labels:['app=search-indexer'], ctrs:[['indexer','ghcr.io/acme/search-indexer:0.18.0','Running · not ready','restarts 2 · readiness 503']] },
+      { n:'ml-batch-5c7f-9kq2d', ns:'ml', st:'Pending', r:0, age:'6m', node:'—', ip:'—', ctrl:'Job/ml-batch-5c7f', qos:'Guaranteed', labels:['job-name=ml-batch-5c7f'], ctrs:[['trainer','ghcr.io/acme/trainer:cuda12','Waiting','unschedulable · nvidia.com/gpu: 1']] },
+      { n:'grafana-6b8d9-tw4mn', ns:'monitoring', st:'ContainerCreating', r:0, age:'18m', node:'ip-10-4-14-201.ec2.internal', ip:'—', ctrl:'ReplicaSet/grafana-6b8d9', qos:'BestEffort', labels:['app.kubernetes.io/name=grafana'], ctrs:[['grafana','grafana/grafana:11.2.0','Waiting','FailedMount · dashboards']] },
+      { n:'prometheus-k8s-0', ns:'monitoring', st:'Running', r:0, age:'34d', node:'ip-10-4-30-5.ec2.internal', ip:'10.4.31.90', ctrl:'StatefulSet/prometheus-k8s', qos:'Burstable', labels:['app.kubernetes.io/name=prometheus'], ctrs:[['prometheus','quay.io/prometheus/prometheus:v2.54.1','Running','restarts 0 · :9090']] },
+      { n:'coredns-5d78c9869d-8hjvq', ns:'kube-system', st:'Running', r:0, age:'34d', node:'ip-10-4-12-87.ec2.internal', ip:'10.4.13.2', ctrl:'ReplicaSet/coredns-5d78c9869d', qos:'Burstable', labels:['k8s-app=kube-dns'], ctrs:[['coredns','registry.k8s.io/coredns/coredns:v1.11.3','Running','restarts 0 · :53']] },
+      { n:'aws-node-7kx2p', ns:'kube-system', st:'Running', r:0, age:'34d', node:'ip-10-4-12-87.ec2.internal', ip:'10.4.12.87', ctrl:'DaemonSet/aws-node', qos:'Burstable', labels:['k8s-app=aws-node'], ctrs:[['aws-node','amazon-k8s-cni:v1.18.3','Running','restarts 0']] }
+    ];
+    const ctrColor = (s) => s === 'Running' ? 'var(--ok)' : (s === 'CrashLoopBackOff' ? 'var(--err)' : 'var(--warn)');
+    const filter = this.state.filter;
+    const rows = [];
+    pods.forEach((p, i) => {
+      const meta = S[p.st];
+      if (filter !== 'all' && meta[2] !== filter) return;
+      const selected = i === this.state.sel;
+      rows.push({
+        ...p,
+        c: meta[0],
+        selected: selected ? 'true' : 'false',
+        rowStyle: selected ? 'background:var(--sel);' : 'background:transparent;',
+        rStyle: p.r > 5 ? 'color:var(--err);font-weight:500;' : (p.r > 0 ? 'color:var(--warn);' : 'color:var(--mute);'),
+        dots: p.ctrs.map((k) => ctrColor(k[2])),
+        pick: () => this.setState({ sel: i })
+      });
+    });
+    const p = pods[this.state.sel];
+    const pm = S[p.st];
+    const sel = {
+      ...p,
+      c: pm[0], cbg: pm[1],
+      short: p.n.length > 22 ? p.n.slice(0, 20) + '…' : p.n,
+      c0: p.ctrs[0][0],
+      ctrs: p.ctrs.map((k) => ({ name: k[0], image: k[1], state: k[2], meta: k[3], c: ctrColor(k[2]) }))
+    };
+    const L = (ts, lvl, msg) => ({ ts, lvl, msg, c: lvl === 'ERROR' || lvl === 'FATAL' ? 'var(--err)' : (lvl === 'WARN' ? 'var(--warn)' : (lvl === 'DEBUG' ? 'var(--mute)' : 'var(--acc)')) });
+    let logs;
+    if (p.st === 'CrashLoopBackOff') {
+      logs = [
+        L('21:07:14.882', 'INFO', 'starting checkout-api v2.14.0 (commit 9f3c1ab)'),
+        L('21:07:14.887', 'INFO', 'loading config from /etc/checkout'),
+        L('21:07:14.893', 'INFO', 'connecting to postgres payments-db.payments.svc:5432'),
+        L('21:07:14.996', 'INFO', 'postgres ok, pool size 20'),
+        L('21:07:14.998', 'WARN', 'STRIPE_WEBHOOK_SECRET is empty, falling back to /etc/checkout/stripe.env'),
+        L('21:07:14.999', 'ERROR', 'open /etc/checkout/stripe.env: no such file or directory'),
+        L('21:07:14.999', 'FATAL', 'config invalid, exiting with status 1'),
+        L('21:12:20.114', 'INFO', 'starting checkout-api v2.14.0 (commit 9f3c1ab)'),
+        L('21:12:20.230', 'WARN', 'STRIPE_WEBHOOK_SECRET is empty, falling back to /etc/checkout/stripe.env'),
+        L('21:12:20.231', 'FATAL', 'config invalid, exiting with status 1')
+      ];
+    } else if (p.st === 'Pending' || p.st === 'ContainerCreating') {
+      logs = [L('21:14:03.000', 'WARN', 'container ' + p.ctrs[0][0] + ' is waiting to start: ' + p.ctrs[0][3]), L('21:14:03.000', 'DEBUG', 'logs will stream here once the container starts')];
+    } else {
+      logs = [
+        L('21:13:58.004', 'INFO', 'GET /healthz 200 0.4ms'),
+        L('21:13:58.731', 'INFO', 'POST /v1/cart/9312/items 201 18.2ms'),
+        L('21:13:59.112', 'INFO', 'GET /v1/cart/9312 200 6.9ms'),
+        L('21:14:00.004', 'INFO', 'GET /healthz 200 0.3ms'),
+        L('21:14:00.540', 'DEBUG', 'cache hit sku:44718 ttl=287s'),
+        L('21:14:01.276', 'WARN', 'slow query 412ms: SELECT … FROM carts WHERE id = $1'),
+        L('21:14:02.004', 'INFO', 'GET /healthz 200 0.4ms'),
+        L('21:14:02.861', 'INFO', 'POST /v1/checkout 200 96.1ms'),
+        L('21:14:03.402', 'INFO', 'GET /v1/cart/9318 200 5.2ms')
+      ];
+    }
+    const T = (t, c) => ({ t, c: c || 'var(--fg)' });
+    let shell, prompt;
+    if (p.st === 'CrashLoopBackOff') {
+      shell = [
+        T('$ kubectl exec -it ' + p.n + ' -c api -- /bin/sh', 'var(--mute)'),
+        T('error: unable to upgrade connection: container not found ("api")', 'var(--err)'),
+        T('api is restarting. Attach to envoy instead, or start a debug container that shares api’s process namespace.', 'var(--mute)'),
+        T(''),
+        T('$ kubectl debug -it ' + p.n + ' --image=busybox:1.36 --target=api', 'var(--mute)'),
+        T('Defaulting debug container name to debugger-k7q2x.'),
+        T('/ # ls /etc/checkout'),
+        T('app.yaml')
+      ];
+      prompt = '/ # ';
+    } else {
+      shell = [
+        T('$ kubectl exec -it ' + p.n + ' -c ' + p.ctrs[0][0] + ' -- /bin/sh', 'var(--mute)'),
+        T('/app $ ls'),
+        T('bin  config  migrations  server'),
+        T('/app $ env | grep -c ^STRIPE'),
+        T('2')
+      ];
+      prompt = '/app $ ';
+    }
+    const fdefs = [['all','All','412','var(--mute)'],['running','Running','398','var(--ok)'],['pending','Pending','9','var(--warn)'],['failed','Failing','5','var(--err)']];
+    const filters = fdefs.map((f) => ({
+      label: f[1], n: f[2], c: f[3],
+      pressed: f[0] === filter ? 'true' : 'false',
+      style: f[0] === filter ? 'border:1px solid var(--acc);background:var(--accbg);color:var(--fg);' : 'border:1px solid var(--line2);background:transparent;color:var(--fg2);',
+      pick: () => this.setState({ filter: f[0] })
+    }));
+    const isLogs = this.state.tab === 'logs';
+    const on = 'background:var(--panel);color:var(--fg);box-shadow:inset 0 0 0 1px var(--line2);';
+    const off = 'background:transparent;color:var(--mute);';
+    return {
+      theme, vars: this.themeVars(theme),
+      rows, sel, logs, shell, prompt, filters,
+      isLogs, isShell: !isLogs,
+      logsTab: isLogs ? on : off,
+      shellTab: isLogs ? off : on,
+      showLogs: () => this.setState({ tab: 'logs' }),
+      showShell: () => this.setState({ tab: 'shell' })
+    };
+  }
+}
+</script>
+</body>
+</html>

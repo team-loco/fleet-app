@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Deployment checkout-api — prod-us-east</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.hv:hover{background:var(--hover)}
+</style>
+</helmet>
+<div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--editor);width:100%;height:900px;display:flex;flex-direction:column;overflow:hidden">
+  <div style="flex:1;min-height:0;display:flex;flex-wrap:wrap">
+    <div style="flex:0 0 auto;display:flex"><dc-import name="Nav" theme="{{theme}}" mode="cluster" active="deployments" hint-size="360px,874px"></dc-import></div>
+    <div style="flex:999 1 560px;min-width:0;height:874px;display:flex;flex-direction:column">
+
+      <div style="flex:1;min-height:0;display:flex;flex-wrap:wrap">
+        <div style="flex:999 1 520px;min-width:0;height:100%;overflow:auto">
+          <div style="padding:16px 16px 14px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line)">
+            <div style="display:flex;align-items:center;gap:10px">
+              <h1 style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600">checkout-api</h1>
+              <span style="font-size:12.5px;color:var(--err)">✕ 2/3 ready</span>
+              <span style="flex:1"></span>
+              <div style="position:relative">
+                <button aria-expanded="{{menuOpen}}" onClick="{{toggleMenu}}" style="height:24px;padding:0 10px;border:1px solid var(--line2);border-radius:3px;background:{{menuBg}};color:var(--fg2);font-family:inherit;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px">Actions<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">⌘.</span></button>
+                <sc-if value="{{menuOpen}}" hint-placeholder-val="{{ false }}">
+                  <div role="menu" style="position:absolute;right:0;top:30px;width:300px;background:var(--panel);border:1px solid var(--line2);border-radius:4px;box-shadow:0 12px 32px var(--shadow);padding:4px;z-index:5">
+                    <sc-for list="{{menu}}" as="m" hint-placeholder-count="6">
+                      <button role="menuitem" class="hv" style="display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:10px;row-gap:1px;width:100%;padding:6px 8px;border:0;border-radius:3px;background:transparent;text-align:left;font-family:inherit;cursor:pointer;color:var(--fg)">
+                        <span style="font-size:12.5px">{{m.label}}</span>
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">{{m.key}}</span>
+                        <sc-if value="{{m.hasDesc}}" hint-placeholder-val="{{ false }}"><span style="font-size:11.5px;color:var(--mute);grid-column:1 / 3">{{m.desc}}</span></sc-if>
+                      </button>
+                    </sc-for>
+                  </div>
+                </sc-if>
+              </div>
+            </div>
+            <p style="margin:0;font-size:13px;line-height:1.5;color:var(--fg2)">One pod is crash-looping, so the rollout to revision 37 is stuck.</p>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--mute)">payments · checkout-api:2.14.0 · managed by <a href="Kustomization.dc.html" style="color:var(--acc);text-decoration:none">apps-payments</a></div>
+          </div>
+
+          <div style="display:flex;align-items:baseline;gap:8px;padding:14px 16px 6px">
+            <h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Pods</h2>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">3 · click to follow logs</span>
+          </div>
+          <div style="overflow-x:auto">
+            <div style="min-width:820px">
+              <div style="display:grid;grid-template-columns:minmax(210px,1.5fr) 44px 140px 58px 178px 52px 60px 34px;column-gap:12px;align-items:center;height:24px;padding:0 16px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:11.5px;color:var(--mute)">
+                <span>Name</span><span>Ready</span><span>Status</span><span style="text-align:right">Restarts</span><span>Node</span><span style="text-align:right">CPU</span><span style="text-align:right">Mem</span><span>Age</span>
+              </div>
+              <sc-for list="{{pods}}" as="p" hint-placeholder-count="3">
+                <button class="hv" onClick="{{p.pick}}" aria-pressed="{{p.selected}}" style="display:grid;grid-template-columns:minmax(210px,1.5fr) 44px 140px 58px 178px 52px 60px 34px;column-gap:12px;align-items:center;width:100%;height:26px;padding:0 16px;border:0;border-bottom:1px solid var(--line);text-align:left;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--fg);cursor:pointer;{{p.style}}">
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{p.name}}</span>
+                  <span style="color:{{p.c}}">{{p.ready}}</span>
+                  <span style="color:{{p.c}};white-space:nowrap">{{p.g}} {{p.status}}</span>
+                  <span style="text-align:right;color:{{p.rc}}">{{p.restarts}}</span>
+                  <span style="color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{p.node}}</span>
+                  <span style="text-align:right;color:var(--fg2)">{{p.cpu}}</span>
+                  <span style="text-align:right;color:var(--fg2)">{{p.mem}}</span>
+                  <span style="color:var(--mute)">{{p.age}}</span>
+                </button>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:baseline;gap:8px;padding:16px 16px 6px">
+            <h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Rollout history</h2>
+          </div>
+          <div style="overflow-x:auto">
+            <div style="min-width:820px">
+              <sc-for list="{{revs}}" as="r" hint-placeholder-count="3">
+                <div style="display:grid;grid-template-columns:34px 170px minmax(170px,1fr) 44px 40px 190px 90px;column-gap:12px;align-items:center;height:26px;padding:0 16px;border-top:1px solid var(--line);font-family:'IBM Plex Mono',monospace;font-size:12px;{{r.style}}">
+                  <span style="color:var(--mute)">{{r.rev}}</span>
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{r.rs}}</span>
+                  <span style="color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{r.image}}</span>
+                  <span style="color:{{r.pc}}">{{r.pods}}</span>
+                  <span style="color:var(--mute)">{{r.age}}</span>
+                  <a href="Changes.dc.html" style="color:var(--acc);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{r.commit}}</a>
+                  <span style="color:var(--mute);text-align:right">{{r.note}}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+        </div>
+
+        <aside aria-label="Inspector" style="flex:1 1 320px;min-width:0;height:100%;overflow:auto;border-left:1px solid var(--line);background:var(--panel);font-size:12.5px">
+          <div style="display:flex;align-items:center;height:30px;padding:0 12px;border-bottom:1px solid var(--line)">
+            <span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute);flex:1">Container</span>
+            <div role="group" aria-label="Container" style="display:flex;border:1px solid var(--line2);border-radius:3px;overflow:hidden">
+              <button aria-pressed="true" style="height:20px;padding:0 8px;border:0;background:var(--sel);color:var(--selfg);font-family:'IBM Plex Mono',monospace;font-size:11.5px;cursor:pointer">api</button>
+              <button aria-pressed="false" style="height:20px;padding:0 8px;border:0;border-left:1px solid var(--line2);background:transparent;color:var(--fg2);font-family:'IBM Plex Mono',monospace;font-size:11.5px;cursor:pointer">envoy</button>
+            </div>
+          </div>
+          <dl style="margin:0;padding:10px 12px;display:grid;grid-template-columns:72px minmax(0,1fr);row-gap:6px;column-gap:10px;border-bottom:1px solid var(--line)">
+            <dt style="color:var(--mute)">image</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;word-break:break-all">ghcr.io/acme/checkout-api:2.14.0</dd>
+            <dt style="color:var(--mute)">ports</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px">8080/TCP http</dd>
+            <dt style="color:var(--mute)">requests</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px">cpu 500m · mem 512Mi</dd>
+            <dt style="color:var(--mute)">limits</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px">cpu 1 · mem 1Gi</dd>
+            <dt style="color:var(--mute)">readiness</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px">GET :8080/healthz · 5s</dd>
+            <dt style="color:var(--mute)">last exit</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--err)">1 (Error) · 2m ago</dd>
+          </dl>
+          <div style="padding:10px 12px 4px;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Environment · resolved</div>
+          <div style="padding:0 12px 10px;display:flex;flex-direction:column;gap:6px;border-bottom:1px solid var(--line)">
+            <sc-for list="{{env}}" as="e" hint-placeholder-count="4">
+              <div style="display:flex;flex-direction:column;gap:2px;padding:5px 7px;border-radius:3px;{{e.box}}">
+                <div style="display:flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:11.5px"><span style="color:{{e.c}};font-size:10px">{{e.g}}</span><span style="color:var(--fg)">{{e.name}}</span></div>
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--fg2);padding-left:16px;word-break:break-all">{{e.src}}</div>
+                <sc-if value="{{e.hasNote}}" hint-placeholder-val="{{ false }}"><div style="font-size:12px;color:var(--fg2);padding-left:16px;line-height:1.45">{{e.note}}</div></sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </aside>
+      </div>
+
+      <section aria-label="Dock" style="height:250px;flex:none;border-top:1px solid var(--line);background:var(--editor);display:flex;flex-direction:column;min-width:0">
+        <div style="display:flex;align-items:stretch;height:30px;border-bottom:1px solid var(--line);background:var(--chrome)">
+          <div role="tablist" aria-label="Dock" style="display:flex">
+            <sc-for list="{{dockTabs}}" as="t" hint-placeholder-count="3">
+              <button role="tab" aria-selected="{{t.selected}}" onClick="{{t.pick}}" style="display:flex;align-items:center;gap:6px;padding:0 12px;border:0;border-right:1px solid var(--line);font-family:inherit;font-size:12px;cursor:pointer;white-space:nowrap;{{t.style}}">{{t.label}}<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">{{t.sub}}</span></button>
+            </sc-for>
+          </div>
+          <span style="flex:1"></span>
+          <sc-if value="{{isLogs}}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;align-items:center;gap:6px;padding:0 8px;font-size:12px">
+              <label style="display:flex;align-items:center;height:20px;width:180px;padding:0 6px;border:1px solid var(--line2);border-radius:3px;background:var(--editor)"><span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Filter logs</span><input placeholder="filter  /regex/" style="flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--fg);font-family:'IBM Plex Mono',monospace;font-size:11.5px"></label>
+              <button aria-pressed="true" style="height:20px;padding:0 7px;border:1px solid var(--selline);border-radius:3px;background:var(--sel);color:var(--selfg);font-family:inherit;font-size:11.5px;cursor:pointer">previous</button>
+              <button aria-pressed="true" style="height:20px;padding:0 7px;border:1px solid var(--selline);border-radius:3px;background:var(--sel);color:var(--selfg);font-family:inherit;font-size:11.5px;cursor:pointer">follow</button>
+              <button aria-pressed="false" style="height:20px;padding:0 7px;border:1px solid var(--line2);border-radius:3px;background:transparent;color:var(--fg2);font-family:inherit;font-size:11.5px;cursor:pointer">wrap</button>
+            </div>
+          </sc-if>
+        </div>
+        <div style="flex:1;overflow:auto;padding:6px 0;font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:19px">
+          <sc-if value="{{isLogs}}" hint-placeholder-val="{{ true }}">
+            <div>
+              <sc-for list="{{logs}}" as="l" hint-placeholder-count="8">
+                <div style="display:flex;gap:12px;white-space:pre;padding:0 12px;{{l.bg}}"><span style="color:var(--mute)">{{l.ts}}</span><span style="color:{{l.c}};width:40px;flex:none">{{l.lvl}}</span><span style="color:var(--fg)">{{l.msg}}</span></div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{isEvents}}" hint-placeholder-val="{{ false }}">
+            <div>
+              <sc-for list="{{events}}" as="e" hint-placeholder-count="5">
+                <div style="display:grid;grid-template-columns:48px 14px 150px minmax(0,1fr) 34px;column-gap:10px;padding:0 12px;white-space:nowrap"><span style="color:var(--mute)">{{e.age}}</span><span style="color:{{e.c}};font-size:10px">{{e.g}}</span><span>{{e.reason}}</span><span style="color:var(--fg2);overflow:hidden;text-overflow:ellipsis">{{e.msg}}</span><span style="color:var(--mute);text-align:right">×{{e.n}}</span></div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{isShell}}" hint-placeholder-val="{{ false }}">
+            <div style="padding:0 12px">
+              <sc-for list="{{shell}}" as="s" hint-placeholder-count="6"><div style="white-space:pre-wrap;color:{{s.c}}">{{s.t}}</div></sc-for>
+              <div style="display:flex;align-items:center">/ # <span style="width:7px;height:15px;background:var(--fg);margin-left:2px"></span></div>
+            </div>
+          </sc-if>
+        </div>
+      </section>
+    </div>
+  </div>
+  <dc-import name="StatusBar" theme="{{theme}}" left="EKS · us-east-1 · v1.31.2" agent="4s ago" hint-size="100%,26px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { pod: 0, tab: 'logs', menu: !!props.menu };
+  }
+  vars() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    const D = '--editor:#111317;--panel:#15181D;--chrome:#1A1D22;--raise:#20242A;--hover:#1D2127;--line:#262A30;--line2:#323740;--guide:#2A2E35;--fg:#DCDFE4;--fg2:#B3B9C3;--mute:#8E96A3;--sep:#4C525C;--sel:#1F2C40;--selfg:#F2F6FC;--selline:#3A5A8C;--acc:#74ADFF;--onacc:#0C1220;--ok:#48C78E;--warn:#E8B04B;--err:#F26D6D;--sus:#9AA2AE;--okbg:rgba(72,199,142,.10);--errbg:rgba(242,109,109,.11);--warnbg:rgba(232,176,75,.10);--accbg:rgba(116,173,255,.12);--addbg:rgba(72,199,142,.12);--delbg:rgba(242,109,109,.13);--addfg:#7FDDB2;--delfg:#FF9C9C;--shadow:rgba(0,0,0,.5);color-scheme:dark;';
+    const L = '--editor:#FFFFFF;--panel:#F6F7F8;--chrome:#EEEFF1;--raise:#E9EBEE;--hover:#F1F2F4;--line:#E1E3E7;--line2:#CFD3D9;--guide:#E4E6EA;--fg:#1D2027;--fg2:#3B414B;--mute:#5F6774;--sep:#A5ABB5;--sel:#DCE7FA;--selfg:#0D2850;--selline:#8DB0EA;--acc:#1F5FD1;--onacc:#FFFFFF;--ok:#167A4C;--warn:#935800;--err:#C53030;--sus:#6B7280;--okbg:rgba(22,122,76,.08);--errbg:rgba(197,48,48,.07);--warnbg:rgba(147,88,0,.08);--accbg:rgba(31,95,209,.08);--addbg:rgba(22,122,76,.10);--delbg:rgba(197,48,48,.09);--addfg:#0F5E3A;--delfg:#A12626;--shadow:rgba(20,24,32,.18);color-scheme:light;';
+    return { theme: t, vars: t === 'light' ? L : D };
+  }
+  renderVals() {
+    const v = this.vars();
+    const list = [
+      { name: 'checkout-api-7f9c6d-x2lqp', ready: '1/2', status: 'CrashLoopBackOff', bad: true, restarts: '14', node: 'ip-10-4-12-87', cpu: '4m', mem: '38Mi', age: '3h' },
+      { name: 'checkout-api-7f9c6d-m8vtn', ready: '2/2', status: 'Running', restarts: '0', node: 'ip-10-4-14-201', cpu: '212m', mem: '301Mi', age: '3h' },
+      { name: 'checkout-api-7f9c6d-q4zhk', ready: '2/2', status: 'Running', restarts: '0', node: 'ip-10-4-22-63', cpu: '187m', mem: '288Mi', age: '3h' }
+    ];
+    const pods = list.map((p, i) => ({
+      ...p,
+      c: p.bad ? 'var(--err)' : 'var(--ok)', g: p.bad ? '✕' : '●',
+      rc: p.restarts !== '0' ? 'var(--err)' : 'var(--mute)',
+      selected: i === this.state.pod ? 'true' : 'false',
+      style: i === this.state.pod ? 'background:var(--sel);box-shadow:inset 0 0 0 1px var(--selline);' : 'background:transparent;',
+      pick: () => this.setState({ pod: i })
+    }));
+    const cur = list[this.state.pod];
+    const short = cur.name.slice(-5);
+    const L = (ts, lvl, msg) => ({ ts, lvl, msg, c: lvl === 'ERROR' || lvl === 'FATAL' ? 'var(--err)' : (lvl === 'WARN' ? 'var(--warn)' : (lvl === 'DEBUG' ? 'var(--mute)' : 'var(--acc)')), bg: lvl === 'ERROR' || lvl === 'FATAL' ? 'background:var(--errbg);' : '' });
+    const logs = cur.bad ? [
+      L('21:12:20.114', 'INFO', 'starting checkout-api v2.14.0 (commit 9f3c1ab)'),
+      L('21:12:20.119', 'INFO', 'config: loading /etc/checkout/app.yaml'),
+      L('21:12:20.125', 'INFO', 'postgres: connecting payments-db.payments.svc:5432'),
+      L('21:12:20.228', 'INFO', 'postgres: ok (pool 20)'),
+      L('21:12:20.230', 'WARN', 'env STRIPE_WEBHOOK_SECRET is empty; falling back to /etc/checkout/stripe.env'),
+      L('21:12:20.231', 'ERROR', 'open /etc/checkout/stripe.env: no such file or directory'),
+      L('21:12:20.231', 'FATAL', 'config invalid: stripe webhook secret not set; exit 1'),
+      L('', '', '── container exited 1 · restart 14 in 5m0s (back-off) ──')
+    ] : [
+      L('21:14:00.004', 'INFO', 'GET /healthz 200 0.3ms'),
+      L('21:14:00.731', 'INFO', 'POST /v1/cart/9312/items 201 18.2ms'),
+      L('21:14:01.112', 'INFO', 'GET /v1/cart/9312 200 6.9ms'),
+      L('21:14:01.276', 'WARN', 'slow query 412ms: SELECT … FROM carts WHERE id = $1'),
+      L('21:14:02.004', 'INFO', 'GET /healthz 200 0.4ms'),
+      L('21:14:02.861', 'INFO', 'POST /v1/checkout 200 96.1ms'),
+      L('21:14:03.402', 'INFO', 'GET /v1/cart/9318 200 5.2ms')
+    ];
+    const tab = this.state.tab;
+    const dockTabs = [['logs', 'Logs', short + ' · api'], ['events', 'Events', '7'], ['shell', 'Terminal', 'debug']].map((t) => ({
+      label: t[1], sub: t[2],
+      selected: t[0] === tab ? 'true' : 'false',
+      style: t[0] === tab ? 'background:var(--editor);color:var(--fg);margin-bottom:-1px;' : 'background:transparent;color:var(--mute);',
+      pick: () => this.setState({ tab: t[0] })
+    }));
+    const EV = (age, s, reason, msg, n) => ({ age, reason, msg, n, g: s === 'err' ? '✕' : (s === 'warn' ? '▲' : '●'), c: s === 'err' ? 'var(--err)' : (s === 'warn' ? 'var(--warn)' : 'var(--ok)') });
+    const S = (t, c) => ({ t, c: c || 'var(--fg)' });
+    const ENV = (s, name, src, note) => ({ g: s === 'err' ? '✕' : (s === 'ok' ? '●' : '·'), c: s === 'err' ? 'var(--err)' : (s === 'ok' ? 'var(--ok)' : 'var(--mute)'), name, src, note: note || '', hasNote: !!note, box: s === 'err' ? 'background:var(--errbg);box-shadow:inset 0 0 0 1px var(--err);' : '' });
+    const menuOpen = this.state.menu;
+    const M = (label, key, desc) => ({ label, key, desc: desc || '', hasDesc: !!desc });
+    return {
+      menuOpen, menuBg: menuOpen ? 'var(--sel)' : 'transparent',
+      toggleMenu: () => this.setState({ menu: !menuOpen }),
+      menu: [
+        M('Logs', '⌘L'),
+        M('Shell into pod', '⌘T'),
+        M('Restart rollout', ''),
+        M('Scale…', ''),
+        M('Roll back to revision 36', '', 'Flux re-applies git on the next reconcile unless apps-payments is suspended.'),
+        M('View YAML', '⌘Y')
+      ],
+      theme: v.theme, vars: v.vars, pods,
+      revs: [
+        { rev: '37', rs: 'checkout-api-7f9c6d', image: 'checkout-api:2.14.0', pods: '2/3', pc: 'var(--err)', age: '3h', commit: 'a41e07c bump to 2.14.0…', note: 'current', style: 'background:var(--panel);' },
+        { rev: '36', rs: 'checkout-api-5b8f2a', image: 'checkout-api:2.13.4', pods: '0', pc: 'var(--mute)', age: '9d', commit: 'd81f3c0 retry budget…', note: '', style: '' },
+        { rev: '35', rs: 'checkout-api-66c1e9', image: 'checkout-api:2.13.3', pods: '0', pc: 'var(--mute)', age: '23d', commit: 'e19a4b8 pdb + hpa…', note: '', style: '' }
+      ],
+      env: [
+        ENV('ok', 'DATABASE_URL', '← secret payments-db / url'),
+        ENV('ok', 'STRIPE_API_KEY', '← secret stripe / api-key'),
+        ENV('err', 'STRIPE_WEBHOOK_SECRET', '← secret stripe / webhook_secret', 'Key not found, so the var is empty (optional: true). secret/stripe has: api-key, webhook-secret.'),
+        ENV('plain', 'LOG_LEVEL', '= info')
+      ],
+      dockTabs, logs,
+      isLogs: tab === 'logs', isEvents: tab === 'events', isShell: tab === 'shell',
+      events: [
+        EV('2m', 'err', 'BackOff', 'Back-off restarting failed container api in pod checkout-api-7f9c6d-x2lqp', '14'),
+        EV('3h', 'err', 'ProgressDeadlineExceeded', 'ReplicaSet "checkout-api-7f9c6d" has timed out progressing', '1'),
+        EV('3h', 'ok', 'ScalingReplicaSet', 'Scaled down replica set checkout-api-5b8f2a to 0 from 1', '1'),
+        EV('3h', 'ok', 'ScalingReplicaSet', 'Scaled up replica set checkout-api-7f9c6d to 3 from 2', '1'),
+        EV('3h', 'ok', 'ScalingReplicaSet', 'Scaled up replica set checkout-api-7f9c6d to 1', '1')
+      ],
+      shell: [
+        S('$ kubectl debug -it checkout-api-7f9c6d-x2lqp --image=busybox:1.36 --target=api', 'var(--mute)'),
+        S('Targeting container "api". Debug container: debugger-k7q2x', 'var(--mute)'),
+        S('/ # cat /proc/1/environ | tr "\\0" "\\n" | grep STRIPE'),
+        S('STRIPE_API_KEY=sk_live_••••••••'),
+        S('STRIPE_WEBHOOK_SECRET='),
+        S('/ # ls /etc/checkout'),
+        S('app.yaml')
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

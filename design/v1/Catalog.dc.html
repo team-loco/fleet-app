@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Catalog — clusters</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:var(--acc)}
+.tr:hover{background:var(--hover)}
+</style>
+</helmet>
+<div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--bg);width:100%;min-height:900px;display:flex;flex-direction:column">
+  <dc-import name="Titlebar" theme="{{theme}}" crumb="Clusters" mode="catalog" hint-size="100%,40px"></dc-import>
+  <div style="flex:1;display:flex;flex-wrap:wrap;min-height:834px">
+    <div style="flex:1 1 268px;display:flex">
+      <dc-import name="Sidebar" theme="{{theme}}" active="clusters" mode="catalog" hint-size="268px,834px"></dc-import>
+    </div>
+    <main style="flex:999 1 560px;min-width:0;display:flex;flex-wrap:wrap">
+      <div style="flex:999 1 520px;min-width:0;display:flex;flex-direction:column">
+        <div style="padding:18px 20px 14px;display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line)">
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <h1 style="margin:0;font-size:18px;font-weight:600;display:flex;align-items:baseline;gap:8px">Clusters <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:400;color:var(--mute)">7</span></h1>
+            <p style="margin:0;color:var(--mute);font-size:12.5px">Discovered from 3 kubeconfig sources. Files are watched; new contexts appear here automatically.</p>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button style="display:flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:6px;border:1px solid var(--line2);background:var(--panel);color:var(--fg);font-family:inherit;font-size:12.5px;cursor:pointer">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4.5V12a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1H8L6.5 3.5H3A1 1 0 0 0 2 4.5z"/></svg>Sync a folder
+            </button>
+            <button style="display:flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:6px;border:0;background:var(--acc);color:var(--onacc);font-family:inherit;font-size:12.5px;font-weight:500;cursor:pointer">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>Add cluster
+            </button>
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+          <div style="min-width:700px">
+            <div style="display:grid;grid-template-columns:minmax(200px,1.6fr) 64px 150px 56px 170px 40px;column-gap:14px;padding:0 20px;height:30px;align-items:center;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--mute);border-bottom:1px solid var(--line)">
+              <span>Name</span><span>Distro</span><span>Version</span><span style="text-align:right">Nodes</span><span>Status</span><span>Pin</span>
+            </div>
+            <sc-for list="{{rows}}" as="c" hint-placeholder-count="7">
+              <button class="tr" onClick="{{c.pick}}" aria-pressed="{{c.selected}}" style="display:grid;grid-template-columns:minmax(200px,1.6fr) 64px 150px 56px 170px 40px;column-gap:14px;padding:0 20px;height:44px;align-items:center;width:100%;border:0;border-bottom:1px solid var(--line);text-align:left;font-family:inherit;font-size:12.5px;color:var(--fg);cursor:pointer;{{c.rowStyle}}">
+                <span style="display:flex;align-items:center;gap:10px;min-width:0">
+                  <span style="width:26px;height:26px;flex:none;border-radius:6px;background:{{c.bg}};color:#FFFFFF;font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center">{{c.ini}}</span>
+                  <span style="display:flex;flex-direction:column;min-width:0">
+                    <span style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{c.name}}</span>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{c.src}}</span>
+                  </span>
+                </span>
+                <span style="color:var(--fg2)">{{c.distro}}</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--fg2)">{{c.ver}}</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;text-align:right">{{c.nodes}}</span>
+                <span style="display:flex;align-items:center;gap:6px;color:{{c.c}};font-weight:500"><span style="width:6px;height:6px;border-radius:50%;background:{{c.c}}"></span>{{c.status}}</span>
+                <span style="color:{{c.pinC}}"><svg width="14" height="14" viewBox="0 0 16 16" fill="{{c.pinFill}}" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.75l1.9 3.9 4.3.6-3.1 3 .75 4.25L8 11.5l-3.85 2 .75-4.25-3.1-3 4.3-.6z"/></svg></span>
+              </button>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+
+      <aside aria-label="Cluster settings" style="flex:1 1 340px;min-width:0;border-left:1px solid var(--line);background:var(--panel2);display:flex;flex-direction:column;overflow:auto;max-height:834px">
+        <div style="padding:18px 18px 14px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span style="width:40px;height:40px;border-radius:9px;background:{{sel.bg}};color:#FFFFFF;font-size:14px;font-weight:600;display:flex;align-items:center;justify-content:center">{{sel.ini}}</span>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+              <span style="font-size:15px;font-weight:600">{{sel.name}}</span>
+              <span style="display:flex;align-items:center;gap:6px;color:{{sel.c}};font-size:12px;font-weight:500"><span style="width:6px;height:6px;border-radius:50%;background:{{sel.c}}"></span>{{sel.status}}</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <a href="Main.dc.html" style="flex:1;display:flex;align-items:center;justify-content:center;height:30px;border-radius:6px;background:var(--acc);color:var(--onacc);text-decoration:none;font-size:12.5px;font-weight:500">{{sel.cta}}</a>
+            <button style="height:30px;padding:0 12px;border-radius:6px;border:1px solid var(--line2);background:var(--panel);color:var(--fg);font-family:inherit;font-size:12.5px;cursor:pointer">Disconnect</button>
+          </div>
+          <sc-if value="{{sel.authIssue}}" hint-placeholder-val="{{ false }}">
+            <div style="padding:10px 12px;border-radius:6px;background:var(--errbg);color:var(--fg);font-size:12.5px;line-height:1.45">Credentials from <span style="font-family:'IBM Plex Mono',monospace;font-size:12px">gke-gcloud-auth-plugin</span> expired. Re-run your login and Shoal reconnects on its own.</div>
+          </sc-if>
+        </div>
+        <div style="padding:14px 18px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line)">
+          <span style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)">Connection</span>
+          <dl style="margin:0;display:grid;grid-template-columns:96px minmax(0,1fr);row-gap:7px;column-gap:12px;font-size:12.5px">
+            <dt style="color:var(--mute)">Context</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:12px;word-break:break-all">{{sel.ctx}}</dd>
+            <dt style="color:var(--mute)">Server</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:12px;word-break:break-all">{{sel.server}}</dd>
+            <dt style="color:var(--mute)">Auth</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:12px">{{sel.auth}}</dd>
+            <dt style="color:var(--mute)">Kubeconfig</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:12px">{{sel.src}}</dd>
+          </dl>
+        </div>
+        <div style="padding:14px 18px;display:flex;flex-direction:column;gap:12px;border-bottom:1px solid var(--line)">
+          <span style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)">Preferences</span>
+          <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px">Default namespace
+            <input value="payments" style="height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line2);background:var(--panel);color:var(--fg);font-family:'IBM Plex Mono',monospace;font-size:12px">
+          </label>
+          <label style="display:flex;flex-direction:column;gap:5px;font-size:12.5px">Metrics source
+            <input value="auto · monitoring/prometheus-k8s:9090" style="height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line2);background:var(--panel);color:var(--fg);font-family:'IBM Plex Mono',monospace;font-size:12px">
+          </label>
+          <div style="display:flex;align-items:center;justify-content:space-between;font-size:12.5px">
+            <span>Show in hotbar</span>
+            <button role="switch" aria-checked="true" aria-label="Show in hotbar" style="width:32px;height:18px;border-radius:9px;border:0;background:var(--acc);position:relative;cursor:pointer;padding:0"><span style="position:absolute;top:2px;right:2px;width:14px;height:14px;border-radius:50%;background:#FFFFFF"></span></button>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;font-size:12.5px">
+            <span>Confirm destructive actions</span>
+            <button role="switch" aria-checked="true" aria-label="Confirm destructive actions" style="width:32px;height:18px;border-radius:9px;border:0;background:var(--acc);position:relative;cursor:pointer;padding:0"><span style="position:absolute;top:2px;right:2px;width:14px;height:14px;border-radius:50%;background:#FFFFFF"></span></button>
+          </div>
+        </div>
+        <div style="padding:14px 18px;display:flex;flex-direction:column;gap:8px">
+          <span style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)">Labels</span>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">
+            <sc-for list="{{sel.labels}}" as="lb" hint-placeholder-count="2"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:2px 6px;border-radius:4px;background:var(--raise);color:var(--fg2)">{{lb}}</span></sc-for>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+  <footer style="height:26px;box-sizing:border-box;border-top:1px solid var(--line);background:var(--chrome);display:flex;align-items:center;gap:16px;padding:0 12px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute);overflow:hidden;white-space:nowrap">
+    <span>5 connected · 1 auth expired · 1 offline</span>
+    <span style="flex:1"></span>
+    <span>watching ~/.kube</span>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { sel: 0 };
+  }
+  resolveTheme() {
+    const t = this.props.theme ?? 'system';
+    if (t === 'dark' || t === 'light') return t;
+    try { return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { return 'dark'; }
+  }
+  themeVars(t) {
+    const d = { bg:'#0D0F12', chrome:'#0B0D10', panel:'#13161B', panel2:'#111419', raise:'#1C2129', line:'#252A33', line2:'#2C323C', fg:'#D7DCE3', fg2:'#B9C0CB', mute:'#8B93A1', sep:'#4B5260', sel:'#1D2A3F', selfg:'#FFFFFF', acc:'#6AA6FF', onacc:'#0B0D10', ok:'#3FC58A', warn:'#F0B24A', err:'#FF6B6B', ai:'#B48CFF', track:'#1F242C', hover:'#171B21', okbg:'rgba(63,197,138,.13)', errbg:'rgba(255,107,107,.13)', warnbg:'rgba(240,178,74,.12)', accbg:'rgba(106,166,255,.14)' };
+    const l = { bg:'#F6F7F9', chrome:'#ECEEF2', panel:'#FFFFFF', panel2:'#FAFBFC', raise:'#F0F2F5', line:'#DDE1E7', line2:'#CDD2DA', fg:'#1B1F26', fg2:'#3A414C', mute:'#5E6673', sep:'#A3AAB5', sel:'#DCE8FB', selfg:'#0B2A57', acc:'#2563D9', onacc:'#FFFFFF', ok:'#17784B', warn:'#9A5B00', err:'#C93434', ai:'#7C4DDB', track:'#E6E9EE', hover:'#F1F3F6', okbg:'rgba(23,120,75,.10)', errbg:'rgba(201,52,52,.09)', warnbg:'rgba(154,91,0,.10)', accbg:'rgba(37,99,217,.10)' };
+    const m = t === 'light' ? l : d;
+    return Object.keys(m).map((k) => '--' + k + ':' + m[k] + ';').join('') + 'color-scheme:' + t + ';';
+  }
+  renderVals() {
+    const theme = this.resolveTheme();
+    const C = {
+      Connected: 'var(--ok)', Degraded: 'var(--warn)', 'Auth expired': 'var(--err)', Offline: 'var(--mute)', 'Not connected': 'var(--mute)'
+    };
+    const list = [
+      { ini:'PE', name:'prod-us-east', bg:'#2F5D9E', distro:'EKS', ver:'v1.31.2', nodes:'14', status:'Connected', pinned:true, src:'~/.kube/eks/prod.yaml', ctx:'arn:aws:eks:us-east-1:[ACCOUNT]:cluster/prod', server:'https://[ID].gr7.us-east-1.eks.amazonaws.com', auth:'exec · aws eks get-token', labels:['env=prod','region=us-east-1','team=platform'] },
+      { ini:'PW', name:'prod-eu-west', bg:'#6A4C9C', distro:'EKS', ver:'v1.31.2', nodes:'11', status:'Connected', pinned:true, src:'~/.kube/eks/prod-eu.yaml', ctx:'arn:aws:eks:eu-west-1:[ACCOUNT]:cluster/prod-eu', server:'https://[ID].gr7.eu-west-1.eks.amazonaws.com', auth:'exec · aws eks get-token', labels:['env=prod','region=eu-west-1'] },
+      { ini:'ST', name:'staging', bg:'#2E7D62', distro:'GKE', ver:'v1.30.5-gke.1014', nodes:'6', status:'Degraded', pinned:true, src:'~/.kube/config', ctx:'gke_[PROJECT]_us-central1_staging', server:'https://[IP]', auth:'exec · gke-gcloud-auth-plugin', labels:['env=staging'] },
+      { ini:'QA', name:'qa-gke', bg:'#7A3B4B', distro:'GKE', ver:'v1.30.5-gke.1014', nodes:'—', status:'Auth expired', pinned:true, src:'~/.kube/config', ctx:'gke_[PROJECT]_us-central1_qa', server:'https://[IP]', auth:'exec · gke-gcloud-auth-plugin', labels:['env=qa'] },
+      { ini:'DV', name:'dev-kind', bg:'#8A5A2B', distro:'kind', ver:'v1.31.0', nodes:'3', status:'Connected', pinned:true, src:'~/.kube/kind-dev.yaml', ctx:'kind-dev', server:'https://127.0.0.1:52814', auth:'client certificate', labels:['env=dev','local'] },
+      { ini:'EK', name:'edge-k3s', bg:'#4D5B6B', distro:'k3s', ver:'v1.29.8+k3s1', nodes:'—', status:'Offline', pinned:false, src:'~/.kube/config', ctx:'edge-k3s', server:'https://10.20.0.4:6443', auth:'token', labels:['env=edge'] },
+      { ini:'AN', name:'analytics-aks', bg:'#3B6C8A', distro:'AKS', ver:'v1.30.3', nodes:'8', status:'Not connected', pinned:false, src:'~/.kube/eks/analytics-aks.yaml', ctx:'analytics-aks', server:'https://[ID].hcp.westus2.azmk8s.io', auth:'exec · kubelogin', labels:['team=data'] }
+    ];
+    const rows = list.map((c, i) => ({
+      ...c,
+      c: C[c.status],
+      selected: i === this.state.sel ? 'true' : 'false',
+      rowStyle: i === this.state.sel ? 'background:var(--sel);' : 'background:transparent;',
+      pinC: c.pinned ? 'var(--warn)' : 'var(--mute)',
+      pinFill: c.pinned ? 'currentColor' : 'none',
+      pick: () => this.setState({ sel: i })
+    }));
+    const s = list[this.state.sel];
+    const sel = {
+      ...s,
+      c: C[s.status],
+      authIssue: s.status === 'Auth expired',
+      cta: s.status === 'Connected' || s.status === 'Degraded' ? 'Open cluster' : (s.status === 'Auth expired' ? 'Re-authenticate' : 'Connect')
+    };
+    return { theme, vars: this.themeVars(theme), rows, sel };
+  }
+}
+</script>
+</body>
+</html>

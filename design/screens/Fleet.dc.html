@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fleet overview</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.hv:hover{background:var(--hover)}
+</style>
+</helmet>
+<div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--editor);width:100%;height:900px;display:flex;flex-direction:column;overflow:hidden">
+  <div style="flex:1;min-height:0;display:flex;flex-wrap:wrap">
+    <div style="flex:0 0 auto;display:flex"><dc-import name="Nav" theme="{{theme}}" mode="fleet" active="overview" hint-size="360px,874px"></dc-import></div>
+    <div style="flex:999 1 560px;min-width:0;height:874px;display:flex;flex-direction:column">
+      <div style="height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line)">
+        <h1 style="margin:0;font-size:14px;font-weight:600">Overview</h1>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">live</span>
+      </div>
+
+      <div style="flex:1;min-height:0;overflow:auto">
+        <section aria-labelledby="h-clusters">
+          <div style="display:flex;align-items:baseline;gap:8px;padding:14px 16px 8px">
+            <h2 id="h-clusters" style="margin:0;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Clusters</h2>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">6</span>
+          </div>
+          <div style="overflow-x:auto">
+            <div style="min-width:1000px">
+              <div style="display:grid;grid-template-columns:minmax(140px,1.3fr) 128px 76px 54px 108px 92px 92px 108px 84px 92px;column-gap:14px;align-items:center;height:24px;padding:0 16px;border-bottom:1px solid var(--line);font-size:11.5px;color:var(--mute)">
+                <span>Cluster</span><span>State</span><span>Version</span><span style="text-align:right">Nodes</span><span>Pods</span><span>CPU</span><span>Memory</span><span>Flux</span><span>Revision</span><span>Problems</span>
+              </div>
+              <sc-for list="{{clusters}}" as="c" hint-placeholder-count="6">
+                <div class="hv" style="display:grid;grid-template-columns:minmax(140px,1.3fr) 128px 76px 54px 108px 92px 92px 108px 84px 92px;column-gap:14px;align-items:center;height:28px;padding:0 16px;border-bottom:1px solid var(--line);font-size:12.5px;{{c.rowStyle}}">
+                  <span style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{c.name}}</span>
+                  <span style="display:flex;align-items:center;gap:6px;color:{{c.sc}};white-space:nowrap"><span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;width:10px">{{c.sg}}</span>{{c.state}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--fg2)">{{c.ver}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;text-align:right">{{c.nodes}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;white-space:nowrap">{{c.pods}} <span style="color:{{c.pbc}}">{{c.podsBad}}</span></span>
+                  <span style="display:flex;align-items:center;gap:8px;font-family:'IBM Plex Mono',monospace;font-size:12px"><span style="width:36px;height:4px;background:var(--line2);display:flex"><span style="height:100%;width:{{c.cpuW}};background:var(--fg2)"></span></span>{{c.cpu}}</span>
+                  <span style="display:flex;align-items:center;gap:8px;font-family:'IBM Plex Mono',monospace;font-size:12px"><span style="width:36px;height:4px;background:var(--line2);display:flex"><span style="height:100%;width:{{c.memW}};background:var(--fg2)"></span></span>{{c.mem}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:{{c.fc}};white-space:nowrap">{{c.flux}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:{{c.rc}}">{{c.rev}}</span>
+                  <span style="display:flex;gap:8px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;white-space:nowrap"><sc-for list="{{c.probs}}" as="b" hint-placeholder-count="1"><span style="color:{{b.c}}">{{b.t}}</span></sc-for></span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </section>
+
+        <section aria-labelledby="h-problems">
+          <div style="display:flex;align-items:center;gap:8px;padding:18px 16px 8px">
+            <h2 id="h-problems" style="margin:0;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Problems</h2>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px"><span style="color:var(--err)">✕ 3</span> <span style="color:var(--warn)">▲ 6</span> <span style="color:var(--sus)">‖ 1</span></span>
+            <span style="flex:1"></span>
+            <div role="group" aria-label="Severity" style="display:flex;border:1px solid var(--line2);border-radius:3px;overflow:hidden">
+              <sc-for list="{{filters}}" as="f" hint-placeholder-count="3">
+                <button aria-pressed="{{f.pressed}}" onClick="{{f.pick}}" style="height:22px;padding:0 9px;border:0;font-family:inherit;font-size:12px;cursor:pointer;{{f.style}}">{{f.label}}</button>
+              </sc-for>
+            </div>
+          </div>
+          <div style="overflow-x:auto">
+            <div style="min-width:900px;border-top:1px solid var(--line)">
+              <sc-for list="{{groups}}" as="g" hint-placeholder-count="4">
+                <div>
+                  <div style="display:flex;align-items:center;gap:10px;height:26px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line);font-size:12.5px">
+                    <span style="font-weight:600">{{g.cluster}}</span>
+                    <span style="display:flex;gap:8px;font-family:'IBM Plex Mono',monospace;font-size:11.5px"><sc-for list="{{g.counts}}" as="b" hint-placeholder-count="1"><span style="color:{{b.c}}">{{b.t}}</span></sc-for></span>
+                  </div>
+                  <sc-for list="{{g.items}}" as="p" hint-placeholder-count="3">
+                    <a class="hv" href="{{p.href}}" style="display:grid;grid-template-columns:14px 104px minmax(220px,1.1fr) minmax(280px,2fr) 44px;column-gap:12px;align-items:center;height:26px;padding:0 16px 0 28px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--fg);text-decoration:none">
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:{{p.c}}">{{p.g}}</span>
+                      <span style="color:var(--mute)">{{p.kind}}</span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{p.obj}}</span>
+                      <span style="color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{p.msg}}</span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute);text-align:right">{{p.age}}</span>
+                    </a>
+                  </sc-for>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </section>
+
+        <section aria-labelledby="h-changes" style="padding-bottom:16px">
+          <div style="display:flex;align-items:center;gap:8px;padding:18px 16px 8px">
+            <h2 id="h-changes" style="margin:0;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Recent GitOps changes</h2>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">fleet-infra/main</span>
+            <span style="flex:1"></span>
+            <a href="Changes.dc.html" style="font-size:12px;color:var(--acc);text-decoration:none">All changes →</a>
+          </div>
+          <div style="overflow-x:auto">
+            <div style="min-width:900px">
+              <div style="display:grid;grid-template-columns:72px minmax(260px,1fr) 120px 40px repeat(4,74px);column-gap:12px;align-items:center;height:24px;padding:0 16px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:11.5px;color:var(--mute)">
+                <span>Commit</span><span>Message</span><span>Author</span><span>Age</span><span>staging</span><span>us-east</span><span>eu-west</span><span>dev</span>
+              </div>
+              <sc-for list="{{commits}}" as="k" hint-placeholder-count="3">
+                <a class="hv" href="Changes.dc.html" style="display:grid;grid-template-columns:72px minmax(260px,1fr) 120px 40px repeat(4,74px);column-gap:12px;align-items:center;height:28px;padding:0 16px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--fg);text-decoration:none">
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--acc)">{{k.sha}}</span>
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{k.msg}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{k.who}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{k.age}}</span>
+                  <sc-for list="{{k.lanes}}" as="l" hint-placeholder-count="4"><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:{{l.c}};white-space:nowrap">{{l.t}}</span></sc-for>
+                </a>
+              </sc-for>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+  <dc-import name="StatusBar" theme="{{theme}}" left="5 of 6 clusters connected" hint-size="100%,26px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { sev: 'all' };
+  }
+  vars() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    const D = '--editor:#111317;--panel:#15181D;--chrome:#1A1D22;--raise:#20242A;--hover:#1D2127;--line:#262A30;--line2:#323740;--guide:#2A2E35;--fg:#DCDFE4;--fg2:#B3B9C3;--mute:#8E96A3;--sep:#4C525C;--sel:#1F2C40;--selfg:#F2F6FC;--selline:#3A5A8C;--acc:#74ADFF;--onacc:#0C1220;--ok:#48C78E;--warn:#E8B04B;--err:#F26D6D;--sus:#9AA2AE;--okbg:rgba(72,199,142,.10);--errbg:rgba(242,109,109,.11);--warnbg:rgba(232,176,75,.10);--accbg:rgba(116,173,255,.12);--addbg:rgba(72,199,142,.12);--delbg:rgba(242,109,109,.13);--addfg:#7FDDB2;--delfg:#FF9C9C;--shadow:rgba(0,0,0,.5);color-scheme:dark;';
+    const L = '--editor:#FFFFFF;--panel:#F6F7F8;--chrome:#EEEFF1;--raise:#E9EBEE;--hover:#F1F2F4;--line:#E1E3E7;--line2:#CFD3D9;--guide:#E4E6EA;--fg:#1D2027;--fg2:#3B414B;--mute:#5F6774;--sep:#A5ABB5;--sel:#DCE7FA;--selfg:#0D2850;--selline:#8DB0EA;--acc:#1F5FD1;--onacc:#FFFFFF;--ok:#167A4C;--warn:#935800;--err:#C53030;--sus:#6B7280;--okbg:rgba(22,122,76,.08);--errbg:rgba(197,48,48,.07);--warnbg:rgba(147,88,0,.08);--accbg:rgba(31,95,209,.08);--addbg:rgba(22,122,76,.10);--delbg:rgba(197,48,48,.09);--addfg:#0F5E3A;--delfg:#A12626;--shadow:rgba(20,24,32,.18);color-scheme:light;';
+    return { theme: t, vars: t === 'light' ? L : D };
+  }
+  renderVals() {
+    const v = this.vars();
+    const C = { ok: 'var(--ok)', err: 'var(--err)', warn: 'var(--warn)', sus: 'var(--sus)', mute: 'var(--mute)', fg2: 'var(--fg2)' };
+    const G = { ok: '●', err: '✕', warn: '▲', sus: '‖', off: '○' };
+    const B = (s, n) => ({ t: G[s] + ' ' + n, c: C[s] });
+    const cl = (name, s, state, ver, nodes, pods, podsBad, pbs, cpu, mem, flux, fs, rev, rc, probs, dim) => ({
+      name, sg: s === 'off' ? G.off : G[s], sc: s === 'off' ? C.mute : C[s], state, ver, nodes, pods, podsBad, pbc: C[pbs] || C.mute,
+      cpu: cpu == null ? '—' : cpu + '%', cpuW: (cpu || 0) + '%', mem: mem == null ? '—' : mem + '%', memW: (mem || 0) + '%',
+      flux, fc: C[fs] || C.mute, rev, rc: C[rc] || C.fg2, probs, rowStyle: dim ? 'color:var(--mute);' : ''
+    });
+    const clusters = [
+      cl('prod-us-east', 'err', 'Degraded', 'v1.31.2', '14', '412', '✕ 5', 'err', 61, 61, '✕ 20/21', 'err', 'a41e07c', 'fg2', [B('err', 2), B('warn', 3)]),
+      cl('prod-eu-west', 'ok', 'Healthy', 'v1.31.2', '11', '356', '', '', 48, 55, '‖ 20/21', 'sus', '7c2d9e0', 'sus', [B('sus', 1), B('warn', 1)]),
+      cl('staging', 'warn', 'Warnings', 'v1.30.5', '6', '188', '▲ 2', 'warn', 35, 40, '▲ 20/21', 'warn', 'a41e07c', 'fg2', [B('warn', 2)]),
+      cl('dev-kind', 'ok', 'Healthy', 'v1.31.0', '3', '64', '', '', 12, 22, '● 12/12', 'ok', 'a41e07c', 'fg2', []),
+      cl('qa-gke', 'err', 'Auth expired', '—', '—', '—', '', '', null, null, '—', '', '—', 'mute', [B('err', 1)], true),
+      cl('edge-k3s', 'off', 'Offline 3h', 'v1.29.8', '—', '—', '', '', null, null, '—', '', '—', 'mute', [], true)
+    ];
+    const P = (s, kind, obj, msg, age, href) => ({ g: G[s], c: C[s], s, kind, obj, msg, age, href: href || '#' });
+    const all = [
+      { cluster: 'prod-us-east', items: [
+        P('err', 'Kustomization', 'flux-system/apps-payments', 'Health check failed after 5m: Deployment/payments/checkout-api not ready', '4m', 'Kustomization.dc.html'),
+        P('err', 'Deployment', 'payments/checkout-api', '2/3 ready · pod …x2lqp CrashLoopBackOff, 14 restarts, exit 1', '3h', 'Workload.dc.html'),
+        P('warn', 'Pod', 'ml/ml-batch-5c7f-9kq2d', 'FailedScheduling: 0/14 nodes available, insufficient nvidia.com/gpu', '6m'),
+        P('warn', 'Pod', 'monitoring/grafana-6b8d9-tw4mn', 'FailedMount: configmap "dashboards" not found', '18m'),
+        P('warn', 'Node', 'ip-10-4-31-12', 'Cordoned (SchedulingDisabled)', '42m')
+      ] },
+      { cluster: 'prod-eu-west', items: [
+        P('sus', 'Kustomization', 'flux-system/apps-payments', 'Suspended · 2 commits behind fleet-infra/main', '2d', 'Kustomization.dc.html'),
+        P('warn', 'HPA', 'web/web-frontend', 'At max replicas (12/12) for 25m', '25m')
+      ] },
+      { cluster: 'staging', items: [
+        P('warn', 'HelmRelease', 'monitoring/kube-prometheus-stack', 'Upgrade to 62.7.0 retrying (2/3): context deadline exceeded', '9m', 'Flux.dc.html'),
+        P('warn', 'Pod', 'search/search-indexer-0', 'Readiness probe failed: HTTP 503', '11m')
+      ] },
+      { cluster: 'qa-gke', items: [
+        P('err', 'Cluster', 'qa-gke', 'Credentials expired (gke-gcloud-auth-plugin) · run gcloud auth login', '1d')
+      ] }
+    ];
+    const sev = this.state.sev;
+    const keep = (p) => sev === 'all' || (sev === 'err' ? p.s === 'err' : p.s !== 'err');
+    const groups = all.map((g) => {
+      const items = g.items.filter(keep);
+      const counts = [];
+      ['err', 'warn', 'sus'].forEach((s) => { const n = items.filter((p) => p.s === s).length; if (n) counts.push(B(s, n)); });
+      return { cluster: g.cluster, items, counts };
+    }).filter((g) => g.items.length);
+    const filters = [['all', 'All'], ['err', 'Errors'], ['warn', 'Warnings']].map((f) => ({
+      label: f[1],
+      pressed: f[0] === sev ? 'true' : 'false',
+      style: f[0] === sev ? 'background:var(--sel);color:var(--selfg);' : 'background:transparent;color:var(--fg2);',
+      pick: () => this.setState({ sev: f[0] })
+    }));
+    const LN = (s, t) => ({ t: (s === 'none' ? '–' : G[s]) + (t ? ' ' + t : ''), c: s === 'none' ? C.mute : C[s] });
+    const commits = [
+      { sha: 'a41e07c', msg: 'checkout-api: bump to 2.14.0, read webhook secret from env', who: '@mkhan', age: '3h', lanes: [LN('ok', 'applied'), LN('err', 'failing'), LN('sus', 'held'), LN('ok', 'applied')] },
+      { sha: '3be91f2', msg: 'monitoring: kube-prometheus-stack 62.7.0 on staging', who: '@renovate[bot]', age: '5h', lanes: [LN('warn', 'retrying'), LN('none'), LN('none'), LN('none')] },
+      { sha: '7c2d9e0', msg: 'web-frontend: raise min replicas to 6', who: '@jlee', age: '1d', lanes: [LN('ok', 'applied'), LN('ok', 'applied'), LN('ok', 'applied'), LN('ok', 'applied')] }
+    ];
+    return { theme: v.theme, vars: v.vars, clusters, groups, filters, commits };
+  }
+}
+</script>
+</body>
+</html>

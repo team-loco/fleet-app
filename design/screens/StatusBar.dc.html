@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Status bar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<footer style="{{vars}}height:26px;width:100%;box-sizing:border-box;border-top:1px solid var(--line);background:var(--chrome);display:flex;align-items:center;gap:16px;padding:0 12px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute);white-space:nowrap;overflow:hidden">
+  <a href="Fleet.dc.html" style="display:flex;gap:10px;text-decoration:none"><span style="color:var(--err)">✕ 3</span><span style="color:var(--warn)">▲ 6</span></a>
+  <span>{{left}}</span>
+  <span style="flex:1"></span>
+  <sc-if value="{{hasAgent}}" hint-placeholder-val="{{ false }}"><a href="LocoPlatform.dc.html" style="display:flex;align-items:center;gap:6px;text-decoration:none;color:var(--mute)"><span style="color:var(--ok)">●</span>loco agent · synced {{agent}}</a></sc-if>
+  <span>{{right}}</span>
+</footer>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"left":{"editor":"text","default":"5 of 6 clusters connected"},"right":{"editor":"text","default":""},"agent":{"editor":"text","default":""},"$preview":{"width":1440,"height":26}}'>
+class Component extends DCLogic {
+  vars() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    const D = '--editor:#111317;--panel:#15181D;--chrome:#1A1D22;--raise:#20242A;--hover:#1D2127;--line:#262A30;--line2:#323740;--guide:#2A2E35;--fg:#DCDFE4;--fg2:#B3B9C3;--mute:#8E96A3;--sep:#4C525C;--sel:#1F2C40;--selfg:#F2F6FC;--selline:#3A5A8C;--acc:#74ADFF;--onacc:#0C1220;--ok:#48C78E;--warn:#E8B04B;--err:#F26D6D;--sus:#9AA2AE;--okbg:rgba(72,199,142,.10);--errbg:rgba(242,109,109,.11);--warnbg:rgba(232,176,75,.10);--accbg:rgba(116,173,255,.12);--addbg:rgba(72,199,142,.12);--delbg:rgba(242,109,109,.13);--addfg:#7FDDB2;--delfg:#FF9C9C;--shadow:rgba(0,0,0,.5);color-scheme:dark;';
+    const L = '--editor:#FFFFFF;--panel:#F6F7F8;--chrome:#EEEFF1;--raise:#E9EBEE;--hover:#F1F2F4;--line:#E1E3E7;--line2:#CFD3D9;--guide:#E4E6EA;--fg:#1D2027;--fg2:#3B414B;--mute:#5F6774;--sep:#A5ABB5;--sel:#DCE7FA;--selfg:#0D2850;--selline:#8DB0EA;--acc:#1F5FD1;--onacc:#FFFFFF;--ok:#167A4C;--warn:#935800;--err:#C53030;--sus:#6B7280;--okbg:rgba(22,122,76,.08);--errbg:rgba(197,48,48,.07);--warnbg:rgba(147,88,0,.08);--accbg:rgba(31,95,209,.08);--addbg:rgba(22,122,76,.10);--delbg:rgba(197,48,48,.09);--addfg:#0F5E3A;--delfg:#A12626;--shadow:rgba(20,24,32,.18);color-scheme:light;';
+    return { theme: t, vars: t === 'light' ? L : D };
+  }
+  renderVals() {
+    const agent = this.props.agent ?? '';
+    return { vars: this.vars().vars, left: this.props.left ?? '5 of 6 clusters connected', right: this.props.right ?? '', agent, hasAgent: !!agent };
+  }
+}
+</script>
+</body>
+</html>

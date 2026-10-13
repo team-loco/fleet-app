@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Add clusters</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.hv:hover{background:var(--hover)}
+</style>
+</helmet>
+<div style="{{vars}}position:relative;width:100%;height:900px;overflow:hidden;font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--editor)">
+  <dc-import name="Fleet" theme="{{theme}}" hint-size="100%,900px"></dc-import>
+  <div style="position:absolute;inset:0;{{scrim}}"></div>
+  <div role="dialog" aria-label="Add clusters" style="position:absolute;top:84px;left:50%;transform:translateX(-50%);width:720px;max-width:calc(100% - 32px);background:var(--panel);border:1px solid var(--line2);border-radius:4px;box-shadow:0 18px 48px var(--shadow);display:flex;flex-direction:column;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:10px;height:44px;padding:0 14px;border-bottom:1px solid var(--line)">
+      <h1 style="margin:0;font-size:14px;font-weight:600">{{title}}</h1>
+      <span style="flex:1"></span>
+      <a href="Fleet.dc.html" aria-label="Close" style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:3px;color:var(--mute);text-decoration:none;font-size:16px">×</a>
+    </div>
+
+    <sc-if value="{{isPick}}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;flex-direction:column">
+        <p style="margin:0;padding:12px 14px 4px;color:var(--fg2);font-size:12.5px">Contexts in your kubeconfig files that aren't in Shoal yet.</p>
+        <sc-for list="{{files}}" as="f" hint-placeholder-count="2">
+          <div>
+            <div style="padding:12px 14px 6px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{f.path}}</div>
+            <sc-for list="{{f.ctxs}}" as="c" hint-placeholder-count="2">
+              <div class="hv" style="display:grid;grid-template-columns:20px minmax(0,1fr) 180px;column-gap:10px;align-items:center;padding:7px 14px;border-top:1px solid var(--line)">
+                <input type="checkbox" aria-label="{{c.ctx}}" checked="{{c.on}}" onChange="{{c.toggle}}" style="margin:0;width:14px;height:14px;accent-color:var(--acc)">
+                <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{c.ctx}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{c.meta}}</span>
+                </div>
+                <sc-if value="{{c.on}}" hint-placeholder-val="{{ true }}">
+                  <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--mute)">name<input value="{{c.name}}" style="flex:1;min-width:0;height:24px;box-sizing:border-box;padding:0 8px;border:1px solid var(--line2);border-radius:3px;background:var(--editor);color:var(--fg);font-family:'IBM Plex Mono',monospace;font-size:12px"></label>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+        <div style="display:flex;align-items:center;gap:8px;padding:12px 14px;border-top:1px solid var(--line);background:var(--chrome)">
+          <button style="height:24px;padding:0 8px;border:0;background:transparent;color:var(--acc);font-family:inherit;font-size:12px;cursor:pointer">Paste kubeconfig…</button>
+          <button style="height:24px;padding:0 8px;border:0;background:transparent;color:var(--acc);font-family:inherit;font-size:12px;cursor:pointer">Watch a folder…</button>
+          <span style="flex:1"></span>
+          <a href="Fleet.dc.html" style="height:24px;box-sizing:border-box;padding:0 10px;border:1px solid var(--line2);border-radius:3px;color:var(--fg2);font-size:12px;display:flex;align-items:center;text-decoration:none">Cancel</a>
+          <button onClick="{{next}}" style="height:24px;padding:0 10px;border:1px solid var(--acc);border-radius:3px;background:var(--acc);color:var(--onacc);font-family:inherit;font-size:12px;font-weight:500;cursor:pointer">{{connectLabel}}</button>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{isCheck}}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column">
+        <sc-for list="{{results}}" as="r" hint-placeholder-count="2">
+          <div style="padding:12px 14px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;align-items:baseline;gap:10px">
+              <span style="font-weight:600">{{r.name}}</span>
+              <span style="font-size:12.5px;color:{{r.c}}">{{r.verdict}}</span>
+              <span style="flex:1"></span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{r.ctx}}</span>
+            </div>
+            <sc-for list="{{r.checks}}" as="k" hint-placeholder-count="5">
+              <div style="display:grid;grid-template-columns:14px minmax(0,1fr);column-gap:8px;font-size:12.5px;line-height:1.5">
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:{{k.c}};padding-top:2px">{{k.g}}</span>
+                <span style="color:var(--fg2)">{{k.t}}<sc-if value="{{k.hasCmd}}" hint-placeholder-val="{{ false }}"><span style="display:flex;align-items:center;gap:8px;margin-top:6px"><code style="font-family:'IBM Plex Mono',monospace;font-size:12px;padding:3px 8px;border:1px solid var(--line2);border-radius:3px;background:var(--editor);color:var(--fg)">{{k.cmd}}</code><button style="height:22px;padding:0 8px;border:1px solid var(--line2);border-radius:3px;background:transparent;color:var(--fg2);font-family:inherit;font-size:12px;cursor:pointer">Copy</button><button style="height:22px;padding:0 8px;border:1px solid var(--line2);border-radius:3px;background:transparent;color:var(--fg2);font-family:inherit;font-size:12px;cursor:pointer">Retry</button></span></sc-if></span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+        <div style="display:flex;align-items:center;gap:8px;padding:12px 14px;background:var(--chrome)">
+          <button onClick="{{back}}" style="height:24px;padding:0 10px;border:1px solid var(--line2);border-radius:3px;background:transparent;color:var(--fg2);font-family:inherit;font-size:12px;cursor:pointer">Back</button>
+          <span style="flex:1;font-size:12px;color:var(--mute)">sandbox stays here until it authenticates.</span>
+          <a href="Fleet.dc.html" style="height:24px;box-sizing:border-box;padding:0 10px;border:1px solid var(--acc);border-radius:3px;background:var(--acc);color:var(--onacc);font-size:12px;font-weight:500;display:flex;align-items:center;text-decoration:none">Add analytics</a>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"step":{"editor":"enum","options":["pick","check"],"default":"pick"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { step: props.step ?? 'pick', sel: { analytics: true, minikube: false, sandbox: true } };
+  }
+  vars() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    const D = '--editor:#111317;--panel:#15181D;--chrome:#1A1D22;--raise:#20242A;--hover:#1D2127;--line:#262A30;--line2:#323740;--guide:#2A2E35;--fg:#DCDFE4;--fg2:#B3B9C3;--mute:#8E96A3;--sep:#4C525C;--sel:#1F2C40;--selfg:#F2F6FC;--selline:#3A5A8C;--acc:#74ADFF;--onacc:#0C1220;--ok:#48C78E;--warn:#E8B04B;--err:#F26D6D;--sus:#9AA2AE;--okbg:rgba(72,199,142,.10);--errbg:rgba(242,109,109,.11);--warnbg:rgba(232,176,75,.10);--accbg:rgba(116,173,255,.12);--addbg:rgba(72,199,142,.12);--delbg:rgba(242,109,109,.13);--addfg:#7FDDB2;--delfg:#FF9C9C;--shadow:rgba(0,0,0,.5);color-scheme:dark;';
+    const L = '--editor:#FFFFFF;--panel:#F6F7F8;--chrome:#EEEFF1;--raise:#E9EBEE;--hover:#F1F2F4;--line:#E1E3E7;--line2:#CFD3D9;--guide:#E4E6EA;--fg:#1D2027;--fg2:#3B414B;--mute:#5F6774;--sep:#A5ABB5;--sel:#DCE7FA;--selfg:#0D2850;--selline:#8DB0EA;--acc:#1F5FD1;--onacc:#FFFFFF;--ok:#167A4C;--warn:#935800;--err:#C53030;--sus:#6B7280;--okbg:rgba(22,122,76,.08);--errbg:rgba(197,48,48,.07);--warnbg:rgba(147,88,0,.08);--accbg:rgba(31,95,209,.08);--addbg:rgba(22,122,76,.10);--delbg:rgba(197,48,48,.09);--addfg:#0F5E3A;--delfg:#A12626;--shadow:rgba(20,24,32,.18);color-scheme:light;';
+    return { theme: t, vars: t === 'light' ? L : D };
+  }
+  renderVals() {
+    const v = this.vars();
+    const sel = this.state.sel;
+    const C = (id, ctx, meta, name) => ({ ctx, meta, name, on: !!sel[id], toggle: () => this.setState({ sel: { ...sel, [id]: !sel[id] } }) });
+    const files = [
+      { path: '~/.kube/config', ctxs: [
+        C('analytics', 'gke_acme-data_us-central1_analytics', 'https://34.118.[IP] · gke-gcloud-auth-plugin', 'analytics'),
+        C('minikube', 'minikube', 'https://127.0.0.1:52011 · client certificate', 'minikube')
+      ] },
+      { path: '~/.kube/eks/sandbox.yaml', ctxs: [
+        C('sandbox', 'arn:aws:eks:us-west-2:[ACCOUNT]:cluster/sandbox', 'https://[ID].eks.amazonaws.com · aws eks get-token', 'sandbox')
+      ] }
+    ];
+    const n = Object.keys(sel).filter((k) => sel[k]).length;
+    const K = (s, t, cmd) => ({ g: s === 'ok' ? '●' : (s === 'warn' ? '▲' : '✕'), c: s === 'ok' ? 'var(--ok)' : (s === 'warn' ? 'var(--warn)' : 'var(--err)'), t, cmd: cmd || '', hasCmd: !!cmd });
+    const step = this.state.step;
+    return {
+      theme: v.theme, vars: v.vars,
+      scrim: v.theme === 'light' ? 'background:rgba(20,24,32,.22);' : 'background:rgba(4,5,7,.55);',
+      isPick: step === 'pick', isCheck: step === 'check',
+      title: step === 'pick' ? 'Add clusters' : 'Connecting 2 clusters',
+      files,
+      connectLabel: 'Connect ' + n,
+      next: () => this.setState({ step: 'check' }),
+      back: () => this.setState({ step: 'pick' }),
+      results: [
+        { name: 'analytics', verdict: '● Ready to add', c: 'var(--ok)', ctx: 'gke_acme-data_us-central1_analytics', checks: [
+          K('ok', 'Reachable in 142 ms'),
+          K('ok', 'Kubernetes v1.30.4 · 9 nodes · 212 pods'),
+          K('ok', 'Flux v2.4.0 · 14 Kustomizations, 6 HelmReleases'),
+          K('ok', 'Metrics from monitoring/prometheus-k8s'),
+          K('warn', 'Can’t read Secrets, so env var values won’t resolve. Everything else works.')
+        ] },
+        { name: 'sandbox', verdict: '✕ Can’t authenticate', c: 'var(--err)', ctx: 'arn:aws:eks:us-west-2:[ACCOUNT]:cluster/sandbox', checks: [
+          K('ok', 'Reachable in 88 ms'),
+          K('err', 'aws eks get-token: ExpiredToken. Sign in again, then retry.', 'aws sso login --profile sandbox')
+        ] }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

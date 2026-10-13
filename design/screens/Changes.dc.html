@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Changes — fleet-infra</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.hv:hover{background:var(--hover)}
+</style>
+</helmet>
+<div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--editor);width:100%;height:900px;display:flex;flex-direction:column;overflow:hidden">
+  <div style="flex:1;min-height:0;display:flex;flex-wrap:wrap">
+    <div style="flex:0 0 auto;display:flex"><dc-import name="Nav" theme="{{theme}}" mode="fleet" active="changes" hint-size="360px,874px"></dc-import></div>
+    <div style="flex:999 1 560px;min-width:0;height:874px;display:flex;flex-direction:column">
+      <div style="height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid var(--line);font-size:12.5px;overflow:hidden">
+        <h1 style="margin:0;font-size:14px;font-weight:600">Changes</h1>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute);padding-left:4px">fleet-infra/main</span>
+        <span style="flex:1"></span>
+        <label style="display:flex;align-items:center;gap:6px;height:22px;width:220px;box-sizing:border-box;padding:0 8px;border:1px solid var(--line2);border-radius:3px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">path:<input value="apps/payments" aria-label="Path filter" style="flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--fg);font-family:inherit;font-size:11.5px"></label>
+        <button style="height:22px;padding:0 8px;border:1px solid var(--line2);border-radius:3px;background:transparent;color:var(--fg2);font-family:inherit;font-size:12px;cursor:pointer;white-space:nowrap">All clusters</button>
+      </div>
+
+      <div style="flex:1;min-height:0;display:flex;flex-wrap:wrap">
+        <div style="flex:1 1 360px;min-width:0;height:100%;overflow:auto;border-right:1px solid var(--line);background:var(--panel)">
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) repeat(4,30px);column-gap:4px;align-items:center;height:24px;padding:0 12px;border-bottom:1px solid var(--line);font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--mute)">
+            <span>commit</span><span title="staging" style="text-align:center">stg</span><span title="prod-us-east" style="text-align:center">use1</span><span title="prod-eu-west" style="text-align:center">euw1</span><span title="dev-kind" style="text-align:center">dev</span>
+          </div>
+          <sc-for list="{{commits}}" as="k" hint-placeholder-count="6">
+            <button onClick="{{k.pick}}" aria-pressed="{{k.selected}}" style="display:grid;grid-template-columns:minmax(0,1fr) repeat(4,30px);column-gap:4px;align-items:center;width:100%;padding:7px 12px;border:0;border-bottom:1px solid var(--line);text-align:left;font-family:inherit;color:var(--fg);cursor:pointer;{{k.style}}">
+              <span style="display:flex;flex-direction:column;gap:3px;min-width:0">
+                <span style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{k.msg}}</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute);white-space:nowrap"><span style="color:var(--acc)">{{k.sha}}</span> · {{k.who}} · {{k.age}}</span>
+              </span>
+              <sc-for list="{{k.lanes}}" as="l" hint-placeholder-count="4"><span title="{{l.title}}" style="text-align:center;font-family:'IBM Plex Mono',monospace;font-size:11px;color:{{l.c}}">{{l.g}}</span></sc-for>
+            </button>
+          </sc-for>
+        </div>
+
+        <div style="flex:999 1 560px;min-width:0;height:100%;overflow:auto">
+          <div style="padding:14px 16px;display:flex;flex-direction:column;gap:6px;border-bottom:1px solid var(--line)">
+            <h1 style="margin:0;font-size:15px;font-weight:600">{{cur.msg}}</h1>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--mute)"><span style="color:var(--acc)">{{cur.full}}</span> · {{cur.who}} · {{cur.when}} · {{cur.stat}}</div>
+          </div>
+
+          <div style="display:flex;align-items:baseline;gap:8px;padding:12px 16px 6px">
+            <h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Rollout</h2>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{cur.target}}</span>
+          </div>
+          <div style="border-top:1px solid var(--line)">
+            <sc-for list="{{cur.rollout}}" as="r" hint-placeholder-count="4">
+              <div style="display:grid;grid-template-columns:14px 110px 140px minmax(0,1fr);column-gap:12px;align-items:center;height:25px;padding:0 16px;border-bottom:1px solid var(--line);font-size:12.5px">
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:{{r.c}}">{{r.g}}</span>
+                <span>{{r.cluster}}</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--fg2)">{{r.ks}}</span>
+                <span style="color:{{r.nc}};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{r.note}}</span>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:14px 16px 8px">
+            <h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Diff</h2>
+            <span style="flex:1"></span>
+            <div role="group" aria-label="Diff view" style="display:flex;border:1px solid var(--line2);border-radius:3px;overflow:hidden">
+              <sc-for list="{{views}}" as="w" hint-placeholder-count="3">
+                <button aria-pressed="{{w.pressed}}" onClick="{{w.pick}}" style="height:22px;padding:0 9px;border:0;font-family:inherit;font-size:12px;cursor:pointer;white-space:nowrap;{{w.style}}">{{w.label}}</button>
+              </sc-for>
+            </div>
+          </div>
+          <div style="padding:0 16px 8px;font-size:12px;color:var(--mute)">{{viewNote}}</div>
+
+          <sc-for list="{{files}}" as="f" hint-placeholder-count="2">
+            <div style="margin:0 16px 14px;border:1px solid var(--line);border-radius:3px;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:10px;height:28px;padding:0 10px;background:var(--panel);border-bottom:1px solid var(--line);font-family:'IBM Plex Mono',monospace;font-size:12px">
+                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{f.path}}</span>
+                <span style="color:var(--addfg)">{{f.add}}</span><span style="color:var(--delfg)">{{f.del}}</span>
+              </div>
+              <div style="overflow-x:auto;padding:4px 0;font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:20px">
+                <sc-for list="{{f.lines}}" as="l" hint-placeholder-count="8">
+                  <div>
+                    <div style="display:flex;white-space:pre;{{l.bg}}"><span style="width:40px;flex:none;text-align:right;padding-right:8px;color:var(--mute)">{{l.n}}</span><span style="width:16px;flex:none;color:{{l.sc}}">{{l.s}}</span><span style="color:var(--fg)">{{l.t}}</span><sc-if value="{{l.hasNote}}" hint-placeholder-val="{{ false }}"><span style="margin-left:16px;font-family:'IBM Plex Sans',sans-serif;font-size:12px;color:var(--warn)">← {{l.note}}</span></sc-if></div>
+                    <sc-if value="{{l.hasComment}}" hint-placeholder-val="{{ false }}">
+                      <div style="margin:4px 12px 6px 64px;padding:8px 10px;border:1px solid var(--line2);border-radius:3px;background:var(--panel);font-family:'IBM Plex Sans',sans-serif;font-size:12.5px;line-height:1.5;white-space:normal;display:flex;flex-direction:column;gap:4px">
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">@mkhan · 12m · shared with #payments-oncall</span>
+                        <span>This patch predates the env-based secret and still points at <span style="font-family:'IBM Plex Mono',monospace;font-size:12px">webhook_secret</span>. Fix is in PR #482.</span>
+                        <a href="Preview.dc.html" style="color:var(--acc);text-decoration:none;font-size:12px">Preview PR #482 against prod-us-east →</a>
+                      </div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+  <dc-import name="StatusBar" theme="{{theme}}" left="fleet-infra fetched 4m ago" hint-size="100%,26px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { sel: 0, view: 'east' };
+  }
+  vars() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    const D = '--editor:#111317;--panel:#15181D;--chrome:#1A1D22;--raise:#20242A;--hover:#1D2127;--line:#262A30;--line2:#323740;--guide:#2A2E35;--fg:#DCDFE4;--fg2:#B3B9C3;--mute:#8E96A3;--sep:#4C525C;--sel:#1F2C40;--selfg:#F2F6FC;--selline:#3A5A8C;--acc:#74ADFF;--onacc:#0C1220;--ok:#48C78E;--warn:#E8B04B;--err:#F26D6D;--sus:#9AA2AE;--okbg:rgba(72,199,142,.10);--errbg:rgba(242,109,109,.11);--warnbg:rgba(232,176,75,.10);--accbg:rgba(116,173,255,.12);--addbg:rgba(72,199,142,.12);--delbg:rgba(242,109,109,.13);--addfg:#7FDDB2;--delfg:#FF9C9C;--shadow:rgba(0,0,0,.5);color-scheme:dark;';
+    const L = '--editor:#FFFFFF;--panel:#F6F7F8;--chrome:#EEEFF1;--raise:#E9EBEE;--hover:#F1F2F4;--line:#E1E3E7;--line2:#CFD3D9;--guide:#E4E6EA;--fg:#1D2027;--fg2:#3B414B;--mute:#5F6774;--sep:#A5ABB5;--sel:#DCE7FA;--selfg:#0D2850;--selline:#8DB0EA;--acc:#1F5FD1;--onacc:#FFFFFF;--ok:#167A4C;--warn:#935800;--err:#C53030;--sus:#6B7280;--okbg:rgba(22,122,76,.08);--errbg:rgba(197,48,48,.07);--warnbg:rgba(147,88,0,.08);--accbg:rgba(31,95,209,.08);--addbg:rgba(22,122,76,.10);--delbg:rgba(197,48,48,.09);--addfg:#0F5E3A;--delfg:#A12626;--shadow:rgba(20,24,32,.18);color-scheme:light;';
+    return { theme: t, vars: t === 'light' ? L : D };
+  }
+  renderVals() {
+    const v = this.vars();
+    const C = { ok: 'var(--ok)', err: 'var(--err)', warn: 'var(--warn)', sus: 'var(--sus)', none: 'var(--sep)' };
+    const G = { ok: '●', err: '✕', warn: '▲', sus: '‖', none: '·' };
+    const names = ['staging', 'prod-us-east', 'prod-eu-west', 'dev-kind'];
+    const lanes = (arr) => arr.map((s, i) => ({ g: G[s], c: C[s], title: names[i] + ': ' + s }));
+    const Ln = (n, s, t, extra) => {
+      const o = { n: n, s: s === ' ' ? '' : s, t, sc: s === '+' ? 'var(--addfg)' : (s === '-' ? 'var(--delfg)' : 'var(--mute)'), bg: s === '+' ? 'background:var(--addbg);' : (s === '-' ? 'background:var(--delbg);' : ''), hasNote: false, note: '', hasComment: false };
+      if (extra && extra.note) { o.hasNote = true; o.note = extra.note; o.bg = 'background:var(--warnbg);'; }
+      if (extra && extra.comment) o.hasComment = true;
+      return o;
+    };
+    const RO = (s, cluster, ks, note) => ({ g: G[s], c: C[s], cluster, ks, note, nc: s === 'err' ? 'var(--err)' : 'var(--fg2)' });
+    const commits = [
+      { sha: 'a41e07c', full: 'a41e07c3f91d', msg: 'checkout-api: bump to 2.14.0, read webhook secret from env', who: '@mkhan', age: '3h', when: 'today 18:11', stat: '2 files · +7 −3', lanes: ['ok', 'err', 'sus', 'ok'],
+        target: 'affects ks/apps-payments on 4 clusters',
+        rollout: [RO('ok', 'staging', 'apps-payments', 'applied 3h ago · healthy after 48s'), RO('err', 'prod-us-east', 'apps-payments', 'applied 3h ago · health check failing (checkout-api 2/3)'), RO('sus', 'prod-eu-west', 'apps-payments', 'not applied · Kustomization suspended (change freeze)'), RO('ok', 'dev-kind', 'apps-payments', 'applied 3h ago · healthy after 21s')] },
+      { sha: '3be91f2', full: '3be91f2a0c77', msg: 'monitoring: kube-prometheus-stack 62.7.0 on staging', who: '@renovate[bot]', age: '5h', when: 'today 16:02', stat: '1 file · +1 −1', lanes: ['warn', 'none', 'none', 'none'],
+        target: 'affects hr/kube-prometheus-stack on staging',
+        rollout: [RO('warn', 'staging', 'infra-monitoring', 'HelmRelease upgrade retrying (2/3): context deadline exceeded')] },
+      { sha: '7c2d9e0', full: '7c2d9e0b51e4', msg: 'web-frontend: raise min replicas to 6', who: '@jlee', age: '1d', when: 'yesterday 11:40', stat: '1 file · +1 −1', lanes: ['ok', 'ok', 'ok', 'ok'],
+        target: 'affects ks/apps-web on 4 clusters',
+        rollout: [RO('ok', 'staging', 'apps-web', 'applied · healthy'), RO('ok', 'prod-us-east', 'apps-web', 'applied · healthy'), RO('ok', 'prod-eu-west', 'apps-web', 'applied · healthy'), RO('ok', 'dev-kind', 'apps-web', 'applied · healthy')] },
+      { sha: 'd81f3c0', full: 'd81f3c04a9b2', msg: 'checkout-api: retry budget for stripe calls', who: '@mkhan', age: '9d', when: 'Oct 3', stat: '1 file · +4', lanes: ['ok', 'ok', 'ok', 'ok'],
+        target: 'affects ks/apps-payments on 4 clusters',
+        rollout: [RO('ok', 'staging', 'apps-payments', 'applied · healthy'), RO('ok', 'prod-us-east', 'apps-payments', 'applied · healthy'), RO('ok', 'prod-eu-west', 'apps-payments', 'applied · healthy'), RO('ok', 'dev-kind', 'apps-payments', 'applied · healthy')] },
+      { sha: 'e19a4b8', full: 'e19a4b8c2f60', msg: 'payments: add PDB and HPA', who: '@ops-team', age: '23d', when: 'Sep 19', stat: '3 files · +38', lanes: ['ok', 'ok', 'ok', 'ok'],
+        target: 'affects ks/apps-payments on 4 clusters',
+        rollout: [RO('ok', 'staging', 'apps-payments', 'applied · healthy'), RO('ok', 'prod-us-east', 'apps-payments', 'applied · healthy'), RO('ok', 'prod-eu-west', 'apps-payments', 'applied · healthy'), RO('ok', 'dev-kind', 'apps-payments', 'applied · healthy')] }
+    ];
+    const sel = this.state.sel;
+    const list = commits.map((k, i) => ({
+      ...k, lanes: lanes(k.lanes),
+      selected: i === sel ? 'true' : 'false',
+      style: i === sel ? 'background:var(--sel);box-shadow:inset 0 0 0 1px var(--selline);' : 'background:transparent;',
+      pick: () => this.setState({ sel: i })
+    }));
+    const cur = commits[sel];
+    const view = sel === 0 ? this.state.view : 'source';
+    let files, viewNote;
+    if (sel === 0 && view === 'source') {
+      viewNote = 'Source change as committed. Overlays that patch these fields are not shown here; switch to a rendered view to see what each cluster actually receives.';
+      files = [
+        { path: 'apps/payments/base/deployment.yaml', add: '+7', del: '−1', lines: [
+          Ln('21', ' ', '      containers:'), Ln('22', ' ', '      - name: api'),
+          Ln('23', '-', '        image: ghcr.io/acme/checkout-api:2.13.4'), Ln('23', '+', '        image: ghcr.io/acme/checkout-api:2.14.0'),
+          Ln('24', ' ', '        env:'),
+          Ln('25', '+', '        - name: STRIPE_WEBHOOK_SECRET'), Ln('26', '+', '          valueFrom:'), Ln('27', '+', '            secretKeyRef:'),
+          Ln('28', '+', '              name: stripe'), Ln('29', '+', '              key: webhook-secret'), Ln('30', '+', '              optional: true'),
+          Ln('31', ' ', '        - name: LOG_LEVEL')
+        ] },
+        { path: 'apps/payments/base/configmap.yaml', add: '', del: '−2', lines: [
+          Ln('8', ' ', '  files:'), Ln('9', ' ', '    - app.yaml'), Ln('10', '-', '    - stripe.env'), Ln('11', '-', '      # legacy: read by checkout-api < 2.14'), Ln('12', ' ', 'generatorOptions:')
+        ] }
+      ];
+    } else if (sel === 0) {
+      const east = view === 'east';
+      viewNote = east
+        ? 'Rendered by kustomize for prod-us-east at a41e07c, diffed against what is live. The overlay patch overrides the key from base.'
+        : 'Rendered by kustomize for staging at a41e07c, diffed against what is live. No overlay patch on this field.';
+      files = [
+        { path: 'Deployment/payments/checkout-api · rendered for ' + (east ? 'prod-us-east' : 'staging'), add: '+7', del: '−1', lines: [
+          Ln('41', ' ', '      - name: api'),
+          Ln('42', '-', '        image: ghcr.io/acme/checkout-api:2.13.4'), Ln('42', '+', '        image: ghcr.io/acme/checkout-api:2.14.0'),
+          Ln('43', ' ', '        env:'),
+          Ln('44', '+', '        - name: STRIPE_WEBHOOK_SECRET'), Ln('45', '+', '          valueFrom:'), Ln('46', '+', '            secretKeyRef:'),
+          Ln('47', '+', '              name: stripe'),
+          east ? Ln('48', '+', '              key: webhook_secret', { note: 'set by overlays/prod-us-east/patches/stripe.yaml:9 · unchanged 214d' }) : Ln('48', '+', '              key: webhook-secret'),
+          Ln('49', '+', '              optional: true'),
+          Ln('50', ' ', '        - name: LOG_LEVEL')
+        ] }
+      ];
+    } else {
+      viewNote = 'Source change as committed.';
+      files = [{ path: sel === 1 ? 'infrastructure/monitoring/staging/release.yaml' : (sel === 2 ? 'apps/web/base/hpa.yaml' : 'apps/payments/base/' + (sel === 3 ? 'deployment.yaml' : 'pdb.yaml')), add: '+1', del: '−1', lines: sel === 1
+        ? [Ln('12', ' ', '      chart: kube-prometheus-stack'), Ln('13', '-', '      version: 61.9.0'), Ln('13', '+', '      version: 62.7.0')]
+        : (sel === 2 ? [Ln('9', ' ', 'spec:'), Ln('10', '-', '  minReplicas: 3'), Ln('10', '+', '  minReplicas: 6')]
+          : [Ln('1', '+', 'apiVersion: policy/v1'), Ln('2', '+', 'kind: PodDisruptionBudget'), Ln('3', '+', 'metadata:'), Ln('4', '+', '  name: checkout-api')]) }];
+    }
+    const views = (sel === 0 ? [['source', 'Source'], ['east', 'Rendered · prod-us-east'], ['staging', 'Rendered · staging']] : [['source', 'Source']]).map((w) => ({
+      label: w[1], pressed: w[0] === view ? 'true' : 'false',
+      style: w[0] === view ? 'background:var(--sel);color:var(--selfg);' : 'background:transparent;color:var(--fg2);',
+      pick: () => this.setState({ view: w[0] })
+    }));
+    return { theme: v.theme, vars: v.vars, commits: list, cur, files, views, viewNote };
+  }
+}
+</script>
+</body>
+</html>

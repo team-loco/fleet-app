@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cluster overview — prod-us-east</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:var(--acc)}a:hover{text-decoration:underline}
+.tr:hover{background:var(--hover)}
+</style>
+</helmet>
+<div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--bg);width:100%;min-height:900px;display:flex;flex-direction:column">
+  <dc-import name="Titlebar" theme="{{theme}}" crumb="Overview" mode="cluster" hint-size="100%,40px"></dc-import>
+  <div style="flex:1;display:flex;flex-wrap:wrap;min-height:834px">
+    <div style="flex:1 1 268px;display:flex">
+      <dc-import name="Sidebar" theme="{{theme}}" active="overview" mode="cluster" hint-size="268px,834px"></dc-import>
+    </div>
+    <main style="flex:999 1 560px;min-width:0;box-sizing:border-box;padding:20px 24px;display:flex;flex-direction:column;gap:16px">
+
+      <div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <h1 style="margin:0;font-size:20px;font-weight:600;letter-spacing:-0.01em">Cluster overview</h1>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">
+            <span style="padding:2px 7px;border:1px solid var(--line);border-radius:4px;background:var(--panel)">EKS</span>
+            <span style="padding:2px 7px;border:1px solid var(--line);border-radius:4px;background:var(--panel)">v1.31.2</span>
+            <span style="padding:2px 7px;border:1px solid var(--line);border-radius:4px;background:var(--panel)">us-east-1</span>
+            <span style="padding:2px 7px;border:1px solid var(--line);border-radius:4px;background:var(--panel)">23 namespaces</span>
+            <span style="padding:2px 7px">metrics · monitoring/prometheus-k8s</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div role="group" aria-label="Time range" style="display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--panel)">
+            <button aria-pressed="true" style="height:28px;padding:0 10px;border:0;background:var(--sel);color:var(--selfg);font-family:'IBM Plex Mono',monospace;font-size:12px;cursor:pointer">1h</button>
+            <button aria-pressed="false" style="height:28px;padding:0 10px;border:0;border-left:1px solid var(--line);background:transparent;color:var(--fg2);font-family:'IBM Plex Mono',monospace;font-size:12px;cursor:pointer">6h</button>
+            <button aria-pressed="false" style="height:28px;padding:0 10px;border:0;border-left:1px solid var(--line);background:transparent;color:var(--fg2);font-family:'IBM Plex Mono',monospace;font-size:12px;cursor:pointer">24h</button>
+            <button aria-pressed="false" style="height:28px;padding:0 10px;border:0;border-left:1px solid var(--line);background:transparent;color:var(--fg2);font-family:'IBM Plex Mono',monospace;font-size:12px;cursor:pointer">7d</button>
+          </div>
+          <button style="display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line2);background:var(--panel);color:var(--fg);font-family:inherit;font-size:12.5px;cursor:pointer">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3"/></svg>Live
+          </button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+        <section style="background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--mute)"><span>CPU</span><span style="font-family:'IBM Plex Mono',monospace">68.4 / 112 cores</span></div>
+          <div style="font-size:26px;font-weight:600;letter-spacing:-0.02em">61%</div>
+          <div style="position:relative;height:6px;background:var(--track);border-radius:3px">
+            <div style="width:61%;height:100%;background:var(--acc);border-radius:3px"></div>
+            <div style="position:absolute;left:74%;top:-3px;width:2px;height:12px;background:var(--warn)"></div>
+          </div>
+          <div style="display:flex;gap:14px;font-size:12px;color:var(--mute)"><span>Requests <span style="color:var(--fg);font-weight:500">74%</span></span><span>Limits <span style="color:var(--warn);font-weight:500">131%</span></span></div>
+        </section>
+        <section style="background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--mute)"><span>Memory</span><span style="font-family:'IBM Plex Mono',monospace">312 / 512 GiB</span></div>
+          <div style="font-size:26px;font-weight:600;letter-spacing:-0.02em">61%</div>
+          <div style="position:relative;height:6px;background:var(--track);border-radius:3px">
+            <div style="width:61%;height:100%;background:var(--ai);border-radius:3px"></div>
+            <div style="position:absolute;left:66%;top:-3px;width:2px;height:12px;background:var(--warn)"></div>
+          </div>
+          <div style="display:flex;gap:14px;font-size:12px;color:var(--mute)"><span>Requests <span style="color:var(--fg);font-weight:500">66%</span></span><span>Limits <span style="color:var(--fg);font-weight:500">92%</span></span></div>
+        </section>
+        <section style="background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--mute)"><span>Pods</span><span style="font-family:'IBM Plex Mono',monospace">capacity 1,540</span></div>
+          <div style="font-size:26px;font-weight:600;letter-spacing:-0.02em">412</div>
+          <div style="display:flex;height:6px;border-radius:3px;overflow:hidden;gap:2px;background:var(--track)">
+            <div style="width:96.6%;background:var(--ok)"></div><div style="width:2.2%;background:var(--warn)"></div><div style="width:1.2%;background:var(--err)"></div>
+          </div>
+          <div style="display:flex;gap:14px;font-size:12px;color:var(--mute)"><span><span style="color:var(--fg);font-weight:500">398</span> running</span><span><span style="color:var(--warn);font-weight:500">9</span> pending</span><span><span style="color:var(--err);font-weight:500">5</span> failing</span></div>
+        </section>
+        <section style="background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--mute)"><span>Nodes</span><span style="font-family:'IBM Plex Mono',monospace">m6i.4xlarge ×12 · g5 ×2</span></div>
+          <div style="font-size:26px;font-weight:600;letter-spacing:-0.02em">14</div>
+          <div style="display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:3px">
+            <sc-for list="{{nodes}}" as="n" hint-placeholder-count="14"><div title="{{n.t}}" style="height:6px;border-radius:2px;background:{{n.c}}"></div></sc-for>
+          </div>
+          <div style="display:flex;gap:14px;font-size:12px;color:var(--mute)"><span><span style="color:var(--fg);font-weight:500">13</span> ready</span><span><span style="color:var(--warn);font-weight:500">1</span> cordoned</span></div>
+        </section>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:12px">
+        <section style="flex:2 1 480px;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+            <h2 style="margin:0;font-size:13px;font-weight:600">Utilization</h2>
+            <div style="display:flex;gap:14px;font-size:12px;color:var(--mute)">
+              <span style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:2px;background:var(--acc)"></span>CPU</span>
+              <span style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:2px;background:var(--ai)"></span>Memory</span>
+              <span style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:0;border-top:1px dashed var(--warn)"></span>CPU requests</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <div style="display:flex;flex-direction:column;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--mute);height:170px;text-align:right;width:30px">
+              <span>100%</span><span>75%</span><span>50%</span><span>25%</span><span>0</span>
+            </div>
+            <svg role="img" aria-label="CPU rising from 39 to 60 percent and memory steady near 52 to 57 percent over the last hour" viewBox="0 0 600 180" preserveAspectRatio="none" style="flex:1;height:170px;display:block;color:var(--line)">
+              <g stroke="currentColor" stroke-width="1" vector-effect="non-scaling-stroke">
+                <path d="M0 0.5H600M0 45H600M0 90H600M0 135H600M0 179.5H600" vector-effect="non-scaling-stroke"/>
+              </g>
+              <path d="M0 47H600" stroke="var(--warn)" stroke-width="1" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
+              <polygon points="0,110 50,104 100,98 150,101 200,92 250,86 300,90 350,80 400,76 450,82 500,74 550,70 600,72 600,180 0,180" fill="var(--accbg)"/>
+              <polyline points="0,110 50,104 100,98 150,101 200,92 250,86 300,90 350,80 400,76 450,82 500,74 550,70 600,72" fill="none" stroke="var(--acc)" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+              <polyline points="0,86 50,85 100,84 150,84 200,82 250,81 300,80 350,80 400,78 450,78 500,77 550,76 600,76" fill="none" stroke="var(--ai)" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--mute);padding-left:38px">
+            <span>−60m</span><span>−45m</span><span>−30m</span><span>−15m</span><span>now</span>
+          </div>
+        </section>
+
+        <section style="flex:1 1 300px;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+          <h2 style="margin:0;font-size:13px;font-weight:600">Workloads</h2>
+          <sc-for list="{{workloads}}" as="w" hint-placeholder-count="5">
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <div style="display:flex;justify-content:space-between;font-size:12.5px"><span>{{w.kind}}</span><span style="font-family:'IBM Plex Mono',monospace;color:var(--mute)">{{w.summary}}</span></div>
+              <div style="display:flex;height:5px;border-radius:3px;overflow:hidden;gap:2px;background:var(--track)">
+                <div style="width:{{w.ok}};background:var(--ok)"></div><div style="width:{{w.mid}};background:var(--warn)"></div><div style="width:{{w.bad}};background:var(--err)"></div>
+              </div>
+            </div>
+          </sc-for>
+        </section>
+      </div>
+
+      <section style="background:var(--panel);border:1px solid var(--line);border-radius:8px;display:flex;flex-direction:column;min-width:0">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)">
+          <h2 style="margin:0;font-size:13px;font-weight:600">Warnings <span style="font-family:'IBM Plex Mono',monospace;font-weight:400;color:var(--warn)">7</span></h2>
+          <button style="height:26px;padding:0 10px;border-radius:6px;border:0;background:transparent;color:var(--acc);font-family:inherit;font-size:12.5px;cursor:pointer">All events →</button>
+        </div>
+        <div style="overflow-x:auto">
+          <div style="min-width:880px">
+            <div style="display:grid;grid-template-columns:150px minmax(230px,1.2fr) 110px minmax(260px,2fr) 56px 44px;column-gap:16px;padding:0 16px;height:30px;align-items:center;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--mute);border-bottom:1px solid var(--line)">
+              <span>Reason</span><span>Object</span><span>Namespace</span><span>Message</span><span>Age</span><span style="text-align:right">×</span>
+            </div>
+            <sc-for list="{{events}}" as="e" hint-placeholder-count="5">
+              <div class="tr" style="display:grid;grid-template-columns:150px minmax(230px,1.2fr) 110px minmax(260px,2fr) 56px 44px;column-gap:16px;padding:0 16px;height:32px;align-items:center;font-size:12.5px;border-bottom:1px solid var(--line)">
+                <span style="display:flex;align-items:center;gap:8px;color:{{e.c}};font-weight:500"><span style="width:6px;height:6px;border-radius:50%;background:{{e.c}}"></span>{{e.reason}}</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{e.obj}}</span>
+                <span style="color:var(--fg2)">{{e.ns}}</span>
+                <span style="color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{e.msg}}</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--mute)">{{e.age}}</span>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--mute);text-align:right">{{e.n}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <footer style="height:26px;box-sizing:border-box;border-top:1px solid var(--line);background:var(--chrome);display:flex;align-items:center;gap:16px;padding:0 12px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute);overflow:hidden;white-space:nowrap">
+    <span style="display:flex;align-items:center;gap:6px"><span style="width:7px;height:7px;border-radius:50%;background:var(--ok)"></span>connected</span>
+    <span>~/.kube/eks/prod.yaml</span>
+    <span style="flex:1"></span>
+    <span>3 port-forwards</span><span>watching 412 pods</span><span>1 of 5 clusters degraded</span>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  resolveTheme() {
+    const t = this.props.theme ?? 'system';
+    if (t === 'dark' || t === 'light') return t;
+    try { return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { return 'dark'; }
+  }
+  themeVars(t) {
+    const d = { bg:'#0D0F12', chrome:'#0B0D10', panel:'#13161B', panel2:'#111419', raise:'#1C2129', line:'#252A33', line2:'#2C323C', fg:'#D7DCE3', fg2:'#B9C0CB', mute:'#8B93A1', sep:'#4B5260', sel:'#1D2A3F', selfg:'#FFFFFF', acc:'#6AA6FF', onacc:'#0B0D10', ok:'#3FC58A', warn:'#F0B24A', err:'#FF6B6B', ai:'#B48CFF', track:'#1F242C', hover:'#171B21', okbg:'rgba(63,197,138,.13)', errbg:'rgba(255,107,107,.13)', warnbg:'rgba(240,178,74,.12)', accbg:'rgba(106,166,255,.14)' };
+    const l = { bg:'#F6F7F9', chrome:'#ECEEF2', panel:'#FFFFFF', panel2:'#FAFBFC', raise:'#F0F2F5', line:'#DDE1E7', line2:'#CDD2DA', fg:'#1B1F26', fg2:'#3A414C', mute:'#5E6673', sep:'#A3AAB5', sel:'#DCE8FB', selfg:'#0B2A57', acc:'#2563D9', onacc:'#FFFFFF', ok:'#17784B', warn:'#9A5B00', err:'#C93434', ai:'#7C4DDB', track:'#E6E9EE', hover:'#F1F3F6', okbg:'rgba(23,120,75,.10)', errbg:'rgba(201,52,52,.09)', warnbg:'rgba(154,91,0,.10)', accbg:'rgba(37,99,217,.10)' };
+    const m = t === 'light' ? l : d;
+    return Object.keys(m).map((k) => '--' + k + ':' + m[k] + ';').join('') + 'color-scheme:' + t + ';';
+  }
+  renderVals() {
+    const theme = this.resolveTheme();
+    const nodes = [];
+    for (let i = 0; i < 14; i++) nodes.push(i === 9 ? { c: 'var(--warn)', t: 'ip-10-4-31-12 · cordoned' } : { c: 'var(--ok)', t: 'Ready' });
+    return {
+      theme,
+      vars: this.themeVars(theme),
+      nodes,
+      workloads: [
+        { kind: 'Deployments', summary: '46 / 48 ready', ok: '95.8%', mid: '2.1%', bad: '2.1%' },
+        { kind: 'StatefulSets', summary: '11 / 12 ready', ok: '91.7%', mid: '8.3%', bad: '0%' },
+        { kind: 'DaemonSets', summary: '9 / 9 ready', ok: '100%', mid: '0%', bad: '0%' },
+        { kind: 'Jobs', summary: '29 ok · 1 running · 1 failed', ok: '93.5%', mid: '3.2%', bad: '3.3%' },
+        { kind: 'CronJobs', summary: '14 scheduled', ok: '100%', mid: '0%', bad: '0%' }
+      ],
+      events: [
+        { reason: 'BackOff', c: 'var(--err)', obj: 'pod/checkout-api-7f9c6d-x2lqp', ns: 'payments', msg: 'Back-off restarting failed container api', age: '2m', n: '14' },
+        { reason: 'FailedScheduling', c: 'var(--warn)', obj: 'pod/ml-batch-5c7f-9kq2d', ns: 'ml', msg: '0/14 nodes are available: 14 Insufficient nvidia.com/gpu', age: '6m', n: '22' },
+        { reason: 'Unhealthy', c: 'var(--warn)', obj: 'pod/search-indexer-0', ns: 'search', msg: 'Readiness probe failed: HTTP probe failed with statuscode: 503', age: '11m', n: '5' },
+        { reason: 'FailedMount', c: 'var(--warn)', obj: 'pod/grafana-6b8d9-tw4mn', ns: 'monitoring', msg: 'MountVolume.SetUp failed for volume "dashboards": configmap not found', age: '18m', n: '3' },
+        { reason: 'NodeNotSchedulable', c: 'var(--warn)', obj: 'node/ip-10-4-31-12', ns: '—', msg: 'Node ip-10-4-31-12 status is now: NodeNotSchedulable', age: '42m', n: '1' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
