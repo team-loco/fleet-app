@@ -379,6 +379,21 @@ fn command_p_quick_opens_a_page_and_command_shift_p_runs_a_command() -> anyhow::
     Ok(())
 }
 
+fn picked(ui: &Ui, cluster: &str, list: &str) -> Option<fleet_ui::prefs::NamespacePick> {
+    ui.read_app(|cx| fleet_ui::prefs::namespace_pick(cluster, list, cx))
+}
+
+fn open_deployments(ui: &mut Ui, cluster: &str) -> anyhow::Result<()> {
+    ui.press("cmd-shift-c")?;
+    ui.type_text(cluster)?;
+    ui.press("enter")?;
+    ui.press("cmd-k")?;
+    ui.type_text("deployments")?;
+    ui.press("enter")?;
+    assert_eq!(ui.state().page, Page::Deployments);
+    Ok(())
+}
+
 #[test]
 fn back_forward_and_control_tab_walk_the_visited_pages() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
@@ -489,5 +504,26 @@ fn command_1_focuses_the_sidebar_where_arrows_and_enter_pick_a_page() -> anyhow:
     ui.type_text("ev")?;
     ui.press("enter")?;
     assert_eq!(ui.state().page, Page::Events);
+    Ok(())
+}
+
+#[test]
+fn lists_start_in_the_default_namespace_and_remember_the_pick_per_cluster() -> anyhow::Result<()> {
+    const BEYOND_ONE_NAMESPACE: &str = "resources-Deployment-row-8";
+    let mut ui = Ui::open(Screen::Resources)?;
+    assert_eq!(picked(&ui, SAMPLE, "Deployment"), None);
+    assert!(ui.bounds(BEYOND_ONE_NAMESPACE).is_none());
+    ui.click("resource-namespace")?;
+    ui.click("resource-namespace-option-0")?;
+    assert_eq!(
+        picked(&ui, SAMPLE, "Deployment"),
+        Some(fleet_ui::prefs::NamespacePick::All)
+    );
+    assert!(ui.bounds(BEYOND_ONE_NAMESPACE).is_some());
+    open_deployments(&mut ui, "staging")?;
+    assert_eq!(picked(&ui, "staging", "Deployment"), None);
+    assert!(ui.bounds(BEYOND_ONE_NAMESPACE).is_none());
+    open_deployments(&mut ui, SAMPLE)?;
+    assert!(ui.bounds(BEYOND_ONE_NAMESPACE).is_some());
     Ok(())
 }

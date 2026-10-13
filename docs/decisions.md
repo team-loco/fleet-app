@@ -78,3 +78,13 @@ Settled; change only with a new entry that says why.
     ⌘1 focuses the sidebar (arrows move a focus ring, Enter opens), ⌘2 the page's main list,
     and Tab / ⇧Tab walk gpui's tab stops. After any navigation the shell takes keyboard focus
     back so keys keep working when the focused list disappears.
+21. **Namespaced lists start in one namespace** (#117): pods and every resource list (Deployments
+    through PVCs) open in the cluster's default namespace: the cluster settings override, else the
+    kubeconfig context's namespace, else `default`. "All namespaces" is an explicit pick. The pick is
+    remembered per cluster and list in `view.json` in the Fleet data dir (`fleet_ui::prefs`, the one
+    store for per-cluster view state; column widths live there too). Before navigating to such a list
+    the shell sends `Command::SelectNamespace`, and the live backend then runs that page's reflector
+    for the one namespace (plus the cluster-wide Namespace list for the picker). Sidebar counts come
+    only from cluster-wide watches, so a scoped list shows no count instead of a partial one. Pods stay
+    on the always-on cluster-wide pod watch that problem detection needs, so for pods only the view is
+    scoped.

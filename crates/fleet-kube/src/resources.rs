@@ -10,7 +10,7 @@ use k8s_openapi::api::core::v1::{
 };
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use kube::api::{DynamicObject, PartialObjectMeta};
-use kube::core::{ApiResource, GroupVersionKind};
+use kube::core::{ApiResource, GroupVersionKind, NamespaceResourceScope};
 use kube::runtime::reflector::{self, Store};
 use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Api, Client, Resource};
@@ -151,9 +151,32 @@ where
     K: Watched + DeserializeOwned + Resource<DynamicType = ()>,
     K::Scope: Send,
 {
+    spawn_api(runtime, Api::<K>::all(client), signals)
+}
+
+fn spawn_scoped<K>(
+    runtime: &Handle,
+    client: Client,
+    namespace: Option<&str>,
+    signals: UnboundedSender<Signal>,
+) -> RunningWatch
+where
+    K: Watched + DeserializeOwned + Resource<DynamicType = (), Scope = NamespaceResourceScope>,
+{
+    let api: Api<K> = match namespace {
+        Some(namespace) => Api::namespaced(client, namespace),
+        None => Api::all(client),
+    };
+    spawn_api(runtime, api, signals)
+}
+
+fn spawn_api<K>(runtime: &Handle, api: Api<K>, signals: UnboundedSender<Signal>) -> RunningWatch
+where
+    K: Watched + DeserializeOwned + Resource<DynamicType = ()>,
+    K::Scope: Send,
+{
     let writer = reflector::store::Writer::<K>::default();
     let store = writer.as_reader();
-    let api: Api<K> = Api::all(client);
     let stream = reflector::reflector(
         writer,
         watcher(api, watcher::Config::default())
@@ -192,35 +215,39 @@ pub fn spawn_custom(
 
 pub fn spawn_builtin(
     kind: &WatchKind,
+    namespace: Option<&str>,
     runtime: &Handle,
     client: Client,
     signals: UnboundedSender<Signal>,
 ) -> Option<RunningWatch> {
+    let ns = namespace;
     let running = match kind {
         WatchKind::Namespaces => spawn_full::<Namespace>(runtime, client, signals),
         WatchKind::Nodes => spawn_full::<Node>(runtime, client, signals),
-        WatchKind::Pods => spawn_full::<Pod>(runtime, client, signals),
-        WatchKind::Deployments => spawn_full::<Deployment>(runtime, client, signals),
-        WatchKind::StatefulSets => spawn_full::<StatefulSet>(runtime, client, signals),
-        WatchKind::DaemonSets => spawn_full::<DaemonSet>(runtime, client, signals),
-        WatchKind::ReplicaSets => spawn_full::<ReplicaSet>(runtime, client, signals),
-        WatchKind::Jobs => spawn_full::<Job>(runtime, client, signals),
-        WatchKind::CronJobs => spawn_full::<CronJob>(runtime, client, signals),
-        WatchKind::Services => spawn_full::<Service>(runtime, client, signals),
-        WatchKind::Ingresses => spawn_full::<Ingress>(runtime, client, signals),
+        WatchKind::Pods => spawn_scoped::<Pod>(runtime, client, ns, signals),
+        WatchKind::Deployments => spawn_scoped::<Deployment>(runtime, client, ns, signals),
+        WatchKind::StatefulSets => spawn_scoped::<StatefulSet>(runtime, client, ns, signals),
+        WatchKind::DaemonSets => spawn_scoped::<DaemonSet>(runtime, client, ns, signals),
+        WatchKind::ReplicaSets => spawn_scoped::<ReplicaSet>(runtime, client, ns, signals),
+        WatchKind::Jobs => spawn_scoped::<Job>(runtime, client, ns, signals),
+        WatchKind::CronJobs => spawn_scoped::<CronJob>(runtime, client, ns, signals),
+        WatchKind::Services => spawn_scoped::<Service>(runtime, client, ns, signals),
+        WatchKind::Ingresses => spawn_scoped::<Ingress>(runtime, client, ns, signals),
         WatchKind::ConfigMaps => {
-            spawn_full::<PartialObjectMeta<ConfigMap>>(runtime, client, signals)
+            spawn_scoped::<PartialObjectMeta<ConfigMap>>(runtime, client, ns, signals)
         }
-        WatchKind::Secrets => spawn_full::<PartialObjectMeta<Secret>>(runtime, client, signals),
+        WatchKind::Secrets => {
+            spawn_scoped::<PartialObjectMeta<Secret>>(runtime, client, ns, signals)
+        }
         WatchKind::ServiceAccounts => {
-            spawn_full::<PartialObjectMeta<ServiceAccount>>(runtime, client, signals)
+            spawn_scoped::<PartialObjectMeta<ServiceAccount>>(runtime, client, ns, signals)
         }
         WatchKind::NetworkPolicies => {
-            spawn_full::<PartialObjectMeta<NetworkPolicy>>(runtime, client, signals)
+            spawn_scoped::<PartialObjectMeta<NetworkPolicy>>(runtime, client, ns, signals)
         }
-        WatchKind::Events => spawn_full::<Event>(runtime, client, signals),
+        WatchKind::Events => spawn_scoped::<Event>(runtime, client, ns, signals),
         WatchKind::PersistentVolumeClaims => {
-            spawn_full::<PersistentVolumeClaim>(runtime, client, signals)
+            spawn_scoped::<PersistentVolumeClaim>(runtime, client, ns, signals)
         }
         WatchKind::Custom(_) => return None,
     };

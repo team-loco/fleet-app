@@ -18,6 +18,7 @@ use crate::actions::{
     ToggleClusterSwitcher, ToggleCommandPalette, ToggleSidebar,
 };
 use crate::kit::{FilterBar, Toast, toast};
+use crate::prefs::{self, NamespacePick};
 use crate::screens::add_cluster::{AddClusterDialog, AddClusterEvent};
 use crate::screens::app_settings::AppSettingsScreen;
 use crate::screens::changes::ChangesScreen;
@@ -31,6 +32,7 @@ use crate::screens::settings::SettingsScreen;
 use crate::screens::workload::WorkloadScreen;
 use crate::screens::{ClusterPages, ScreenEvent};
 use crate::theme::{self, ActiveTheme, TEXT_UI};
+use fleet_core::resources::namespaced_list;
 use switcher::{ClusterSwitcher, SwitcherEvent};
 
 pub(crate) const KEY_CONTEXT: &str = "Shell";
@@ -45,6 +47,7 @@ pub struct Shell {
     window_id: u64,
     commands: Sender<Command>,
     pending: Vec<Command>,
+    sent_namespace: Option<NamespacePick>,
     sidebar_generation: usize,
     focus: FocusHandle,
     fleet: Entity<FleetScreen>,
@@ -151,6 +154,7 @@ impl Shell {
             window_id,
             commands,
             pending: initial,
+            sent_namespace: None,
             sidebar_generation: 0,
             focus,
             fleet,
@@ -250,6 +254,7 @@ impl Shell {
             self.loaded = true;
         }
         self.state.update(update);
+        self.scope_namespace(cx);
         self.run_pending(window, cx);
         let snapshot = &self.state.snapshot;
         self.fleet
@@ -332,8 +337,15 @@ impl Shell {
         let confirm_destructive = cluster
             .and_then(|c| self.state.snapshot.catalog.get(&c.id))
             .is_none_or(|settings| settings.preferences.confirm_destructive);
-        self.pages
-            .sync(self.state.page, cluster, detail, confirm_destructive, cx);
+        let namespace = self.list_namespace();
+        self.pages.sync(
+            self.state.page,
+            cluster,
+            detail,
+            confirm_destructive,
+            namespace.as_deref(),
+            cx,
+        );
     }
 
     fn screen_event(&mut self, event: &ScreenEvent, cx: &mut Context<Self>) {
@@ -385,6 +397,9 @@ impl Shell {
             Command::ToggleSidebar => self.sidebar_generation += 1,
             Command::SelectCluster(_) => {}
             Command::SelectPage(_) => {}
+            Command::SelectNamespace(ref namespace) => {
+                self.sent_namespace = Some(NamespacePick::of(namespace.as_deref()));
+            }
             Command::OpenResource(_) => {}
             Command::InspectResource(_) => {}
             Command::FollowLogs(_) => {}
@@ -446,6 +461,7 @@ impl Shell {
         if let Command::OpenResource(target) = &command {
             self.pages.reveal(target, cx);
         }
+        self.scope_namespace(cx);
         self.sync_page(cx);
         self.send(command);
         self.sync_palette(cx);
@@ -484,8 +500,10 @@ impl Shell {
         });
         let cluster = self.state.cluster.as_ref();
         let resource = self.state.resource.as_ref();
-        self.pods
-            .update(cx, |pods, cx| pods.set_context(cluster, resource, cx));
+        let namespace = self.list_namespace();
+        self.pods.update(cx, |pods, cx| {
+            pods.set_context(cluster, resource, namespace.as_deref(), cx);
+        });
         if let Some((screen, _)) = &self.workload {
             self.sync_workload_yaml(screen, cx);
         }
@@ -495,6 +513,26 @@ impl Shell {
         let target = screen.read(cx).target().clone();
         let yaml = self.state.snapshot.yaml(&target);
         screen.update(cx, |screen, cx| screen.set_yaml(yaml, cx));
+    }
+
+    fn list_namespace(&self) -> Option<String> {
+        self.sent_namespace.as_ref().and_then(NamespacePick::choice)
+    }
+
+    fn scope_namespace(&mut self, cx: &App) {
+        let Some(cluster) = self.state.cluster.as_ref() else {
+            return;
+        };
+        let Some(list) = namespaced_list(self.state.page) else {
+            return;
+        };
+        let default = self.state.snapshot.catalog.default_namespace(cluster);
+        let choice = prefs::namespace(cluster.as_str(), list, default, cx);
+        let pick = NamespacePick::of(choice.as_deref());
+        if self.sent_namespace.as_ref() != Some(&pick) {
+            self.sent_namespace = Some(pick);
+            self.send(Command::SelectNamespace(choice));
+        }
     }
 
     pub fn filter_bar(&self, cx: &App) -> Option<Entity<FilterBar>> {
@@ -717,5 +755,82 @@ mod tests {
         assert!(received.is_empty());
         assert!(shell.read_with(cx, |shell, cx| shell.palette.read(cx).is_open()));
         assert!(shell.read_with(cx, |shell, _| shell.state.sidebar_open));
+    }
+
+    fn cluster_snapshot(id: &ClusterId, namespace: &str) -> fleet_core::Snapshot {
+        use fleet_core::settings::{Auth, ClusterSettings, Connection};
+        let summary = fleet_core::ClusterSummary {
+            id: id.clone(),
+            name: id.to_string(),
+            status: Status::Ok,
+            state: "Healthy".into(),
+            distro: "kind".into(),
+            region: "local".into(),
+            version: None,
+            nodes: Some(1),
+            problems: fleet_core::Counts::default(),
+            nav: std::collections::BTreeMap::new(),
+            metrics: None,
+        };
+        let settings = ClusterSettings {
+            cluster: id.clone(),
+            connection: Connection {
+                context: id.to_string(),
+                server: String::new(),
+                auth: Auth::Other("token".into()),
+                kubeconfig: String::new(),
+            },
+            auth_expired: false,
+            prometheus: None,
+            preferences: fleet_core::Preferences {
+                default_namespace: Some(namespace.into()),
+                ..fleet_core::Preferences::default()
+            },
+        };
+        fleet_core::Snapshot {
+            clusters: vec![summary],
+            catalog: fleet_core::ClusterCatalog {
+                sources: 1,
+                clusters: vec![settings],
+            },
+            ..fleet_core::Snapshot::default()
+        }
+    }
+
+    #[gpui::test]
+    fn namespaced_lists_scope_the_backend_before_it_navigates(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(Some(theme::Appearance::Dark), cx)
+                .unwrap_or_else(|error| panic!("UI init: {error}"));
+        });
+        let cluster = ClusterId::new("kind-a");
+        let (backend, updates) = async_channel::unbounded();
+        let (commands, received) = async_channel::unbounded();
+        let store = cx.new(|cx| Store::new(updates, commands, cx));
+        let initial = vec![
+            Command::SelectCluster(Some(cluster.clone())),
+            Command::SelectPage(Page::Deployments),
+        ];
+        let _window = cx.update(|cx| open_window(&store, initial, cx));
+        let snapshot = cluster_snapshot(&cluster, "loco-system");
+        assert!(
+            backend
+                .try_send(Update::Snapshot(Box::new(snapshot)))
+                .is_ok()
+        );
+        cx.run_until_parked();
+        let sent: Vec<Command> = std::iter::from_fn(|| received.try_recv().ok())
+            .filter_map(|command| match command {
+                Command::ForWindow(_, command) => Some(*command),
+                _ => None,
+            })
+            .collect();
+        let scoped = sent
+            .iter()
+            .position(|c| c == &Command::SelectNamespace(Some("loco-system".into())));
+        let page = sent
+            .iter()
+            .position(|c| c == &Command::SelectPage(Page::Deployments));
+        assert!(scoped.is_some() && scoped < page, "{sent:?}");
     }
 }

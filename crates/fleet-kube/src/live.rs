@@ -38,7 +38,7 @@ use crate::provider::AuthKind;
 use crate::resources::WatchKind;
 use crate::settings::KubeSettings;
 use crate::shell_env::{ShellEnv, capture, user_shell};
-use crate::snapshot::page_kinds;
+use crate::snapshot::page_watches;
 use crate::store::{ClusterStore, SavedCluster, SavedPreferences};
 use crate::task::TaskGuard;
 use crate::throttle::Throttle;
@@ -118,6 +118,7 @@ struct Inspecting {
 struct Navigation {
     selected: Option<ClusterId>,
     page: Page,
+    namespace: Option<String>,
     page_subscriptions: Vec<Subscription>,
     yaml: Option<(ResourceRef, String)>,
     inspecting: Option<Inspecting>,
@@ -141,6 +142,7 @@ impl Navigation {
         Self {
             selected: None,
             page: Page::Overview,
+            namespace: None,
             page_subscriptions: Vec::new(),
             yaml: None,
             inspecting: None,
@@ -278,9 +280,9 @@ impl Live {
         let subscriptions = self
             .selected_handle()
             .map(|handle| {
-                page_kinds(self.navigation.page)
+                page_watches(self.navigation.page, self.navigation.namespace.as_deref())
                     .into_iter()
-                    .map(|kind| handle.subscribe(kind))
+                    .map(|(kind, namespace)| handle.subscribe_in(kind, namespace))
                     .collect()
             })
             .unwrap_or_default();
@@ -649,6 +651,12 @@ impl Live {
                 }
                 self.navigation.page = *page;
                 self.resubscribe_page();
+            }
+            Command::SelectNamespace(namespace) => {
+                if &self.navigation.namespace != namespace {
+                    self.navigation.namespace.clone_from(namespace);
+                    self.resubscribe_page();
+                }
             }
             Command::OpenCommit(_) => {
                 self.navigation.selected = None;
