@@ -1,35 +1,47 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
+use fleet_core::add_cluster::home_relative;
 use fleet_core::resource::page_for_kind;
 use fleet_core::{
-    Backend, ChangesLog, ClusterId, Command, FleetHome, GitOps, Page, Receiver, ResourceRef,
-    Sender, Snapshot, Update,
+    Backend, ChangesLog, CheckLine, ClusterId, ClusterSummary, Command, ContextChoice, Counts,
+    FleetHome, GitOps, KubeconfigFile, NewCluster, Page, Receiver, ResourceRef, Sender, Snapshot,
+    Status, Update, Verdict,
 };
 use tokio::time::MissedTickBehavior;
 
-use crate::discovery::{
-    ContextRef, Discovery, DiscoveryEvent, DiscoverySources, KubeContext, discover,
-};
+use crate::checks::{self, CheckResult, run_checks_streaming};
+use crate::discovery::{ContextRef, Discovery, DiscoveryEvent, DiscoverySources, discover};
 use crate::manager::{COALESCE_INTERVAL, ClusterHandle, ClusterManager, Subscription};
+use crate::provider::AuthKind;
 use crate::resources::WatchKind;
 use crate::settings::KubeSettings;
-use crate::shell_env::{capture, user_shell};
+use crate::shell_env::{ShellEnv, capture, user_shell};
 use crate::snapshot::{page_kind, summarize};
+use crate::store::{ClusterStore, SavedCluster};
 use crate::watch::KubeconfigWatcher;
 
 const THREAD_NAME: &str = "fleet-kube";
 const BASELINE_KINDS: [WatchKind; 2] = [WatchKind::Nodes, WatchKind::Pods];
+const MISSING_STATE: &str = "Not in kubeconfig";
+const MISSING_CONTEXT: &str = "This context is no longer in its kubeconfig file.";
 
 pub struct LiveBackend {
     settings: KubeSettings,
     sources: DiscoverySources,
+    store: ClusterStore,
 }
 
 impl LiveBackend {
-    pub fn new(settings: KubeSettings, sources: DiscoverySources) -> Self {
-        Self { settings, sources }
+    pub fn new(settings: KubeSettings, sources: DiscoverySources, store: ClusterStore) -> Self {
+        Self {
+            settings,
+            sources,
+            store,
+        }
     }
 }
 
@@ -61,41 +73,27 @@ struct Connected {
 
 struct Live {
     manager: ClusterManager,
+    store: ClusterStore,
+    discovery: Discovery,
+    env: Arc<ShellEnv>,
+    settings: KubeSettings,
+    updates: Sender<Update>,
+    home: Option<PathBuf>,
     clusters: BTreeMap<ContextRef, Connected>,
     selected: Option<ClusterId>,
     page: Page,
     page_subscription: Option<Subscription>,
 }
 
-pub fn cluster_ids(contexts: &[KubeContext]) -> BTreeMap<ContextRef, ClusterId> {
-    let mut per_name: BTreeMap<&str, usize> = BTreeMap::new();
-    for context in contexts {
-        *per_name.entry(context.id.context.as_str()).or_default() += 1;
-    }
-    contexts
-        .iter()
-        .map(|context| {
-            let name = context.id.context.as_str();
-            let duplicated = per_name.get(name).is_some_and(|count| *count > 1);
-            let file = context
-                .id
-                .file
-                .file_name()
-                .map(|file| file.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let id = if duplicated {
-                format!("{name} ({file})")
-            } else {
-                name.to_owned()
-            };
-            (context.id.clone(), ClusterId::new(id))
-        })
-        .collect()
-}
-
 impl Live {
-    fn reconcile(&mut self, discovery: &Discovery) {
-        let ids = cluster_ids(&discovery.contexts);
+    fn reconcile(&mut self) {
+        let ids: BTreeMap<ContextRef, ClusterId> = self
+            .store
+            .clusters()
+            .iter()
+            .filter(|saved| self.discovery.get(&saved.context_ref()).is_some())
+            .map(|saved| (saved.context_ref(), saved.id()))
+            .collect();
         let wanted: BTreeSet<&ContextRef> = ids.keys().collect();
         let gone: Vec<ContextRef> = self
             .clusters
@@ -107,10 +105,11 @@ impl Live {
             self.clusters.remove(&id);
             self.manager.disconnect(&id);
         }
-        for context in &discovery.contexts {
-            let Some(id) = ids.get(&context.id).cloned() else {
+        for (context_ref, id) in ids {
+            let Some(context) = self.discovery.get(&context_ref).cloned() else {
                 continue;
             };
+            let context = &context;
             let unchanged = self
                 .clusters
                 .get(&context.id)
@@ -153,7 +152,7 @@ impl Live {
         self.page_subscription = subscription;
     }
 
-    fn apply(&mut self, command: &Command) {
+    fn apply(&mut self, command: &Command) -> bool {
         match command {
             Command::SelectCluster(id) => {
                 self.selected.clone_from(id);
@@ -188,16 +187,91 @@ impl Live {
             Command::Uncordon(_) => {}
             Command::Drain(_) => {}
             Command::Delete(_) => {}
-            Command::OpenAddCluster(_) => {}
-            Command::CheckContexts(_) => {}
-            Command::AddClusters(_) => {}
-            Command::RemoveCluster(_) => {}
+            Command::OpenAddCluster(_) => {
+                let files = kubeconfig_files(&self.discovery, &self.store, self.home.as_deref());
+                self.publish(Update::Contexts(files));
+            }
+            Command::CheckContexts(ids) => self.check(ids),
+            Command::AddClusters(added) => {
+                self.add(added);
+                return true;
+            }
+            Command::RemoveCluster(id) => {
+                self.remove(id);
+                return true;
+            }
             Command::WatchWorkload { .. } => {}
             Command::StreamLogs(_) => {}
             Command::Exec(_) => {}
             Command::RestartRollout(_) => {}
             Command::Scale { .. } => {}
             Command::Rollback { .. } => {}
+        }
+        false
+    }
+
+    fn publish(&self, update: Update) {
+        if self.updates.try_send(update).is_err() {
+            tracing::debug!("UI stopped listening for updates");
+        }
+    }
+
+    fn add(&mut self, added: &[NewCluster]) {
+        if let Err(error) = self.store.add(added) {
+            tracing::error!(%error, path = %self.store.path().display(), "saving clusters failed");
+        }
+        self.reconcile();
+    }
+
+    fn remove(&mut self, id: &ClusterId) {
+        if let Err(error) = self.store.remove(id) {
+            tracing::error!(%error, path = %self.store.path().display(), "saving clusters failed");
+        }
+        if self.selected.as_ref() == Some(id) {
+            self.selected = None;
+            self.page = Page::Overview;
+        }
+        self.reconcile();
+    }
+
+    fn check(&self, ids: &[ContextRef]) {
+        for id in ids {
+            let Some(context) = self.discovery.get(id).cloned() else {
+                let line = CheckLine {
+                    status: fleet_core::CheckStatus::Err,
+                    detail: MISSING_CONTEXT.to_owned(),
+                    remedy: None,
+                    duration: Duration::ZERO,
+                };
+                self.publish(Update::Check(id.clone(), line));
+                self.publish(Update::Checked(id.clone(), Verdict::CannotReach));
+                continue;
+            };
+            let id = id.clone();
+            let env = self.env.clone();
+            let settings = self.settings.clone();
+            let updates = self.updates.clone();
+            tokio::spawn(async move {
+                let (progress, results) = async_channel::unbounded::<CheckResult>();
+                let run = async move {
+                    let report = run_checks_streaming(&context, &env, &settings, &progress).await;
+                    drop(progress);
+                    report
+                };
+                let forward = async {
+                    while let Ok(result) = results.recv().await {
+                        let line = check_line(&result);
+                        if updates.send(Update::Check(id.clone(), line)).await.is_err() {
+                            return;
+                        }
+                    }
+                };
+                let (report, ()) = tokio::join!(run, forward);
+                let verdict = verdict(report.verdict);
+                if updates.send(Update::Checked(id, verdict)).await.is_err() {
+                    tracing::debug!("UI stopped listening for check results");
+                }
+            });
         }
     }
 
@@ -208,11 +282,17 @@ impl Live {
     }
 
     fn snapshot(&self) -> Snapshot {
-        let mut clusters: Vec<_> = self
+        let connected = self
             .clusters
             .values()
-            .map(|cluster| summarize(cluster.id.clone(), cluster.id.to_string(), &cluster.handle))
-            .collect();
+            .map(|cluster| summarize(cluster.id.clone(), cluster.id.to_string(), &cluster.handle));
+        let missing = self
+            .store
+            .clusters()
+            .iter()
+            .filter(|saved| !self.clusters.contains_key(&saved.context_ref()))
+            .map(missing_summary);
+        let mut clusters: Vec<_> = connected.chain(missing).collect();
         clusters.sort_by(|a, b| a.name.cmp(&b.name));
         Snapshot {
             clusters,
@@ -228,10 +308,14 @@ impl Live {
 }
 
 async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<Command>) {
-    let LiveBackend { settings, sources } = backend;
-    let env = capture(&user_shell(), settings.shell_env_timeout).await;
+    let LiveBackend {
+        settings,
+        sources,
+        store,
+    } = backend;
+    let env = Arc::new(capture(&user_shell(), settings.shell_env_timeout).await);
     let scan_sources = sources.clone();
-    let mut discovery = tokio::task::spawn_blocking(move || discover(&scan_sources))
+    let discovery = tokio::task::spawn_blocking(move || discover(&scan_sources))
         .await
         .unwrap_or_default();
     let started = KubeconfigWatcher::start(
@@ -247,15 +331,21 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
         }
     };
     let runtime = tokio::runtime::Handle::current();
-    let (manager, cluster_events) = ClusterManager::new(runtime, settings, Arc::new(env));
+    let (manager, cluster_events) = ClusterManager::new(runtime, settings.clone(), env.clone());
     let mut live = Live {
         manager,
+        store,
+        discovery,
+        env,
+        settings,
+        updates: updates.clone(),
+        home: sources.home.clone(),
         clusters: BTreeMap::new(),
         selected: None,
         page: Page::Overview,
         page_subscription: None,
     };
-    live.reconcile(&discovery);
+    live.reconcile();
     let mut dirty = true;
     let mut publish = tokio::time::interval(COALESCE_INTERVAL);
     publish.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -263,8 +353,8 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
         tokio::select! {
             event = discovery_events.recv(), if !discovery_events.is_closed() => {
                 if let Ok(event) = event {
-                    apply_discovery(&mut discovery, event);
-                    live.reconcile(&discovery);
+                    apply_discovery(&mut live.discovery, event);
+                    live.reconcile();
                     dirty = true;
                 }
             }
@@ -275,7 +365,9 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
             }
             command = commands.recv() => {
                 let Ok(command) = command else { return };
-                live.apply(&command);
+                if live.apply(&command) {
+                    dirty = true;
+                }
             }
             _ = publish.tick() => {
                 if dirty {
@@ -286,6 +378,84 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
                 }
             }
         }
+    }
+}
+
+fn missing_summary(saved: &SavedCluster) -> ClusterSummary {
+    ClusterSummary {
+        id: saved.id(),
+        name: saved.name.clone(),
+        status: Status::Offline,
+        state: MISSING_STATE.to_owned(),
+        distro: String::new(),
+        region: String::new(),
+        version: None,
+        nodes: None,
+        problems: Counts::default(),
+        nav: BTreeMap::new(),
+        metrics: None,
+        #[cfg(feature = "loco")]
+        loco_agent_synced: None,
+    }
+}
+
+pub fn auth_label(auth: &AuthKind) -> String {
+    match auth.exec() {
+        Some(exec) => exec.summary(),
+        None => auth.to_string(),
+    }
+}
+
+pub fn kubeconfig_files(
+    discovery: &Discovery,
+    store: &ClusterStore,
+    home: Option<&Path>,
+) -> Vec<KubeconfigFile> {
+    let mut files: Vec<(PathBuf, KubeconfigFile)> = Vec::new();
+    let available = discovery
+        .contexts
+        .iter()
+        .filter(|context| !store.contains(&context.id));
+    for context in available {
+        let choice = ContextChoice {
+            id: context.id.clone(),
+            server: context.server.clone(),
+            auth: auth_label(&context.auth),
+            selected: false,
+        };
+        if let Some((_, file)) = files.iter_mut().find(|(path, _)| path == &context.id.file) {
+            file.contexts.push(choice);
+        } else {
+            let file = KubeconfigFile {
+                label: home_relative(&context.id.file, home),
+                contexts: vec![choice],
+            };
+            files.push((context.id.file.clone(), file));
+        }
+    }
+    files.into_iter().map(|(_, file)| file).collect()
+}
+
+pub fn check_line(result: &CheckResult) -> CheckLine {
+    let status = match result.status {
+        checks::CheckStatus::Ok => fleet_core::CheckStatus::Ok,
+        checks::CheckStatus::Warn => fleet_core::CheckStatus::Warn,
+        checks::CheckStatus::Err => fleet_core::CheckStatus::Err,
+        checks::CheckStatus::Info => fleet_core::CheckStatus::Info,
+    };
+    CheckLine {
+        status,
+        detail: result.detail.clone(),
+        remedy: result.remedy.clone(),
+        duration: result.duration,
+    }
+}
+
+pub fn verdict(verdict: checks::Verdict) -> Verdict {
+    match verdict {
+        checks::Verdict::Ready => Verdict::Ready,
+        checks::Verdict::CannotReach => Verdict::CannotReach,
+        checks::Verdict::CannotAuthenticate => Verdict::CannotAuthenticate,
     }
 }
 
@@ -313,7 +483,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::provider::{AuthKind, Provider};
+    use crate::discovery::KubeContext;
+    use crate::provider::Provider;
 
     fn context(file: &str, name: &str) -> KubeContext {
         KubeContext {
@@ -332,18 +503,82 @@ mod tests {
     }
 
     #[test]
-    fn ids_are_context_names_unless_duplicated() {
-        let contexts = [
-            context("/h/.kube/config", "dup"),
-            context("/h/.kube/other.yaml", "dup"),
-            context("/h/.kube/config", "solo"),
-        ];
-        let ids = cluster_ids(&contexts);
-        let names: Vec<String> = contexts
+    fn picker_lists_unadded_contexts_by_file() {
+        let Ok(dir) = tempfile::tempdir() else {
+            panic!("tempdir");
+        };
+        let mut store = ClusterStore::empty(dir.path());
+        let added = NewCluster {
+            context: context("/h/.kube/config", "kind-fleet-a").id,
+            name: "fleet-a".to_owned(),
+        };
+        assert!(store.add(&[added]).is_ok());
+        let mut eks = context("/h/.kube/eks/sandbox.yaml", "sandbox");
+        eks.server = Some("https://x.eks.amazonaws.com".to_owned());
+        eks.auth = AuthKind::Exec(crate::provider::ExecCommand {
+            command: "aws".to_owned(),
+            args: ["eks", "get-token", "--cluster-name", "sandbox"]
+                .map(str::to_owned)
+                .to_vec(),
+        });
+        let discovery = Discovery {
+            files: Vec::new(),
+            contexts: vec![
+                context("/h/.kube/config", "kind-fleet-a"),
+                context("/h/.kube/config", "kind-fleet-b"),
+                eks,
+            ],
+            errors: Vec::new(),
+        };
+        let files = kubeconfig_files(&discovery, &store, Some(Path::new("/h")));
+        let labels: Vec<&str> = files.iter().map(|f| f.label.as_str()).collect();
+        assert_eq!(labels, ["~/.kube/config", "~/.kube/eks/sandbox.yaml"]);
+        let shown: Vec<(String, String, bool)> = files
             .iter()
-            .filter_map(|c| ids.get(&c.id).map(ToString::to_string))
+            .flat_map(|f| &f.contexts)
+            .map(|c| (c.id.context.clone(), c.meta(), c.selected))
             .collect();
-        assert_eq!(names, vec!["dup (config)", "dup (other.yaml)", "solo"]);
+        assert_eq!(
+            shown,
+            [
+                ("kind-fleet-b".to_owned(), "none".to_owned(), false),
+                (
+                    "sandbox".to_owned(),
+                    "https://x.eks.amazonaws.com · aws eks get-token".to_owned(),
+                    false
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn saved_clusters_without_a_context_show_offline() {
+        let saved = SavedCluster {
+            file: PathBuf::from("/gone"),
+            context: "old".to_owned(),
+            name: "old".to_owned(),
+        };
+        let summary = missing_summary(&saved);
+        assert_eq!(summary.status, Status::Offline);
+        assert_eq!(summary.state, MISSING_STATE);
+    }
+
+    #[test]
+    fn check_results_map_to_core_lines() {
+        let result = CheckResult {
+            kind: checks::CheckKind::Authenticate,
+            status: checks::CheckStatus::Err,
+            detail: "ExpiredToken".to_owned(),
+            remedy: Some("aws sso login".to_owned()),
+            duration: Duration::from_millis(5),
+        };
+        let line = check_line(&result);
+        assert_eq!(line.status, fleet_core::CheckStatus::Err);
+        assert_eq!(line.remedy.as_deref(), Some("aws sso login"));
+        assert_eq!(
+            verdict(checks::Verdict::CannotAuthenticate),
+            Verdict::CannotAuthenticate
+        );
     }
 
     #[test]

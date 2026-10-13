@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use fleet_core::{Backend, ClusterId, Command, Page, Update};
+use fleet_core::{Backend, ClusterId, Command, ContextRef, NewCluster, Page, Update};
 use fleet_kube::LiveBackend;
 use fleet_kube::checks::{CheckKind, CheckStatus, Verdict, run_checks};
 use fleet_kube::discovery::{DiscoverySources, KubeContext, discover};
@@ -11,6 +11,7 @@ use fleet_kube::provider::Provider;
 use fleet_kube::resources::WatchKind;
 use fleet_kube::settings::KubeSettings;
 use fleet_kube::shell_env::ShellEnv;
+use fleet_kube::store::ClusterStore;
 use k8s_openapi::api::core::v1::{ConfigMap, Pod};
 use kube::api::{DeleteParams, PartialObjectMeta, PostParams};
 use kube::{Api, ResourceExt};
@@ -27,6 +28,7 @@ const HTTP_PORT: u16 = 8080;
 const WAIT: Duration = Duration::from_secs(120);
 const POLL: Duration = Duration::from_millis(500);
 const GREETING: &str = "hello from fleet";
+const SUPPORT_DIR: &str = "support";
 
 fn enabled() -> bool {
     std::env::var(E2E_VAR).is_ok_and(|value| value == "1")
@@ -281,7 +283,16 @@ fn live_backend_publishes_kind_cluster() {
         kubeconfig_env: None,
         home: Some(home.path().to_path_buf()),
     };
-    let backend = LiveBackend::new(KubeSettings::default(), sources);
+    let mut store = ClusterStore::empty(&home.path().join(SUPPORT_DIR));
+    let added = NewCluster {
+        context: ContextRef {
+            file: home.path().join(".kube").join("config"),
+            context: CONTEXT.to_owned(),
+        },
+        name: CONTEXT.to_owned(),
+    };
+    assert!(store.add(&[added]).is_ok());
+    let backend = LiveBackend::new(KubeSettings::default(), sources, store);
     let (updates_tx, updates) = async_channel::unbounded();
     let (commands, commands_rx) = async_channel::unbounded();
     Box::new(backend).start(updates_tx, commands_rx);
