@@ -88,6 +88,7 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Shared {
+    #[cfg(feature = "loco")]
     pub(crate) fn current_client(&self) -> Option<Client> {
         lock(&self.client).clone()
     }

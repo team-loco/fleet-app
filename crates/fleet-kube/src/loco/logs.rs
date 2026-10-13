@@ -55,8 +55,10 @@ pub fn agent_line(line: &str, zone: &TimeZone) -> AgentLogLine {
 }
 
 fn with_attributes(message: String, attributes: &Map<String, Value>) -> String {
+    let mut sorted: Vec<(&String, &Value)> = attributes.iter().collect();
+    sorted.sort_by_key(|(key, _)| *key);
     let mut parts = vec![message];
-    parts.extend(attributes.iter().map(|(key, value)| match value {
+    parts.extend(sorted.into_iter().map(|(key, value)| match value {
         Value::String(text) => format!("{key}={text}"),
         other => format!("{key}={other}"),
     }));

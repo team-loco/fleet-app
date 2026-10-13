@@ -18,7 +18,7 @@ use jiff::tz::TimeZone;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::{Pod, Service};
-use kube::api::DynamicObject;
+use kube::api::{DynamicObject, PropagationPolicy};
 use kube::{Api, Client};
 use serde::de::DeserializeOwned;
 
@@ -382,7 +382,7 @@ impl LocoBackend {
         let changed = self.changed.clone();
         let build = build.clone();
         tokio::spawn(async move {
-            let outcome = handle.delete(&target).await;
+            let outcome = handle.delete(&target, PropagationPolicy::Background).await;
             let Err(error) = outcome else {
                 return;
             };
