@@ -32,7 +32,7 @@ Spec column points at `design/`.
 | S6 | GitOps sync grid across clusters | Flux | claude | s6-gitops-grid | done |
 | S7 | Add cluster flow (contexts, checks) | AddCluster, AddClusterCheck | claude | s7-add-cluster, s7-add-cluster-live | done (#18) |
 | S8 | Cluster overview, Nodes, Namespaces, Events, generic resource lists | v1/Main, Nav | claude | s8-cluster-pages | done (#17, overview) |
-| S9 | Pods: list, details, logs, shell | v1/Pods | | | todo |
+| S9 | Pods: list, details, logs, shell | v1/Pods | claude | s9-pods | done |
 | S10 | Compare across clusters, cluster settings (Catalog) | v1/Compare, v1/Catalog | claude | s10-compare-settings | done |
 | S11 | Loco: Platform, Applications, Builds, Routes | Loco* | claude | s11-loco | doing (Applications, Builds) |
 

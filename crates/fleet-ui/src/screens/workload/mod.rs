@@ -1,5 +1,7 @@
 mod dock;
 
+pub(crate) use dock::kit_line;
+
 use fleet_core::workload::{ContainerSpec, EnvVar, Pod, Revision, short_image, short_pod_name};
 use fleet_core::{Command, ResourceRef, Sink, Status, Workload};
 use gpui::{

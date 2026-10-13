@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Screenshot a demo screen: mise run shot -- <screen> [dark|light]"
-#USAGE arg "<screen>" help="fleet, cluster, collapsed, command, changes, compare, cluster-settings, gitops, overview, nodes, namespaces, events, resources, kit, kit-overlays, kit-panes, add-cluster, add-cluster-check, workload, kustomization, helmrelease or source; with FLEET_FEATURES=loco also loco-apps or loco-builds"
+#USAGE arg "<screen>" help="fleet, cluster, collapsed, command, changes, compare, cluster-settings, gitops, overview, nodes, namespaces, events, resources, kit, kit-overlays, kit-panes, add-cluster, add-cluster-check, workload, pods, pods-shell, kustomization, helmrelease or source; with FLEET_FEATURES=loco also loco-apps or loco-builds"
 #USAGE arg "[appearance]" default="dark" help="dark or light"
 set -euo pipefail
 

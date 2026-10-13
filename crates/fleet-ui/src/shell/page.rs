@@ -51,6 +51,21 @@ impl Shell {
         if self.state.flux_object.is_some() {
             return self.flux_object.clone().into_any_element();
         }
+        let body = if self.state.page == Page::Pods && self.selected_cluster().is_some() {
+            div()
+                .flex_1()
+                .min_h_0()
+                .child(self.pods.clone())
+                .into_any_element()
+        } else {
+            div()
+                .id("page-content")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .child(self.content(&palette, cx))
+                .into_any_element()
+        };
         div()
             .flex()
             .flex_col()
@@ -59,14 +74,7 @@ impl Shell {
             .h_full()
             .bg(palette.editor)
             .child(self.page_header(&palette, cx))
-            .child(
-                div()
-                    .id("page-content")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .child(self.content(&palette, cx)),
-            )
+            .child(body)
             .into_any_element()
     }
 

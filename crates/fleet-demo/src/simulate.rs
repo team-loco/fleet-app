@@ -23,6 +23,8 @@ pub enum Settle {
     Loco(crate::loco::Settle),
     Connected(ClusterId),
     RolledOut(ResourceRef),
+    PodReplaced(ResourceRef),
+    PodStarted(ResourceRef),
 }
 
 pub fn apply(snapshot: &mut Snapshot, command: &Command) -> Option<Settle> {
@@ -38,6 +40,9 @@ pub fn apply(snapshot: &mut Snapshot, command: &Command) -> Option<Settle> {
         Command::Drain(target) => {
             mark_node(snapshot, target, "Draining")?;
             Some(Settle::Drained(target.clone()))
+        }
+        Command::Delete(target) if crate::pods::terminate(&mut snapshot.pods, target) => {
+            Some(Settle::PodReplaced(target.clone()))
         }
         Command::Delete(target) => {
             let resource = find_resource(snapshot, target)?;
@@ -62,7 +67,7 @@ pub fn apply(snapshot: &mut Snapshot, command: &Command) -> Option<Settle> {
     }
 }
 
-pub fn settle(snapshot: &mut Snapshot, settle: &Settle) {
+pub fn settle(snapshot: &mut Snapshot, settle: &Settle) -> Option<Settle> {
     match settle {
         Settle::Cordoned(target) => {
             if let Some(node) = find_node(snapshot, target) {
@@ -85,11 +90,16 @@ pub fn settle(snapshot: &mut Snapshot, settle: &Settle) {
         Settle::Loco(pending) => crate::loco::settle(snapshot, pending),
         Settle::Connected(cluster) => sim::connected(snapshot, cluster),
         Settle::RolledOut(target) => sim::rolled_out(snapshot, target),
+        Settle::PodReplaced(target) => {
+            return crate::pods::replace(&mut snapshot.pods, target).map(Settle::PodStarted);
+        }
+        Settle::PodStarted(target) => crate::pods::start(&mut snapshot.pods, target),
     }
     if let Settle::Cordoned(target) | Settle::Uncordoned(target) | Settle::Drained(target) = settle
     {
         recount_nodes(snapshot, target);
     }
+    None
 }
 
 fn recount_nodes(snapshot: &mut Snapshot, target: &ResourceRef) {

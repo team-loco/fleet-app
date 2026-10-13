@@ -9,6 +9,7 @@ pub mod gitops;
 mod namespaces;
 mod nodes;
 mod overview;
+pub mod pods;
 mod resources;
 pub mod settings;
 pub mod workload;
