@@ -1,3 +1,4 @@
+mod changes;
 mod home;
 mod resources;
 
@@ -98,6 +99,7 @@ pub fn snapshot() -> Snapshot {
         fleet_nav,
         home: home::fleet_home(),
         resources: resources::resources(),
+        changes: changes::log(),
     }
 }
 

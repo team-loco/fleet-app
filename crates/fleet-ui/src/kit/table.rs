@@ -14,7 +14,7 @@ use gpui::{
 
 use crate::theme::{
     ActiveTheme, FLASH, FONT_MONO, Palette, ROW_TABLE, ROW_TABLE_MIN, RULE, SPACE_6, SPACE_8,
-    TEXT_BODY, TEXT_MONO, TEXT_SMALL,
+    TEXT_AXIS, TEXT_BODY, TEXT_MONO, TEXT_SMALL,
 };
 
 const SORT_ASCENDING: &str = "↑";
@@ -195,6 +195,13 @@ pub enum TableEvent {
     Opened(usize),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Header {
+    Hidden,
+    Sans,
+    Mono,
+}
+
 pub struct Table<R: 'static> {
     id: SharedString,
     columns: Rc<Vec<Column<R>>>,
@@ -208,7 +215,7 @@ pub struct Table<R: 'static> {
     span: Option<SpanRow<R>>,
     click_opens: bool,
     fit: bool,
-    header: bool,
+    header: Header,
     status: Option<RowStatus<R>>,
     key: Option<RowKey<R>>,
     flashes: HashMap<SharedString, u64>,
@@ -239,7 +246,7 @@ impl<R: 'static> Table<R> {
             span: None,
             click_opens: false,
             fit: false,
-            header: true,
+            header: Header::Sans,
             status: None,
             key: None,
             flashes: HashMap::new(),
@@ -290,7 +297,12 @@ impl<R: 'static> Table<R> {
     }
 
     pub fn headerless(mut self) -> Self {
-        self.header = false;
+        self.header = Header::Hidden;
+        self
+    }
+
+    pub fn mono_header(mut self) -> Self {
+        self.header = Header::Mono;
         self
     }
 
@@ -476,11 +488,15 @@ impl<R: 'static> Table<R> {
             .items_center()
             .gap(self.column_gap)
             .h(ROW_TABLE_MIN)
-            .px(SPACE_8)
+            .pl(self.inset)
+            .pr(SPACE_8)
             .border_b(RULE)
             .border_color(palette.line)
             .text_size(TEXT_SMALL)
             .text_color(palette.mute)
+            .when(self.header == Header::Mono, |header| {
+                header.font_family(FONT_MONO).text_size(TEXT_AXIS)
+            })
             .children(cells)
             .into_any_element()
     }
@@ -610,7 +626,7 @@ impl<R: 'static> Focusable for Table<R> {
 impl<R: 'static> Render for Table<R> {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
-        let header = self.header.then(|| self.render_header(&palette, cx));
+        let header = (self.header != Header::Hidden).then(|| self.render_header(&palette, cx));
         let body = if self.rows.is_empty() {
             div()
                 .flex()

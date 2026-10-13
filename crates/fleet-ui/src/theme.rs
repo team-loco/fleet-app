@@ -16,6 +16,7 @@ pub const TEXT_BODY: Pixels = px(12.5);
 pub const TEXT_CONTROL: Pixels = px(12.);
 pub const TEXT_AXIS: Pixels = px(10.5);
 pub const TEXT_HEADING: Pixels = px(16.);
+pub const TEXT_SUBHEADING: Pixels = px(15.);
 pub const LINE_PROSE: f32 = 1.5;
 
 pub const RADIUS: Pixels = px(3.);
@@ -29,6 +30,8 @@ pub const ROW_TABLE: Pixels = px(26.);
 pub const ROW_MENU_PAD_Y: Pixels = px(6.);
 pub const ROW_NAV: Pixels = px(26.);
 pub const ROW_CLUSTER: Pixels = px(28.);
+pub const ROW_COMMIT: Pixels = px(48.);
+pub const ROW_ROLLOUT: Pixels = px(25.);
 
 pub const STRIP: Pixels = px(28.);
 pub const CLUSTERS_PANEL: Pixels = px(164.);

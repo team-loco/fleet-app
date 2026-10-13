@@ -28,7 +28,7 @@ Spec column points at `design/`.
 | S2 | Command palette ⌘K | Command, v1/Palette | claude | s2-command-palette | done |
 | S3 | Workload (Deployment) page + logs / events / terminal dock | Workload | | | todo |
 | S4 | Flux object page (Kustomization + HelmRelease + sources) | Kustomization | | | todo |
-| S5 | Changes: commits, per-cluster outcome, full diff, rendered views | Changes | | | todo |
+| S5 | Changes: commits, per-cluster outcome, full diff, rendered views | Changes | claude | s5-changes | done |
 | S6 | GitOps sync grid across clusters | Flux | | | todo |
 | S7 | Add cluster flow (contexts, checks) | AddCluster, AddClusterCheck | | | todo |
 | S8 | Cluster overview, Nodes, Namespaces, Events, generic resource lists | v1/Main, Nav | | | todo |

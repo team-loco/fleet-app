@@ -17,6 +17,7 @@ impl Shell {
         let snapshot = &self.state.snapshot;
         let problems = snapshot.problems();
         let left = match self.selected_cluster() {
+            None if self.state.page == Page::Changes => snapshot.changes.fetched_label(),
             Some(cluster) => {
                 let version = cluster.version.as_deref().unwrap_or("—");
                 [cluster.distro.as_str(), cluster.region.as_str(), version].join(SEPARATOR)

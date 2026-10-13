@@ -47,6 +47,7 @@ enum Screen {
     Cluster,
     Collapsed,
     Command,
+    Changes,
     Kit,
     KitOverlays,
     KitPanes,
@@ -64,6 +65,7 @@ impl Screen {
                 Command::ToggleResourcesPanel,
             ],
             Self::Command => vec![Command::SelectPage(Page::Overview)],
+            Self::Changes => vec![Command::SelectPage(Page::Changes)],
             Self::Kit => Vec::new(),
             Self::KitOverlays => Vec::new(),
             Self::KitPanes => Vec::new(),
@@ -165,6 +167,7 @@ fn launch(
             Screen::Cluster => shell_view(updates, commands, screen, window, cx),
             Screen::Collapsed => shell_view(updates, commands, screen, window, cx),
             Screen::Command => shell_view(updates, commands, screen, window, cx),
+            Screen::Changes => shell_view(updates, commands, screen, window, cx),
         };
         cx.new(|cx| Root::new(view, window, cx))
     })

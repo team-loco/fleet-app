@@ -1,3 +1,4 @@
+pub mod changes;
 pub mod fleet;
 pub mod fuzzy;
 pub mod home;
@@ -10,6 +11,7 @@ pub mod status;
 pub mod time;
 
 pub use async_channel::{Receiver, Sender};
+pub use changes::ChangesLog;
 pub use fleet::{ClusterSummary, Snapshot};
 pub use home::FleetHome;
 pub use id::{ClusterId, ResourceRef};
