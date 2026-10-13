@@ -31,7 +31,7 @@ pub enum Command {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Update {
-    Snapshot(Snapshot),
+    Snapshot(Box<Snapshot>),
     Contexts(Vec<KubeconfigFile>),
     Check(ContextRef, CheckLine),
     Checked(ContextRef, Verdict),
@@ -97,7 +97,7 @@ impl AppState {
     pub fn update(&mut self, update: Update) {
         match update {
             Update::Snapshot(snapshot) => {
-                self.snapshot = snapshot;
+                self.snapshot = *snapshot;
                 let selection_gone = self
                     .cluster
                     .as_ref()
@@ -140,7 +140,7 @@ mod tests {
 
     fn loaded() -> AppState {
         let mut state = AppState::default();
-        state.update(Update::Snapshot(sample()));
+        state.update(Update::Snapshot(Box::new(sample())));
         state
     }
 
@@ -232,7 +232,7 @@ mod tests {
         let mut state = loaded();
         state.apply(&Command::SelectCluster(Some(ClusterId::new("a"))));
         state.apply(&Command::SelectPage(Page::Nodes));
-        state.update(Update::Snapshot(Snapshot::default()));
+        state.update(Update::Snapshot(Box::default()));
         assert_eq!(state.cluster, None);
         assert_eq!(state.page, Page::Overview);
     }

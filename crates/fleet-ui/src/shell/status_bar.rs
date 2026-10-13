@@ -1,3 +1,4 @@
+use fleet_core::gitops::flux_ready;
 use fleet_core::{Command, Page, Status};
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
@@ -21,6 +22,10 @@ impl Shell {
             Some(cluster) => {
                 let version = cluster.version.as_deref().unwrap_or("—");
                 [cluster.distro.as_str(), cluster.region.as_str(), version].join(SEPARATOR)
+            }
+            None if self.state.page == Page::GitOps => {
+                let flux = flux_ready(&snapshot.clusters);
+                format!("flux {}/{} ready", flux.ready, flux.total)
             }
             None => format!(
                 "{} of {} clusters connected",

@@ -53,6 +53,7 @@ enum Screen {
     Namespaces,
     Events,
     Resources,
+    Gitops,
     Kit,
     KitOverlays,
     KitPanes,
@@ -78,6 +79,7 @@ impl Screen {
             Self::Namespaces => vec![sample, Command::SelectPage(Page::Namespaces)],
             Self::Events => vec![sample, Command::SelectPage(Page::Events)],
             Self::Resources => vec![sample, Command::SelectPage(Page::Deployments)],
+            Self::Gitops => vec![Command::SelectPage(Page::GitOps)],
             Self::Kit => Vec::new(),
             Self::KitOverlays => Vec::new(),
             Self::KitPanes => Vec::new(),
@@ -189,6 +191,7 @@ fn launch(
             Screen::Resources => shell_view(updates, commands, screen, window, cx),
             Screen::AddCluster => shell_view(updates, commands, screen, window, cx),
             Screen::AddClusterCheck => shell_view(updates, commands, screen, window, cx),
+            Screen::Gitops => shell_view(updates, commands, screen, window, cx),
         };
         cx.new(|cx| Root::new(view, window, cx))
     })

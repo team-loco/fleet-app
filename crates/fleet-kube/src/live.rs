@@ -4,8 +4,8 @@ use std::thread;
 
 use fleet_core::resource::page_for_kind;
 use fleet_core::{
-    Backend, ChangesLog, ClusterId, Command, FleetHome, Page, Receiver, ResourceRef, Sender,
-    Snapshot, Update,
+    Backend, ChangesLog, ClusterId, Command, FleetHome, GitOps, Page, Receiver, ResourceRef,
+    Sender, Snapshot, Update,
 };
 use tokio::time::MissedTickBehavior;
 
@@ -209,6 +209,7 @@ impl Live {
             resources: Vec::new(),
             changes: ChangesLog::default(),
             details: BTreeMap::new(),
+            gitops: GitOps::default(),
         }
     }
 }
@@ -266,7 +267,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
             _ = publish.tick() => {
                 if dirty {
                     dirty = false;
-                    if updates.send(Update::Snapshot(live.snapshot())).await.is_err() {
+                    if updates.send(Update::Snapshot(Box::new(live.snapshot()))).await.is_err() {
                         return;
                     }
                 }

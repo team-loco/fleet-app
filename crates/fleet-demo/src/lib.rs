@@ -1,6 +1,7 @@
 mod add_cluster;
 mod changes;
 mod detail;
+mod gitops;
 mod home;
 mod lists;
 mod resources;
@@ -42,7 +43,7 @@ enum Input {
 fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
     let mut state = snapshot();
     if updates
-        .send_blocking(Update::Snapshot(state.clone()))
+        .send_blocking(Update::Snapshot(Box::new(state.clone())))
         .is_err()
     {
         return;
@@ -85,7 +86,7 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
         };
         if changed
             && updates
-                .send_blocking(Update::Snapshot(state.clone()))
+                .send_blocking(Update::Snapshot(Box::new(state.clone())))
                 .is_err()
         {
             return;
@@ -170,6 +171,7 @@ pub fn snapshot() -> Snapshot {
         resources: resources::resources(),
         changes: changes::log(),
         details: BTreeMap::from([(ClusterId::new(PROD_US_EAST), detail::prod_us_east())]),
+        gitops: gitops::gitops(),
     }
 }
 
@@ -289,6 +291,12 @@ mod tests {
     }
 
     #[test]
+    fn status_bar_flux_total_matches_design() {
+        let flux = fleet_core::gitops::flux_ready(&snapshot().clusters);
+        assert_eq!((flux.ready, flux.total), (72, 75));
+    }
+
+    #[test]
     fn unreachable_clusters_have_no_metrics() {
         let snapshot = snapshot();
         let without: Vec<&str> = snapshot
@@ -306,7 +314,7 @@ mod tests {
         let (command_tx, command_rx) = async_channel::unbounded();
         Box::new(DemoBackend).start(update_tx, command_rx);
         let first = update_rx.recv_blocking();
-        assert_eq!(first, Ok(Update::Snapshot(snapshot())));
+        assert_eq!(first, Ok(Update::Snapshot(Box::new(snapshot()))));
         assert!(
             command_tx
                 .send_blocking(Command::ToggleClustersPanel)

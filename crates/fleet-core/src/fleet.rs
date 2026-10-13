@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::home::ClusterMetrics;
 use crate::{
-    ChangesLog, ClusterDetail, ClusterId, Counts, FleetHome, Page, ResourceSummary, Status,
+    ChangesLog, ClusterDetail, ClusterId, Counts, FleetHome, GitOps, Page, ResourceSummary, Status,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,6 +38,7 @@ pub struct Snapshot {
     pub resources: Vec<ResourceSummary>,
     pub changes: ChangesLog,
     pub details: BTreeMap<ClusterId, ClusterDetail>,
+    pub gitops: GitOps,
 }
 
 impl Snapshot {
@@ -96,6 +97,7 @@ pub(crate) mod tests {
             resources: Vec::new(),
             changes: ChangesLog::default(),
             details: BTreeMap::new(),
+            gitops: GitOps::default(),
         }
     }
 

@@ -73,12 +73,12 @@ impl AddClusters {
                         .insert(ClusterId::new(&cluster.name), cluster.context.clone());
                     fleet.clusters.push(summary(cluster));
                 }
-                send(updates, Update::Snapshot(fleet.clone()));
+                send(updates, Update::Snapshot(Box::new(fleet.clone())));
             }
             Command::RemoveCluster(id) => {
                 self.added.remove(id);
                 fleet.clusters.retain(|cluster| &cluster.id != id);
-                send(updates, Update::Snapshot(fleet.clone()));
+                send(updates, Update::Snapshot(Box::new(fleet.clone())));
             }
             _ => return false,
         }
