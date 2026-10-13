@@ -23,12 +23,12 @@ Settled; change only with a new entry that says why.
 12. **License**: Apache-2.0.
 13. **PRs**: one unit per PR, merged immediately by the orchestrator.
 14. **No hotbar**: v2 has no hotbar, so Cluster settings drops v1's Pin column and `Show in hotbar`
-    toggle. The clusters panel lists every cluster.
+    toggle. The cluster switcher lists every cluster (decision 18).
 15. **What counts as destructive**: cordon and uncordon only toggle scheduling, evict nothing and
     undo in one click, so they run at once. Drain (evicts pods), delete and apply-from-compare are
     destructive and confirm in-app unless the cluster's "Confirm destructive actions" setting is
     off.
-16. **Collapsed strips are useful, not decorative**: deviates from HANDOFF's "vertical label",
+16. **Collapsed strips are useful, not decorative** (superseded by 18): deviates from HANDOFF's "vertical label",
     requested by the product owner. The clusters strip (28px) shows the expand chevron, an "All
     clusters" glyph row, then one status-glyph row per cluster (selected marked with `sel`, tooltip
     `name · state`, click selects). The resources strip shows the chevron and one glyph-over-count
@@ -45,3 +45,17 @@ Settled; change only with a new entry that says why.
     the shell owns screen entities, dialogs, subscriptions and focus alongside selection; the kit's
     Split primitive divides layout but does not isolate those owners. A follow-up must extract pane
     ownership before adding independent navigation and focused-pane close behavior.
+18. **One sidebar; clusters switch from the status bar**: requested by the product owner
+    (#110, #111, #121); supersedes HANDOFF's two-panel layout and decision 16. The window has one
+    left sidebar: the 28px top strip (traffic lights, collapse chevron), then the nav for the
+    current scope, Fleet home's Overview / Problems / GitOps / Changes or the cluster's pages. ⌘B
+    collapses it to 76px, just the strip and an expand chevron, with no cluster name or state.
+    The clusters panel, both strips and ⌘⇧B are gone. The status bar starts with the cluster
+    switcher (status glyph and name, or ◎ All clusters); a click or ⌘⇧C opens a popover above it
+    with All clusters, every cluster (glyph, state, problem counts) and Add cluster. Typing
+    filters, ↑ ↓ ↵ pick, ⌘. or the row's ⋯ opens that cluster's actions (Settings, Connect or
+    Disconnect, Remove from Fleet). Selecting a cluster only moves navigation; every added
+    cluster stays connected. The LOCO section shows only on clusters where `infra.loco.io` is
+    detected. Inspectors (nodes, pods, resources, workload) slide and fade in and out
+    (`theme::INSPECTOR_IN`, `INSPECTOR_OUT`, `INSPECTOR_SWAP`, ease-out) and replay the fade when
+    the selection changes.

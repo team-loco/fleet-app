@@ -16,7 +16,7 @@ use crate::kit::status_symbols;
 use crate::kit::{
     ActionMenu, CodeView, Column, ConfirmDialog, DockState, KeyValue, Link, LogView, MenuItem,
     PageHeader, Rule, SectionHeader, SectionLabel, Segmented, StatusText, Table, TableEvent,
-    Terminal, TextFieldState, Toast, Width, confirm, min_row_width, toast,
+    Terminal, TextFieldState, Toast, Width, confirm, min_row_width, slide_in, toast,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, LINE_PROSE, Palette, RADIUS, ROW_TABLE, RULE, SPACE_1, SPACE_2,
@@ -68,6 +68,7 @@ const COMMIT_WIDTH: Pixels = px(190.);
 const NOTE_WIDTH: Pixels = px(90.);
 
 const INSPECTOR_WIDTH: Pixels = px(320.);
+const INSPECTOR_ID: &str = "workload-inspector";
 const INSPECTOR_HEADER: Pixels = px(30.);
 const ENV_PAD_X: Pixels = px(7.);
 const ENV_PAD_Y: Pixels = px(5.);
@@ -879,9 +880,11 @@ impl Render for WorkloadScreen {
             .child(self.pods_section(&workload))
             .child(Self::history(&workload, cx));
         let inspector = if self.showing_yaml {
-            self.yaml_inspector(&palette)
+            let panel = self.yaml_inspector(&palette);
+            slide_in(panel, INSPECTOR_ID, YAML_LABEL, YAML_INSPECTOR_WIDTH)
         } else {
-            self.inspector(&workload, cx).into_any_element()
+            let panel = self.inspector(&workload, cx);
+            slide_in(panel, INSPECTOR_ID, CONTAINER, INSPECTOR_WIDTH)
         };
         let dock = self.render_dock(&workload, cx);
         root.child(div().flex().flex_1().min_h_0().child(main).child(inspector))

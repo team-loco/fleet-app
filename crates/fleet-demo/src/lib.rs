@@ -556,10 +556,6 @@ mod tests {
         Box::new(DemoBackend).start(update_tx, command_rx);
         let first = update_rx.recv_blocking();
         assert_eq!(first, Ok(Update::Snapshot(Box::new(snapshot()))));
-        assert!(
-            command_tx
-                .send_blocking(Command::ToggleClustersPanel)
-                .is_ok()
-        );
+        assert!(command_tx.send_blocking(Command::ToggleSidebar).is_ok());
     }
 }

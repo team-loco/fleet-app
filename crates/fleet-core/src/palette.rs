@@ -4,8 +4,7 @@ use std::ops::Range;
 use crate::fuzzy::fuzzy;
 use crate::resource::{kind_info, kind_matches, kind_rank, short_kind};
 use crate::{
-    CLUSTER_NAV, ClusterId, ClusterSummary, Command, FLEET_NAV, ResourceRef, ResourceSummary,
-    Snapshot, Status,
+    ClusterId, ClusterSummary, Command, FLEET_NAV, ResourceRef, ResourceSummary, Snapshot, Status,
 };
 
 const MAX_RESOURCES: usize = 50;
@@ -24,14 +23,8 @@ pub const COMPARE_KEY: &str = "⌘⇧D";
 pub const OWNER_KEY: &str = "⌘⇧G";
 pub const STOP_FORWARD: &str = "Stop port-forward";
 
-const GLOBAL_COMMANDS: &[(&str, &str, Command)] = &[
-    ("Toggle clusters panel", "⌘⇧B", Command::ToggleClustersPanel),
-    (
-        "Toggle resources panel",
-        "⌘B",
-        Command::ToggleResourcesPanel,
-    ),
-];
+const GLOBAL_COMMANDS: &[(&str, &str, Command)] =
+    &[("Toggle sidebar", "⌘B", Command::ToggleSidebar)];
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Query {
@@ -235,12 +228,17 @@ fn page_hits(snapshot: &Snapshot, current: Option<&ClusterId>, text: &str) -> Ve
     let cluster_name = current
         .and_then(|id| snapshot.cluster(id))
         .map(|cluster| cluster.name.clone());
-    let cluster_pages = cluster_name.into_iter().flat_map(|name| {
-        CLUSTER_NAV
-            .iter()
-            .flat_map(|section| section.pages.iter())
-            .map(move |page| (*page, name.clone()))
-    });
+    let cluster_sections = current.map(|id| snapshot.nav_sections(Some(id)));
+    let cluster_pages =
+        cluster_name
+            .zip(cluster_sections)
+            .into_iter()
+            .flat_map(|(name, sections)| {
+                sections
+                    .into_iter()
+                    .flat_map(|section| section.pages.iter())
+                    .map(move |page| (*page, name.clone()))
+            });
     let mut scored: Vec<(i64, Hit)> = fleet_pages
         .chain(cluster_pages)
         .filter_map(|(page, scope)| {
@@ -711,10 +709,7 @@ mod tests {
             command_names(">owner cart"),
             ["Show Flux owner of deploy/cart"]
         );
-        assert_eq!(
-            command_names(">"),
-            ["Toggle clusters panel", "Toggle resources panel"]
-        );
+        assert_eq!(command_names(">"), ["Toggle sidebar"]);
     }
 
     #[test]
@@ -805,11 +800,29 @@ mod tests {
         assert_eq!(pods, Some(Command::SelectPage(Page::Pods)));
     }
 
+    #[cfg(feature = "loco")]
+    #[test]
+    fn loco_pages_are_listed_only_for_clusters_running_loco() {
+        let mut snapshot = snapshot();
+        let a = ClusterId::new("a");
+        let page = |snapshot: &Snapshot| {
+            search(snapshot, Some(&a), "routes")
+                .hits
+                .iter()
+                .any(|hit| hit.command == Command::SelectPage(Page::LocoRoutes))
+        };
+        assert!(!page(&snapshot));
+        snapshot
+            .loco
+            .insert(a.clone(), crate::loco::LocoCluster::default());
+        assert!(page(&snapshot));
+    }
+
     #[test]
     fn command_scope_only_lists_commands() {
-        let results = search(&snapshot(), None, ">res");
+        let results = search(&snapshot(), None, ">side");
         let names: Vec<_> = results.hits.iter().map(|hit| hit.name.as_str()).collect();
-        assert_eq!(names, ["Toggle resources panel"]);
+        assert_eq!(names, ["Toggle sidebar"]);
     }
 
     #[test]

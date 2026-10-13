@@ -21,7 +21,7 @@ gpui_platform::application()
     .with_assets(fleet_ui::assets::Assets)
     .run(|cx: &mut App| {
         fleet_ui::init(forced_appearance, cx)?; // gpui_component::init + fonts + theme
-        cx.bind_keys([KeyBinding::new("cmd-b", ToggleResourcesPanel, None)]);
+        cx.bind_keys([KeyBinding::new("cmd-b", ToggleSidebar, None)]);
         cx.open_window(options, |window, cx| {
             let shell = cx.new(|cx| Shell::new(updates, commands, initial, window, cx));
             cx.new(|cx| Root::new(shell, window, cx))
@@ -76,8 +76,8 @@ gpui_platform::application()
   this.update(cx, |view, cx| { ...; cx.notify() })?; })`, keep the `Task` in a field (dropping cancels).
 - Closures that borrow `cx` (e.g. `cx.listener`) inside iterator chains: collect to `Vec<AnyElement>`
   first, or the borrow checker rejects the second `cx` use.
-- Actions: `gpui::actions!(fleet, [ToggleClustersPanel])`; handle with
-  `.on_action(cx.listener(|this, _: &ToggleClustersPanel, window, cx| ...))` on the root div, which must
+- Actions: `gpui::actions!(fleet, [ToggleSidebar])`; handle with
+  `.on_action(cx.listener(|this, _: &ToggleSidebar, window, cx| ...))` on the root div, which must
   `track_focus(&focus_handle)` and be focused (`window.focus(&handle, cx)`), otherwise key bindings
   never reach it.
 
@@ -93,7 +93,7 @@ gpui_platform::application()
 
 - `element.with_animation(id, Animation::new(dur).with_easing(ease_out_quint()), |el, t| el.w(...))`.
   The animation restarts when the id changes, so the shell bumps a generation counter per toggle and
-  uses `ElementId::NamedInteger("clusters-panel", generation)`; generation 0 renders without animation.
+  uses `ElementId::NamedInteger("sidebar", generation)`; generation 0 renders without animation.
   Content inside an animated width uses a fixed width and `overflow_hidden` so it clips instead of
   reflowing.
 

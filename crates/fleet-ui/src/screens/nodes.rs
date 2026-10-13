@@ -10,10 +10,12 @@ use gpui::{
 use super::{NODE_KIND, ScreenEvent};
 use crate::kit::{
     ActionMenu, Button, Column, ConfirmDialog, IconButton, Inspector, KeyValue, Lede, MenuItem,
-    Meter, MiniMeter, SectionLabel, StatusGlyph, StatusText, Table, TableEvent, confirm,
+    Meter, MiniMeter, Presence, SectionLabel, StatusGlyph, StatusText, Table, TableEvent, confirm,
+    slide_in, slide_out,
 };
 use crate::theme::{
-    ActiveTheme, FONT_MONO, Palette, SPACE_2, SPACE_3, SPACE_4, SPACE_5, TEXT_MONO, TEXT_SMALL,
+    ActiveTheme, FONT_MONO, INSPECTOR, Palette, SPACE_2, SPACE_3, SPACE_4, SPACE_5, TEXT_MONO,
+    TEXT_SMALL,
 };
 
 const NONE: &str = "none";
@@ -31,6 +33,7 @@ const VERSION_WIDTH: Pixels = px(64.);
 const AGE_WIDTH: Pixels = px(40.);
 const INSPECTOR_LABEL: Pixels = px(84.);
 const CONDITION_LABEL: Pixels = px(112.);
+const INSPECTOR_ID: &str = "node-inspector";
 
 pub struct NodesScreen {
     cluster: Option<ClusterId>,
@@ -41,6 +44,11 @@ pub struct NodesScreen {
     selected: Option<String>,
     table: Entity<Table<Node>>,
     menu: Entity<ActionMenu>,
+    presence: Presence<Node>,
+}
+
+fn presence(screen: &mut NodesScreen) -> &mut Presence<Node> {
+    &mut screen.presence
 }
 
 impl EventEmitter<ScreenEvent> for NodesScreen {}
@@ -71,6 +79,7 @@ impl NodesScreen {
             selected: None,
             table,
             menu,
+            presence: Presence::default(),
         }
     }
 
@@ -236,7 +245,7 @@ impl NodesScreen {
                         .child(c.message.clone()),
                 )
         });
-        Inspector::new("node-inspector", node.name.clone())
+        Inspector::new(INSPECTOR_ID, node.name.clone())
             .mono()
             .status(node.status, node.state.clone())
             .actions(
@@ -275,10 +284,18 @@ impl Render for NodesScreen {
             summary.cordoned,
             summary.instance_label()
         );
-        let inspector = self
-            .selected_node()
-            .cloned()
-            .map(|node| self.inspector(&node, &palette, cx));
+        let current = self.selected_node().cloned();
+        self.presence.track(current.as_ref(), presence, cx);
+        let inspector = match current {
+            Some(node) => {
+                let panel = self.inspector(&node, &palette, cx);
+                Some(slide_in(panel, INSPECTOR_ID, &node.name, INSPECTOR))
+            }
+            None => self.presence.leaving().cloned().map(|node| {
+                let panel = self.inspector(&node, &palette, cx);
+                slide_out(panel, INSPECTOR_ID, INSPECTOR)
+            }),
+        };
         div()
             .size_full()
             .flex()

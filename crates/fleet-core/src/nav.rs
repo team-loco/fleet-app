@@ -85,12 +85,27 @@ impl Page {
             Self::Overview | Self::Problems | Self::GitOps | Self::Changes | Self::ClusterSettings
         )
     }
+
+    #[cfg(feature = "loco")]
+    pub const fn is_loco(self) -> bool {
+        matches!(
+            self,
+            Self::LocoPlatform | Self::LocoApplications | Self::LocoBuilds | Self::LocoRoutes
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NavSection {
     pub label: Option<&'static str>,
     pub pages: &'static [Page],
+}
+
+impl NavSection {
+    #[cfg(feature = "loco")]
+    pub fn is_loco(&self) -> bool {
+        self.pages.iter().copied().any(Page::is_loco)
+    }
 }
 
 pub const FLEET_NAV: &[NavSection] = &[NavSection {

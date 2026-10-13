@@ -368,7 +368,7 @@ mod tests {
             apply(&mut snapshot, &Command::Cordon(node_ref("nope"))),
             None
         );
-        assert_eq!(apply(&mut snapshot, &Command::ToggleClustersPanel), None);
+        assert_eq!(apply(&mut snapshot, &Command::ToggleSidebar), None);
         assert_eq!(snapshot, before);
     }
 }

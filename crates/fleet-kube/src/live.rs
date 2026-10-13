@@ -659,8 +659,7 @@ impl Live {
                 self.resubscribe_page();
             }
             Command::Flux(..) => self.act(command),
-            Command::ToggleClustersPanel => {}
-            Command::ToggleResourcesPanel => {}
+            Command::ToggleSidebar => {}
             Command::OpenResource(resource) => self.open(resource),
             Command::InspectResource(resource) => self.open(resource),
             Command::FollowLogs(resource) => self.open(resource),
@@ -1347,6 +1346,35 @@ mod tests {
 
     fn window_command(window: u64, command: Command) -> Command {
         Command::ForWindow(window, Box::new(command))
+    }
+
+    #[tokio::test]
+    async fn switching_clusters_keeps_every_cluster_connected() {
+        let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let mut live = test_live(dir.path());
+        for name in ["a", "b"] {
+            let context = context("/missing-shell-test-kubeconfig", name);
+            let handle = live.manager.connect(context.clone());
+            let extras = Extras::new(live.settings.usage_samples());
+            live.clusters.insert(
+                context.id,
+                Connected {
+                    id: ClusterId::new(name),
+                    handle,
+                    extras,
+                    _baseline: Vec::new(),
+                    usage_task: None,
+                    pod_usage_task: None,
+                    prometheus_task: None,
+                },
+            );
+        }
+        for selected in [Some("a"), Some("b"), None] {
+            let command = Command::SelectCluster(selected.map(ClusterId::new));
+            live.apply(&window_command(FIRST_WINDOW, command));
+            assert_eq!(live.clusters.len(), 2);
+            assert!(live.disconnected.is_empty());
+        }
     }
 
     #[tokio::test]

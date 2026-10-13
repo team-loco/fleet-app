@@ -13,7 +13,8 @@ use gpui::{
 use super::ScreenEvent;
 use crate::kit::{
     ActionMenu, CodeView, Column, ConfirmDialog, IconButton, InputEvent, Inspector, Lede, MenuItem,
-    Select, SelectEvent, StatusGlyph, Table, TableEvent, TextField, TextFieldState, confirm,
+    Presence, Select, SelectEvent, StatusGlyph, Table, TableEvent, TextField, TextFieldState,
+    confirm, slide_in, slide_out,
 };
 use crate::theme::{SPACE_3, SPACE_4};
 
@@ -26,6 +27,7 @@ const AGE_WIDTH: Pixels = px(44.);
 const SELECT_WIDTH: Pixels = px(180.);
 const SEARCH_WIDE: Pixels = px(220.);
 const YAML_INSPECTOR: Pixels = px(480.);
+const INSPECTOR_ID: &str = "resource-inspector";
 const STATUS_COLUMNS: [&str; 2] = ["Ready", "Status"];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -109,6 +111,11 @@ pub struct ResourcesScreen {
     search: Entity<TextFieldState>,
     menu: Entity<ActionMenu>,
     subscriptions: Vec<Subscription>,
+    presence: Presence<Resource>,
+}
+
+fn presence(screen: &mut ResourcesScreen) -> &mut Presence<Resource> {
+    &mut screen.presence
 }
 
 impl EventEmitter<ScreenEvent> for ResourcesScreen {}
@@ -152,6 +159,7 @@ impl ResourcesScreen {
             search,
             menu,
             subscriptions,
+            presence: Presence::default(),
         }
     }
 
@@ -343,7 +351,7 @@ impl ResourcesScreen {
             .child(self.menu.clone())
             .child(close);
         let subtitle = format!("{} · {}", self.kind.name(), row.namespace);
-        Inspector::new("resource-inspector", row.name.clone())
+        Inspector::new(INSPECTOR_ID, row.name.clone())
             .mono()
             .width(YAML_INSPECTOR)
             .status(row.status, subtitle)
@@ -365,10 +373,19 @@ impl Render for ResourcesScreen {
             .child(self.namespaces.clone())
             .child(TextField::search(&self.search).width(SEARCH_WIDE));
         let table = self.table(cx);
-        let inspector = self
-            .selected_row()
-            .cloned()
-            .map(|row| self.inspector(&row, cx));
+        let current = self.selected_row().cloned();
+        self.presence.track(current.as_ref(), presence, cx);
+        let inspector = match current {
+            Some(row) => {
+                let panel = self.inspector(&row, cx);
+                let selection = format!("{}/{}", row.namespace, row.name);
+                Some(slide_in(panel, INSPECTOR_ID, &selection, YAML_INSPECTOR))
+            }
+            None => self.presence.leaving().cloned().map(|row| {
+                let panel = self.inspector(&row, cx);
+                slide_out(panel, INSPECTOR_ID, YAML_INSPECTOR)
+            }),
+        };
         div()
             .size_full()
             .flex()

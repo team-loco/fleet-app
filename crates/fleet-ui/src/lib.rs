@@ -15,8 +15,8 @@ pub mod actions {
     gpui::actions!(
         fleet,
         [
-            ToggleClustersPanel,
-            ToggleResourcesPanel,
+            ToggleSidebar,
+            ToggleClusterSwitcher,
             ToggleCommandPalette,
             FollowLogs,
             CompareAcrossClusters,

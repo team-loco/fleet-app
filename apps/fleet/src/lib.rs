@@ -2,7 +2,7 @@ use clap::ValueEnum;
 use fleet_core::{AddClusterStep, ClusterId, Command, FluxKey, FluxKind, Page, ResourceRef};
 use fleet_ui::actions::{
     CloseWindow, CompareAcrossClusters, FollowLogs, OpenSelectedNewWindow, ShowFluxOwner,
-    ToggleClustersPanel, ToggleCommandPalette, ToggleResourcesPanel,
+    ToggleClusterSwitcher, ToggleCommandPalette, ToggleSidebar,
 };
 use fleet_ui::theme::Appearance;
 use fleet_ui::{Gallery, GalleryPage, Shell, Store};
@@ -21,8 +21,8 @@ gpui::actions!(fleet, [Quit, NewWindow]);
 
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("cmd-shift-b", ToggleClustersPanel, None),
-        KeyBinding::new("cmd-b", ToggleResourcesPanel, None),
+        KeyBinding::new("cmd-shift-c", ToggleClusterSwitcher, None),
+        KeyBinding::new("cmd-b", ToggleSidebar, None),
         KeyBinding::new("cmd-k", ToggleCommandPalette, None),
         KeyBinding::new("cmd-l", FollowLogs, None),
         KeyBinding::new("cmd-shift-d", CompareAcrossClusters, None),
@@ -97,6 +97,7 @@ pub enum Screen {
     Fleet,
     Cluster,
     Collapsed,
+    Switcher,
     Command,
     Changes,
     Overview,
@@ -135,11 +136,8 @@ impl Screen {
         match self {
             Self::Fleet => vec![Command::SelectPage(Page::Overview)],
             Self::Cluster => vec![sample],
-            Self::Collapsed => vec![
-                sample,
-                Command::ToggleClustersPanel,
-                Command::ToggleResourcesPanel,
-            ],
+            Self::Collapsed => vec![sample, Command::ToggleSidebar],
+            Self::Switcher => vec![sample],
             Self::Command => vec![Command::SelectPage(Page::Overview)],
             Self::Changes => vec![Command::SelectPage(Page::Changes)],
             Self::Overview => vec![sample, Command::SelectPage(Page::ClusterOverview)],
@@ -189,7 +187,7 @@ impl Screen {
 }
 
 fn flux_screen(key: FluxKey) -> Vec<Command> {
-    vec![Command::OpenFluxObject(key), Command::ToggleClustersPanel]
+    vec![Command::OpenFluxObject(key)]
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -227,6 +225,7 @@ pub fn root_view(
         Screen::Fleet => shell_view(store, screen, preset, window, cx),
         Screen::Cluster => shell_view(store, screen, preset, window, cx),
         Screen::Collapsed => shell_view(store, screen, preset, window, cx),
+        Screen::Switcher => shell_view(store, screen, preset, window, cx),
         Screen::Command => shell_view(store, screen, preset, window, cx),
         Screen::Changes => shell_view(store, screen, preset, window, cx),
         Screen::Overview => shell_view(store, screen, preset, window, cx),
@@ -268,6 +267,9 @@ fn shell_view(
     if let Screen::Command = screen {
         shell.update(cx, |shell, cx| shell.open_palette(SAMPLE_QUERY, window, cx));
     }
+    if let Screen::Switcher = screen {
+        shell.update(cx, |shell, cx| shell.open_switcher(window, cx));
+    }
     if let Screen::PodsShell = screen {
         shell.update(cx, |shell, cx| shell.show_pod_terminal(window, cx));
     }
@@ -300,7 +302,7 @@ mod tests {
         let key = FluxKey::new("kind-fleet-a", FluxKind::HelmRelease, "apps", "podinfo");
         assert_eq!(
             Screen::Helmrelease.commands(&preset),
-            [Command::OpenFluxObject(key), Command::ToggleClustersPanel]
+            [Command::OpenFluxObject(key)]
         );
         let workload = Screen::Workload.commands(&preset);
         assert_eq!(

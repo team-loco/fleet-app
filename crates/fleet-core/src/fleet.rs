@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 
 use crate::home::{ClusterMetrics, problems_badge};
 use crate::{
-    ChangesLog, ClusterCatalog, ClusterDetail, ClusterId, Comparison, Counts, FleetHome,
-    FluxObject, Forward, GitOps, Page, ResourceKind, ResourceRef, ResourceSummary, Status,
+    CLUSTER_NAV, ChangesLog, ClusterCatalog, ClusterDetail, ClusterId, Comparison, Counts,
+    FLEET_NAV, FleetHome, FluxObject, Forward, GitOps, NavSection, Page, ResourceKind, ResourceRef,
+    ResourceSummary, Status,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,6 +49,27 @@ pub struct Snapshot {
 impl Snapshot {
     pub fn cluster(&self, id: &ClusterId) -> Option<&ClusterSummary> {
         self.clusters.iter().find(|c| &c.id == id)
+    }
+
+    pub fn nav_sections(&self, cluster: Option<&ClusterId>) -> Vec<&'static NavSection> {
+        match cluster {
+            None => FLEET_NAV.iter().collect(),
+            Some(id) => CLUSTER_NAV
+                .iter()
+                .filter(|section| self.shows_section(section, id))
+                .collect(),
+        }
+    }
+
+    #[cfg(feature = "loco")]
+    fn shows_section(&self, section: &NavSection, id: &ClusterId) -> bool {
+        !section.is_loco() || self.loco.contains_key(id)
+    }
+
+    #[cfg(not(feature = "loco"))]
+    #[allow(clippy::unused_self)]
+    fn shows_section(&self, _: &NavSection, _: &ClusterId) -> bool {
+        true
     }
 
     pub fn detail(&self, id: &ClusterId) -> Option<&ClusterDetail> {
@@ -223,5 +245,41 @@ pub(crate) mod tests {
     #[test]
     fn empty_fleet_is_ok() {
         assert_eq!(Snapshot::default().status(), Status::Ok);
+    }
+
+    fn labels(sections: &[&NavSection]) -> Vec<Option<&'static str>> {
+        sections.iter().map(|section| section.label).collect()
+    }
+
+    #[test]
+    fn fleet_home_shows_the_fleet_nav() {
+        let snapshot = sample();
+        assert_eq!(
+            snapshot.nav_sections(None),
+            FLEET_NAV.iter().collect::<Vec<_>>()
+        );
+    }
+
+    #[cfg(not(feature = "loco"))]
+    #[test]
+    fn clusters_show_the_whole_cluster_nav() {
+        let snapshot = sample();
+        let sections = snapshot.nav_sections(Some(&ClusterId::new("a")));
+        assert_eq!(sections, CLUSTER_NAV.iter().collect::<Vec<_>>());
+        assert!(!labels(&sections).contains(&Some("Loco")));
+    }
+
+    #[cfg(feature = "loco")]
+    #[test]
+    fn loco_section_needs_loco_on_the_cluster() {
+        let mut snapshot = sample();
+        snapshot
+            .loco
+            .insert(ClusterId::new("a"), crate::loco::LocoCluster::default());
+        let with = labels(&snapshot.nav_sections(Some(&ClusterId::new("a"))));
+        let without = labels(&snapshot.nav_sections(Some(&ClusterId::new("b"))));
+        assert!(with.contains(&Some("Loco")));
+        assert!(!without.contains(&Some("Loco")));
+        assert_eq!(with.len(), without.len() + 1);
     }
 }
