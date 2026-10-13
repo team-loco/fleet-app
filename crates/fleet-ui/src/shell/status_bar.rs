@@ -11,6 +11,8 @@ use crate::theme::{
 };
 
 const SEPARATOR: &str = " · ";
+#[cfg(feature = "loco")]
+const LOCO_SYNC_UNKNOWN: &str = "loco agent · sync not observable in-cluster";
 
 impl Shell {
     pub(super) fn status_bar(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -77,13 +79,28 @@ impl Shell {
     #[cfg(feature = "loco")]
     fn loco_agent(&self, palette: &crate::theme::Palette) -> Option<AnyElement> {
         use crate::theme::SPACE_3;
-        let synced = self.selected_cluster()?.loco_agent_synced?;
+        let id = self.state.cluster.as_ref()?;
+        let agent = &self.state.snapshot.loco.get(id)?.platform.agent;
+        let (status, label) = match agent.last_heartbeat {
+            Some(heartbeat) => (
+                Status::Ok,
+                format!(
+                    "loco agent · synced {} ago",
+                    fleet_core::time::age(heartbeat)
+                ),
+            ),
+            None => (Status::Offline, LOCO_SYNC_UNKNOWN.to_owned()),
+        };
         let element = div()
             .flex()
             .items_center()
             .gap(SPACE_3)
-            .child(div().text_color(palette.ok).child(Status::Ok.glyph()))
-            .child(format!("loco agent · synced {}s ago", synced.as_secs()))
+            .child(
+                div()
+                    .text_color(palette.status(status))
+                    .child(status.glyph()),
+            )
+            .child(label)
             .into_any_element();
         Some(element)
     }

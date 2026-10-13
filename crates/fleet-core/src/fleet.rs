@@ -1,6 +1,4 @@
 use std::collections::BTreeMap;
-#[cfg(feature = "loco")]
-use std::time::Duration;
 
 use crate::home::ClusterMetrics;
 use crate::{
@@ -21,8 +19,6 @@ pub struct ClusterSummary {
     pub problems: Counts,
     pub nav: BTreeMap<Page, Counts>,
     pub metrics: Option<ClusterMetrics>,
-    #[cfg(feature = "loco")]
-    pub loco_agent_synced: Option<Duration>,
 }
 
 impl ClusterSummary {
@@ -91,8 +87,6 @@ pub(crate) mod tests {
             problems,
             nav: BTreeMap::new(),
             metrics: None,
-            #[cfg(feature = "loco")]
-            loco_agent_synced: None,
         }
     }
 

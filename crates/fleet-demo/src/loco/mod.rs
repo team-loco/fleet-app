@@ -1,10 +1,13 @@
+mod platform;
+mod routes;
+
 use std::collections::BTreeMap;
 use std::time::Duration;
 
 use fleet_core::loco::{
     AppPhase, AppRoute, Application, Applications, Build, BuildLogLine, BuildPhase, Builds,
     ControllerObject, Degraded, HealthCheck, LocoCluster, LocoCommand, LogTone, Placement,
-    Resources, Rollout, Workspace, WorkspaceApps,
+    PlacementIssue, Resources, Rollout, Workspace, WorkspaceApps,
 };
 use fleet_core::{ClusterId, ResourceRef, Snapshot, Status};
 
@@ -38,8 +41,10 @@ const CORE: (&str, &str) = ("ws-0192d0aa", "beta / core");
 
 pub fn clusters() -> BTreeMap<ClusterId, LocoCluster> {
     let cluster = LocoCluster {
+        platform: platform::platform(),
         applications: applications(),
         builds: builds(),
+        routes: routes::routes(),
     };
     BTreeMap::from([(ClusterId::new(CLUSTER), cluster)])
 }
@@ -190,12 +195,7 @@ fn application(seed: &AppSeed, namespace: &str) -> Application {
     let replicas = format!("{}/{}", seed.ready, seed.desired);
     let deployment_status = if failing { Status::Err } else { Status::Ok };
     Application {
-        resource: ResourceRef {
-            cluster: ClusterId::new(CLUSTER),
-            kind: "Application".into(),
-            namespace: Some(APP_NAMESPACE.into()),
-            name: seed.id.into(),
-        },
+        resource: app_ref(seed.id),
         name: seed.name.into(),
         environment: seed.environment.into(),
         region: Some(REGION.into()),
@@ -205,6 +205,7 @@ fn application(seed: &AppSeed, namespace: &str) -> Application {
         placement: Placement {
             desired: Some(seed.desired_revision),
             applied: Some(seed.applied_revision),
+            issue: placement_issue(seed.id),
         },
         hostname: Some(host.clone()),
         degraded,
@@ -231,6 +232,34 @@ fn application(seed: &AppSeed, namespace: &str) -> Application {
             service: format!("{namespace}/{}", seed.name),
             port: APP_PORT,
         }),
+    }
+}
+
+fn placement_issue(id: &str) -> Option<PlacementIssue> {
+    let (status, message) = match id {
+        "api" => (
+            Status::Err,
+            "apply rejected: spec.serviceSpec.resources.replicas: max must be ≥ min · retrying in 30s",
+        ),
+        "frontend-stg" => (
+            Status::Progress,
+            "env secret pending (revision 4 not staged yet)",
+        ),
+        "docs" => (Status::Progress, "applying"),
+        _ => return None,
+    };
+    Some(PlacementIssue {
+        status,
+        message: message.into(),
+    })
+}
+
+pub(crate) fn app_ref(id: &str) -> ResourceRef {
+    ResourceRef {
+        cluster: ClusterId::new(CLUSTER),
+        kind: "Application".into(),
+        namespace: Some(APP_NAMESPACE.into()),
+        name: id.into(),
     }
 }
 
@@ -579,6 +608,76 @@ mod tests {
             loco.builds.subtitle(),
             "loco-builds · pool=builds · kept 24h"
         );
+    }
+
+    #[test]
+    fn platform_reproduces_the_design() {
+        let snapshot = snapshot();
+        let Some(loco) = cluster(&snapshot) else {
+            panic!("prod-us-east has Loco");
+        };
+        let summary = loco.applications.placement_summary();
+        assert_eq!(summary.at_desired, 211);
+        assert_eq!(summary.badges, [(Status::Progress, 2), (Status::Err, 1)]);
+        let placements: Vec<String> = loco
+            .applications
+            .unsettled()
+            .iter()
+            .map(|(ws, app)| {
+                let message = app.placement.issue.as_ref().map(|i| i.message.as_str());
+                format!(
+                    "{} {} {}",
+                    app.name,
+                    ws.label(),
+                    message.unwrap_or_default()
+                )
+            })
+            .collect();
+        assert_eq!(
+            placements,
+            [
+                "api beta / core apply rejected: spec.serviceSpec.resources.replicas: max must be ≥ min · retrying in 30s",
+                "frontend acme / web env secret pending (revision 4 not staged yet)",
+                "docs acme / web applying",
+            ]
+        );
+        let queue = loco.builds.queue();
+        assert_eq!((queue.running, queue.queued), (1, 0));
+        assert_eq!(loco.platform.components.len(), 10);
+        assert_eq!(loco.platform.log.len(), 6);
+        assert_eq!(loco.platform.subtitle(), "loco-system · images sha-8c1f2e7");
+    }
+
+    #[test]
+    fn routes_reproduce_the_design() {
+        let snapshot = snapshot();
+        let Some(loco) = cluster(&snapshot) else {
+            panic!("prod-us-east has Loco");
+        };
+        let routes = &loco.routes;
+        assert_eq!(
+            routes.subtitle(),
+            "Gateway loco-system/eg · Envoy 3/3 · HTTP/3 on"
+        );
+        assert_eq!((routes.total, routes.problems()), (44, 2));
+        let problems: Vec<String> = routes
+            .ranked(fleet_core::loco::RouteFilter::Problems)
+            .iter()
+            .map(|r| format!("{} {} {}", r.host_label(), r.ready_label(), r.detail))
+            .collect();
+        assert_eq!(
+            problems,
+            [
+                "checkout.onloco.app 0/2 Accepted · no ready endpoints (app failing) → 503",
+                "old-landing.onloco.app — ResolvedRefs=False · BackendNotFound",
+            ]
+        );
+        let linked = routes
+            .routes
+            .iter()
+            .filter_map(|r| r.application.as_ref())
+            .all(|app| loco.applications.find(app).is_some());
+        assert!(linked);
     }
 
     #[test]

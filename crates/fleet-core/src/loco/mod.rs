@@ -1,11 +1,18 @@
 mod applications;
 mod builds;
+mod platform;
+mod routes;
 
 pub use applications::{
     AppFilter, AppPhase, AppRoute, Application, Applications, ControllerObject, Degraded,
-    HealthCheck, Placement, Resources, Rollout, WorkspaceApps,
+    HealthCheck, Placement, PlacementIssue, Resources, Rollout, WorkspaceApps,
 };
 pub use builds::{Build, BuildLogLine, BuildPhase, Builds, LogTone};
+pub use platform::{
+    AgentLevel, AgentLogLine, AgentSync, BuildQueue, Component, PlacementSummary, Platform,
+    Reconnects, uptime,
+};
+pub use routes::{Listener, Route, RouteFilter, Routes};
 
 use crate::ResourceRef;
 
@@ -15,8 +22,10 @@ const ELLIPSIS: char = '…';
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LocoCluster {
+    pub platform: Platform,
     pub applications: Applications,
     pub builds: Builds,
+    pub routes: Routes,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

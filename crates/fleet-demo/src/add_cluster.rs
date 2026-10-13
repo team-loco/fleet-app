@@ -220,8 +220,6 @@ fn summary(cluster: &NewCluster) -> ClusterSummary {
         problems: Counts::default(),
         nav: if analytics { nav } else { BTreeMap::new() },
         metrics: None,
-        #[cfg(feature = "loco")]
-        loco_agent_synced: None,
     }
 }
 

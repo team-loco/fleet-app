@@ -34,7 +34,7 @@ Spec column points at `design/`.
 | S8 | Cluster overview, Nodes, Namespaces, Events, generic resource lists | v1/Main, Nav | claude | s8-cluster-pages | done (#17, overview) |
 | S9 | Pods: list, details, logs, shell | v1/Pods | claude | s9-pods | done |
 | S10 | Compare across clusters, cluster settings (Catalog) | v1/Compare, v1/Catalog | claude | s10-compare-settings | done |
-| S11 | Loco: Platform, Applications, Builds, Routes | Loco* | claude | s11-loco | doing (Applications, Builds) |
+| S11 | Loco: Platform, Applications, Builds, Routes | Loco* | claude | s11-loco | done (#25, Platform + Routes PR) |
 
 ## Phase 3 — integration
 
