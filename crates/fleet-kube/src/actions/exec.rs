@@ -215,8 +215,18 @@ pub fn fail(output: &Sink<ExecEvent>, reason: &str) {
 }
 
 pub async fn run(handle: ClusterHandle, request: ExecRequest) {
+    if handle
+        .until_closed(session(&handle, &request))
+        .await
+        .is_none()
+    {
+        fail(&request.output, &Error::NotConnected.to_string());
+    }
+}
+
+async fn session(handle: &ClusterHandle, request: &ExecRequest) {
     let output = request.output.clone();
-    let (session, note) = match start(&handle, &request).await {
+    let (session, note) = match start(handle, request).await {
         Ok(started) => started,
         Err(error) => {
             fail(&output, &action_failure(&error).line());
@@ -226,8 +236,8 @@ pub async fn run(handle: ClusterHandle, request: ExecRequest) {
     if !output.send_blocking(ExecEvent::Started { note }) {
         return;
     }
-    forward_input(&request, session.stdin.clone());
-    forward_resize(&request, session.resize.clone());
+    forward_input(request, session.stdin.clone());
+    forward_resize(request, session.resize.clone());
     let Some(exit) = pump(&session, &output).await else {
         return;
     };

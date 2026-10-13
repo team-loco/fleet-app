@@ -179,7 +179,9 @@ async fn pump(handle: &ClusterHandle, request: &LogRequest) -> Result<()> {
 }
 
 pub async fn stream(handle: ClusterHandle, request: LogRequest) {
-    if let Err(error) = pump(&handle, &request).await {
+    let pumped = handle.until_closed(pump(&handle, &request)).await;
+    let outcome = pumped.unwrap_or(Err(Error::NotConnected));
+    if let Err(error) = outcome {
         let failure = action_failure(&error);
         request.sink.send_blocking(marker(&failure.reason));
     }

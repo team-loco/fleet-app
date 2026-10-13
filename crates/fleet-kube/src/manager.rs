@@ -7,7 +7,7 @@ use kube::Client;
 use kube::api::DynamicObject;
 use kube::core::ApiResource;
 use tokio::runtime::Handle;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::time::Instant;
 
 use crate::backoff::Backoff;
@@ -82,6 +82,7 @@ pub(crate) struct Shared {
     pub(crate) resources: Mutex<HashMap<(String, String), ApiResource>>,
     pub(crate) forwards: Mutex<BTreeMap<u64, crate::ops::ActiveForward>>,
     pub(crate) next_forward: std::sync::atomic::AtomicU64,
+    closed: watch::Sender<bool>,
 }
 
 pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -121,6 +122,9 @@ impl Shared {
     }
 
     pub(crate) fn set_client(&self, client: Option<&Client>) {
+        if self.is_closed() && client.is_some() {
+            return;
+        }
         *lock(&self.client) = client.cloned();
         let mut watches = lock(&self.watches);
         for (kind, entry) in watches.iter_mut() {
@@ -129,6 +133,24 @@ impl Shared {
                 self.start(kind, entry, client);
             }
         }
+    }
+
+    fn is_closed(&self) -> bool {
+        *self.closed.borrow()
+    }
+
+    fn closing(&self) -> impl Future<Output = ()> + Send + 'static {
+        let mut closed = self.closed.subscribe();
+        async move {
+            closed.wait_for(|closed| *closed).await.ok();
+        }
+    }
+
+    fn close(&self) {
+        self.closed.send_replace(true);
+        self.set_client(None);
+        lock(&self.forwards).clear();
+        lock(&self.resources).clear();
     }
 
     fn subscribe(&self, kind: &WatchKind, resource: Option<ApiResource>) {
@@ -201,6 +223,21 @@ impl ClusterHandle {
                 self.shared
                     .start(&WatchKind::FilteredEvents, entry, &client);
             }
+        }
+    }
+
+    pub fn close(&self) {
+        self.shared.close();
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.shared.is_closed()
+    }
+
+    pub async fn until_closed<F: Future>(&self, work: F) -> Option<F::Output> {
+        tokio::select! {
+            output = work => Some(output),
+            () = self.shared.closing() => None,
         }
     }
 
@@ -405,8 +442,11 @@ async fn supervise(
     let mut dirty = BTreeSet::new();
     let mut flush = Throttle::new(COALESCE_INTERVAL);
     let mut next_probe = Instant::now();
+    let closing = shared.closing();
+    tokio::pin!(closing);
     loop {
         tokio::select! {
+            () = &mut closing => return,
             () = tokio::time::sleep_until(next_probe) => {
                 match health_check(&shared).await {
                     Ok(()) => {
@@ -488,10 +528,11 @@ impl ClusterManager {
 
     pub fn connect(&self, context: KubeContext) -> ClusterHandle {
         let mut clusters = lock(&self.clusters);
-        if let Some(existing) = clusters.get(&context.id)
-            && existing.shared.context == context
-        {
-            return existing.clone();
+        if let Some(existing) = clusters.get(&context.id) {
+            if existing.shared.context == context {
+                return existing.clone();
+            }
+            existing.close();
         }
         let (signals_tx, signals_rx) = mpsc::unbounded_channel();
         let info = ClusterInfo {
@@ -513,6 +554,7 @@ impl ClusterManager {
             resources: Mutex::new(HashMap::new()),
             forwards: Mutex::new(BTreeMap::new()),
             next_forward: std::sync::atomic::AtomicU64::new(1),
+            closed: watch::Sender::new(false),
         });
         let _guard = self.runtime.enter();
         let supervisor =
@@ -526,7 +568,8 @@ impl ClusterManager {
     }
 
     pub fn disconnect(&self, id: &ContextRef) -> bool {
-        lock(&self.clusters).remove(id).is_some()
+        let removed = lock(&self.clusters).remove(id);
+        removed.inspect(ClusterHandle::close).is_some()
     }
 
     pub fn get(&self, id: &ContextRef) -> Option<ClusterHandle> {
@@ -541,7 +584,6 @@ impl ClusterManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::discovery::ContextRef;
 
     fn failure(kind: FailureKind) -> Failure {
         Failure {
@@ -558,6 +600,8 @@ mod tests {
         let env = Arc::new(ShellEnv::from_process(String::new()));
         let (manager, _) = ClusterManager::new(runtime, KubeSettings::default(), env);
         let context = |name: &str| KubeContext {
+            trust: crate::discovery::Fingerprint::default(),
+            credentials: crate::discovery::Fingerprint::default(),
             id: ContextRef {
                 file: std::path::PathBuf::from("/missing/test-kubeconfig"),
                 context: name.into(),
@@ -647,6 +691,65 @@ mod tests {
         assert_eq!(provider_id.as_deref(), Some("kind://docker/n"));
     }
 
+    const RELEASE_ATTEMPTS: usize = 200;
+    const RELEASE_POLL: Duration = Duration::from_millis(10);
+    const LOOPBACK: &str = "127.0.0.1";
+
+    async fn port_released(port: u16) -> bool {
+        for _ in 0..RELEASE_ATTEMPTS {
+            if tokio::net::TcpListener::bind((LOOPBACK, port))
+                .await
+                .is_ok()
+            {
+                return true;
+            }
+            tokio::time::sleep(RELEASE_POLL).await;
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn disconnect_tears_down_everything_the_cluster_owns() {
+        let (client, _) = crate::fake::client(Duration::ZERO, |_, _| None);
+        let (manager, handle) = crate::fake::handle(&client);
+        let retained = handle.clone();
+        let Ok(forward) = handle.port_forward("apps", "web-1", 80, 0).await else {
+            panic!("forward starts");
+        };
+        let port = forward.local_addr.port();
+        let _pods = handle.subscribe(WatchKind::Pods);
+        let watching = lock(&handle.shared.watches)
+            .values()
+            .any(|entry| entry.running.is_some());
+        assert!(watching);
+        let stream = tokio::spawn({
+            let handle = handle.clone();
+            async move { handle.until_closed(std::future::pending::<()>()).await }
+        });
+        drop(handle);
+
+        assert!(manager.disconnect(retained.id()));
+
+        assert!(retained.is_closed());
+        assert!(matches!(retained.client(), Err(Error::NotConnected)));
+        assert_eq!(retained.port_forwards(), Vec::new());
+        let watching = lock(&retained.shared.watches)
+            .values()
+            .any(|entry| entry.running.is_some());
+        assert!(!watching);
+        assert!(matches!(stream.await, Ok(None)));
+        assert!(port_released(port).await);
+        for _ in 0..RELEASE_ATTEMPTS {
+            if retained.shared.signals.is_closed() {
+                break;
+            }
+            tokio::time::sleep(RELEASE_POLL).await;
+        }
+        assert!(retained.shared.signals.is_closed());
+        retained.shared.set_client(Some(&client));
+        assert!(matches!(retained.client(), Err(Error::NotConnected)));
+    }
+
     const HANG_PATIENCE: Duration = Duration::from_secs(60);
     const FAST_ENOUGH: Duration = Duration::from_secs(10);
 
@@ -656,19 +759,16 @@ mod tests {
             "apiVersion: v1\nkind: Config\nclusters:\n- name: {name}\n  cluster:\n    server: {server}\ncontexts:\n- name: {name}\n  context:\n    cluster: {name}\n    user: {name}\nusers:\n- name: {name}\n  user:\n    token: abc\n"
         );
         assert!(std::fs::write(&file, text).is_ok());
-        KubeContext {
-            id: ContextRef {
-                file,
-                context: name.to_owned(),
-            },
-            cluster: name.to_owned(),
-            user: None,
-            namespace: None,
-            server: Some(server.to_owned()),
-            provider: Provider::Generic,
-            auth: crate::provider::AuthKind::Token,
-            is_current: false,
-        }
+        let Ok(parsed) = kube::config::Kubeconfig::read_from(&file) else {
+            panic!("kubeconfig");
+        };
+        let found = crate::discovery::contexts_of(&file, &parsed)
+            .into_iter()
+            .next();
+        let Some(context) = found else {
+            panic!("context");
+        };
+        context
     }
 
     #[tokio::test]

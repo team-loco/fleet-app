@@ -330,6 +330,8 @@ mod tests {
         let runtime = tokio::runtime::Handle::current();
         let (manager, _) = crate::manager::ClusterManager::new(runtime, settings.clone(), env);
         let context = crate::discovery::KubeContext {
+            trust: crate::discovery::Fingerprint::default(),
+            credentials: crate::discovery::Fingerprint::default(),
             id: fleet_core::ContextRef {
                 file: "/missing-c77-test-kubeconfig".into(),
                 context: "test".into(),

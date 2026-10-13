@@ -199,6 +199,7 @@ mod tests {
         let now = settled(&mut notifier, Instant::now());
         let mut crashing = with(vec![problem("cart", Status::Err)]);
         crashing.catalog.clusters.push(ClusterSettings {
+            context_change: None,
             cluster: ClusterId::new("a"),
             connection: Connection {
                 context: "a".into(),

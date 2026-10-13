@@ -28,6 +28,7 @@ fn settings(seed: Seed) -> ClusterSettings {
         labels: seed.labels.iter().map(|l| (*l).to_owned()).collect(),
     };
     ClusterSettings {
+        context_change: None,
         cluster: ClusterId::new(seed.name),
         connection: Connection {
             context: seed.context.into(),

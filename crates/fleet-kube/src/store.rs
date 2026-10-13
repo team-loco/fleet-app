@@ -8,7 +8,7 @@ use jiff::Timestamp;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::discovery::ContextRef;
+use crate::discovery::{ContextRef, Fingerprint, KubeContext};
 use crate::error::{Error, Result};
 
 const APP_SUPPORT: &str = "Library/Application Support";
@@ -26,6 +26,23 @@ pub struct SavedCluster {
     pub name: String,
     #[serde(default)]
     pub preferences: SavedPreferences,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<Pin>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pin {
+    pub server: Option<String>,
+    pub trust: Fingerprint,
+}
+
+impl Pin {
+    pub fn of(context: &KubeContext) -> Self {
+        Self {
+            server: context.server.clone(),
+            trust: context.trust.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -213,6 +230,7 @@ impl ClusterStore {
                 context: cluster.context.context.clone(),
                 name: cluster.name.clone(),
                 preferences: SavedPreferences::default(),
+                pin: None,
             });
         }
         self.save()
@@ -236,6 +254,18 @@ impl ClusterStore {
             return Ok(false);
         };
         saved.preferences = SavedPreferences::from(preferences);
+        self.save()?;
+        Ok(true)
+    }
+
+    pub fn pin(&mut self, id: &ClusterId, pin: Pin) -> Result<bool> {
+        let Some(saved) = self.clusters.iter_mut().find(|c| &c.id() == id) else {
+            return Ok(false);
+        };
+        if saved.pin.as_ref() == Some(&pin) {
+            return Ok(false);
+        }
+        saved.pin = Some(pin);
         self.save()?;
         Ok(true)
     }

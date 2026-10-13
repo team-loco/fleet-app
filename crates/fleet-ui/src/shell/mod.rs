@@ -411,6 +411,7 @@ impl Shell {
             Command::SetRefresh(_) => {}
             Command::Connect(_) => {}
             Command::Reauthenticate(_) => {}
+            Command::ConfirmContext(_) => {}
             Command::Disconnect(_) => {}
             Command::PortForward {
                 ref service,

@@ -416,6 +416,40 @@ async fn port_forward_a_service_then_stop_it() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn disconnect_closes_the_clusters_forwards() {
+    let Some(harness) = Harness::start().await else {
+        return;
+    };
+    let service = resource("Service", Some(PODINFO_NAMESPACE), PODINFO);
+    harness.send(Command::PortForward {
+        service,
+        local: 0,
+        remote: PODINFO_PORT,
+    });
+    let snapshot = harness
+        .snapshot_until(|snapshot| !snapshot.forwards.is_empty())
+        .await;
+    let Some(forward) = snapshot.forwards.first().cloned() else {
+        panic!("forward listed");
+    };
+    assert!(http_get(forward.local).await.starts_with("HTTP/1.0 200"));
+    harness.send(Command::Disconnect(cluster()));
+    harness
+        .snapshot_until(|snapshot| snapshot.forwards.is_empty())
+        .await;
+    eventually(
+        "listener closed",
+        || async {
+            tokio::net::TcpStream::connect(("127.0.0.1", forward.local))
+                .await
+                .is_err()
+        },
+        |refused| *refused,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn port_forward_failures_become_notices() {
     let Some(harness) = Harness::start().await else {
         return;
