@@ -81,9 +81,7 @@ impl NodesScreen {
         confirm_destructive: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.cluster.as_ref() != Some(&cluster.id) {
-            self.selected = None;
-        }
+        self.selected = kept_selection(self.cluster.as_ref(), &cluster.id, self.selected.take());
         self.cluster = Some(cluster.id.clone());
         if self.confirm_destructive != confirm_destructive {
             self.confirm_destructive = confirm_destructive;
@@ -109,7 +107,8 @@ impl NodesScreen {
         cx.notify();
     }
 
-    pub fn reveal(&mut self, name: String, cx: &mut Context<Self>) {
+    pub fn reveal(&mut self, cluster: ClusterId, name: String, cx: &mut Context<Self>) {
+        self.cluster = Some(cluster);
         self.selected = Some(name);
         self.select_in_table(cx);
         self.refresh_menu(cx);
@@ -459,9 +458,27 @@ fn columns() -> Vec<Column<Node>> {
     ]
 }
 
+fn kept_selection(
+    shown: Option<&ClusterId>,
+    next: &ClusterId,
+    selected: Option<String>,
+) -> Option<String> {
+    selected.filter(|_| shown == Some(next))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selection_survives_data_for_the_cluster_it_was_revealed_on() {
+        let prod = ClusterId::new("prod-us-east");
+        let other = ClusterId::new("staging");
+        let node = Some("ip-10-4-31-12".to_owned());
+        assert_eq!(kept_selection(Some(&prod), &prod, node.clone()), node);
+        assert_eq!(kept_selection(Some(&other), &prod, node.clone()), None);
+        assert_eq!(kept_selection(None, &prod, node), None);
+    }
 
     #[test]
     fn version_drops_the_build_suffix() {
