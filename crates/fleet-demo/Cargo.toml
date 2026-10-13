@@ -13,6 +13,7 @@ loco = ["fleet-core/loco"]
 [dependencies]
 async-channel.workspace = true
 fleet-core.workspace = true
+jiff.workspace = true
 tracing.workspace = true
 
 [lints]

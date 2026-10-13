@@ -379,21 +379,6 @@ fn command_p_quick_opens_a_page_and_command_shift_p_runs_a_command() -> anyhow::
     Ok(())
 }
 
-fn picked(ui: &Ui, cluster: &str, list: &str) -> Option<fleet_ui::prefs::NamespacePick> {
-    ui.read_app(|cx| fleet_ui::prefs::namespace_pick(cluster, list, cx))
-}
-
-fn open_deployments(ui: &mut Ui, cluster: &str) -> anyhow::Result<()> {
-    ui.press("cmd-shift-c")?;
-    ui.type_text(cluster)?;
-    ui.press("enter")?;
-    ui.press("cmd-k")?;
-    ui.type_text("deployments")?;
-    ui.press("enter")?;
-    assert_eq!(ui.state().page, Page::Deployments);
-    Ok(())
-}
-
 #[test]
 fn back_forward_and_control_tab_walk_the_visited_pages() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
@@ -508,22 +493,68 @@ fn command_1_focuses_the_sidebar_where_arrows_and_enter_pick_a_page() -> anyhow:
 }
 
 #[test]
-fn lists_start_in_the_default_namespace_and_remember_the_pick_per_cluster() -> anyhow::Result<()> {
-    const BEYOND_ONE_NAMESPACE: &str = "resources-Deployment-row-8";
-    let mut ui = Ui::open(Screen::Resources)?;
-    assert_eq!(picked(&ui, SAMPLE, "Deployment"), None);
-    assert!(ui.bounds(BEYOND_ONE_NAMESPACE).is_none());
-    ui.click("resource-namespace")?;
-    ui.click("resource-namespace-option-0")?;
+fn event_row_opens_inspector_enter_reopens_and_escape_closes() -> anyhow::Result<()> {
+    for appearance in [
+        fleet_ui::theme::Appearance::Dark,
+        fleet_ui::theme::Appearance::Light,
+    ] {
+        let mut ui = Ui::with(Screen::Events, fleet::Preset::default(), appearance)?;
+        assert!(ui.bounds("close-event").is_none());
+        ui.click("events-row-0")?;
+        assert!(ui.bounds("close-event").is_some());
+        assert!(ui.bounds("event-object").is_some());
+        ui.press("escape")?;
+        assert!(ui.bounds("close-event").is_none());
+        ui.press("down enter")?;
+        assert!(ui.bounds("close-event").is_some());
+        ui.click("event-object")?;
+        assert_eq!(ui.state().page, Page::Pods);
+    }
+    Ok(())
+}
+
+#[test]
+fn events_namespace_choice_is_kept_per_cluster_in_preferences() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Events)?;
+    let cluster = ui
+        .state()
+        .cluster
+        .ok_or_else(|| anyhow::anyhow!("cluster"))?;
+    ui.click("events-namespace")?;
+    ui.click("events-namespace-option-0")?;
+    let state = ui.state();
+    let preferences = &state
+        .snapshot
+        .catalog
+        .get(&cluster)
+        .ok_or_else(|| anyhow::anyhow!("settings"))?
+        .preferences;
     assert_eq!(
-        picked(&ui, SAMPLE, "Deployment"),
-        Some(fleet_ui::prefs::NamespacePick::All)
+        preferences.namespace_selection,
+        Some(fleet_core::settings::NamespaceSelection::All)
     );
-    assert!(ui.bounds(BEYOND_ONE_NAMESPACE).is_some());
-    open_deployments(&mut ui, "staging")?;
-    assert_eq!(picked(&ui, "staging", "Deployment"), None);
-    assert!(ui.bounds(BEYOND_ONE_NAMESPACE).is_none());
-    open_deployments(&mut ui, SAMPLE)?;
-    assert!(ui.bounds(BEYOND_ONE_NAMESPACE).is_some());
+    ui.press("cmd-shift-c")?;
+    ui.type_text("staging")?;
+    ui.press("enter")?;
+    let other = ui.state();
+    let other_preferences = &other
+        .snapshot
+        .catalog
+        .get(&ClusterId::new("staging"))
+        .ok_or_else(|| anyhow::anyhow!("other settings"))?
+        .preferences;
+    assert_eq!(other_preferences.namespace_selection, None);
+    ui.press("cmd-shift-c")?;
+    ui.type_text(cluster.as_str())?;
+    ui.press("enter")?;
+    let restored = ui.state();
+    assert_eq!(
+        restored
+            .snapshot
+            .catalog
+            .get(&cluster)
+            .map(|settings| &settings.preferences.namespace_selection),
+        Some(&Some(fleet_core::settings::NamespaceSelection::All))
+    );
     Ok(())
 }

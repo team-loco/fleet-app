@@ -107,15 +107,6 @@ impl ResourceKind {
     }
 }
 
-pub const POD_LIST: &str = "Pod";
-
-pub fn namespaced_list(page: Page) -> Option<&'static str> {
-    match page {
-        Page::Pods => Some(POD_LIST),
-        other => ResourceKind::for_page(other).map(ResourceKind::name),
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resource {
     pub namespace: String,
@@ -178,16 +169,6 @@ pub fn sentence(kind: ResourceKind, rows: &[Resource]) -> String {
     )
 }
 
-pub fn namespace_choices(
-    known: impl IntoIterator<Item = String>,
-    chosen: Option<&str>,
-) -> Vec<String> {
-    let mut names: Vec<String> = known.into_iter().chain(chosen.map(str::to_owned)).collect();
-    names.sort();
-    names.dedup();
-    names
-}
-
 pub fn namespaces_of(rows: &[Resource]) -> Vec<String> {
     let mut names: Vec<String> = rows.iter().map(|row| row.namespace.clone()).collect();
     names.sort();
@@ -218,10 +199,6 @@ pub(crate) mod tests {
             assert_ne!(kind.columns().len(), 0);
         }
         assert_eq!(ResourceKind::for_page(Page::Nodes), None);
-        assert_eq!(namespaced_list(Page::Pods), Some(POD_LIST));
-        assert_eq!(namespaced_list(Page::Secrets), Some("Secret"));
-        assert_eq!(namespaced_list(Page::Nodes), None);
-        assert_eq!(namespaced_list(Page::Namespaces), None);
     }
 
     #[test]
@@ -262,16 +239,6 @@ pub(crate) mod tests {
         );
         let counts: Vec<usize> = filter_counts(&rows).into_iter().map(|(_, n)| n).collect();
         assert_eq!(counts, [3, 1]);
-    }
-
-    #[test]
-    fn namespace_choices_include_the_pick_even_before_it_loads() {
-        let known = ["web".to_owned(), "payments".to_owned(), "web".to_owned()];
-        assert_eq!(
-            namespace_choices(known.clone(), Some("loco-system")),
-            ["loco-system", "payments", "web"]
-        );
-        assert_eq!(namespace_choices(known, None), ["payments", "web"]);
     }
 
     fn with_cells(mut row: Resource, cells: &[&str]) -> Resource {

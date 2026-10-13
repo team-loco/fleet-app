@@ -226,6 +226,7 @@ impl SettingsScreen {
         let labels = self.labels.read(cx).value();
         let metrics = MetricsSource::parse(&self.metrics.read(cx).value())?;
         let preferences = Preferences {
+            namespace_selection: settings.preferences.namespace_selection.clone(),
             default_namespace: parse_namespace(&namespace),
             metrics,
             confirm_destructive: settings.preferences.confirm_destructive,

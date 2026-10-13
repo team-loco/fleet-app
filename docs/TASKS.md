@@ -60,6 +60,7 @@ Spec column points at `design/`.
 
 | id | unit | owner | branch | status |
 |---|---|---|---|---|
+| CXD | Events namespace filter, full messages and inspector (#131) | claude | events-inspector | done |
 | C77 | Palette open in new window; split follow-up in #77 | codex | c77-windows-split | done |
 | SEC1 | redact Secret data in YAML views and Helm diffs; strip credentials from URLs, git errors, auth and kubeconfig errors | claude | secret-redaction | done |
 | SHELL2 | single sidebar, cluster switcher in the status bar, Loco nav only where installed, animated inspectors (#110, #111, #121) | claude | shell-single-sidebar | done |
@@ -68,4 +69,3 @@ Spec column points at `design/`.
 | TBL1 | resizable table columns remembered per cluster, one FilterBar on every list, popovers occlude hover (#115, #116, #118) | claude | tables-and-filters | done |
 | KEYS1 | VS Code-familiar bindings, one binding table, history, full keyboard navigation (#114) | claude | keyboard | done |
 | SAFE1 | confirmed mutations carry the UID of the object the user saw; drain evicts by UID (#103, #104) | claude | mutation-safety | done |
-| TBL2 | namespaced lists start in the default namespace, pick remembered per cluster, backend watches only that namespace (#117) | claude | tables-namespaces | done |

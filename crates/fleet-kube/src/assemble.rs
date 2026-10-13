@@ -195,7 +195,7 @@ fn cluster_detail(
             &extras.pod_usage,
             now,
         ),
-        events: detail::events(&handle.objects::<Event>(), selection.event_limit, now),
+        events: detail::events(&handle.event_objects(), selection.event_limit, now),
         resources,
     }
 }

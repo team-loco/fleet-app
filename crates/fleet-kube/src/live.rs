@@ -38,7 +38,7 @@ use crate::provider::AuthKind;
 use crate::resources::WatchKind;
 use crate::settings::KubeSettings;
 use crate::shell_env::{ShellEnv, capture, user_shell};
-use crate::snapshot::page_watches;
+use crate::snapshot::page_kinds;
 use crate::store::{ClusterStore, SavedCluster, SavedPreferences};
 use crate::task::TaskGuard;
 use crate::throttle::Throttle;
@@ -118,7 +118,6 @@ struct Inspecting {
 struct Navigation {
     selected: Option<ClusterId>,
     page: Page,
-    namespace: Option<String>,
     page_subscriptions: Vec<Subscription>,
     yaml: Option<(ResourceRef, String)>,
     inspecting: Option<Inspecting>,
@@ -142,7 +141,6 @@ impl Navigation {
         Self {
             selected: None,
             page: Page::Overview,
-            namespace: None,
             page_subscriptions: Vec::new(),
             yaml: None,
             inspecting: None,
@@ -277,12 +275,28 @@ impl Live {
     }
 
     fn resubscribe_page(&mut self) {
+        if let Some(handle) = self.selected_handle() {
+            let saved = self
+                .navigation
+                .selected
+                .as_ref()
+                .and_then(|id| self.store.get(id));
+            let mut preferences = saved
+                .map(|cluster| Preferences::from(&cluster.preferences))
+                .unwrap_or_default();
+            if preferences.default_namespace.is_none() {
+                preferences
+                    .default_namespace
+                    .clone_from(&handle.context().namespace);
+            }
+            handle.set_event_namespace(preferences.namespace_selection());
+        }
         let subscriptions = self
             .selected_handle()
             .map(|handle| {
-                page_watches(self.navigation.page, self.navigation.namespace.as_deref())
+                page_kinds(self.navigation.page)
                     .into_iter()
-                    .map(|(kind, namespace)| handle.subscribe_in(kind, namespace))
+                    .map(|kind| handle.subscribe(kind))
                     .collect()
             })
             .unwrap_or_default();
@@ -652,12 +666,6 @@ impl Live {
                 self.navigation.page = *page;
                 self.resubscribe_page();
             }
-            Command::SelectNamespace(namespace) => {
-                if &self.navigation.namespace != namespace {
-                    self.navigation.namespace.clone_from(namespace);
-                    self.resubscribe_page();
-                }
-            }
             Command::OpenCommit(_) => {
                 self.navigation.selected = None;
                 self.navigation.page = Page::Changes;
@@ -792,7 +800,12 @@ impl Live {
 
     fn set_preferences(&mut self, id: &ClusterId, preferences: &Preferences) -> bool {
         match self.store.set_preferences(id, preferences) {
-            Ok(changed) => changed,
+            Ok(changed) => {
+                if changed && let Some(handle) = self.handle(id) {
+                    handle.set_event_namespace(preferences.namespace_selection());
+                }
+                changed
+            }
             Err(error) => {
                 tracing::error!(%error, path = %self.store.path().display(), "saving preferences failed");
                 false

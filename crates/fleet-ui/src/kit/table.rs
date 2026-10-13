@@ -21,6 +21,7 @@ use super::list_keys::{Nav, TypeAhead, find, typed};
 use super::menu::{ActionMenu, MenuItem};
 use super::status::StatusGlyph;
 use super::text::Highlighted;
+use super::tooltip::Tooltip;
 use crate::actions::CloseInspector;
 use crate::prefs::{self, ColumnWidths, FLEET_SCOPE};
 use crate::theme::{
@@ -117,6 +118,7 @@ pub struct Column<R> {
     fit: Option<TextFn<R>>,
     fit_extra: Pixels,
     highlight: bool,
+    tooltip: Option<TextFn<R>>,
 }
 
 impl<R: 'static> Column<R> {
@@ -134,6 +136,7 @@ impl<R: 'static> Column<R> {
             fit: None,
             fit_extra: Pixels::ZERO,
             highlight: false,
+            tooltip: None,
         }
     }
 
@@ -201,11 +204,29 @@ impl<R: 'static> Column<R> {
         self
     }
 
+    pub fn tooltip(mut self, text: impl Fn(&R) -> SharedString + 'static) -> Self {
+        self.tooltip = Some(Rc::new(text));
+        self
+    }
+
     fn render_cell(&self, row: &R, palette: &Palette, words: &[String]) -> AnyElement {
-        match &self.cell {
+        let content = match &self.cell {
             Cell::Custom(cell) => cell(row, palette),
             Cell::Text(cell) if self.highlight => cell.render(row, palette, words),
             Cell::Text(cell) => cell.render(row, palette, &[]),
+        };
+        match &self.tooltip {
+            Some(text) => {
+                let tooltip = text(row);
+                div()
+                    .id(self.title.clone())
+                    .w_full()
+                    .min_w_0()
+                    .tooltip(Tooltip::text(tooltip))
+                    .child(content)
+                    .into_any_element()
+            }
+            None => content,
         }
     }
 

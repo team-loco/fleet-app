@@ -78,7 +78,6 @@ todo = "warn"
 
 [profile.dev]
 debug = "line-tables-only"
-incremental = false
 
 [profile.dev.package."*"]
 opt-level = 2

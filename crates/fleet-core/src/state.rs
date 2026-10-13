@@ -14,7 +14,6 @@ pub enum Command {
     WindowClosed(u64),
     SelectCluster(Option<ClusterId>),
     SelectPage(Page),
-    SelectNamespace(Option<String>),
     OpenCommit(String),
     ToggleSidebar,
     OpenResource(ResourceRef),
@@ -153,7 +152,6 @@ impl AppState {
                 self.flux_object = None;
             }
             Command::SelectPage(page) => self.select_page(*page),
-            Command::SelectNamespace(_) => {}
             Command::OpenCommit(_) => self.select_page(Page::Changes),
             Command::ToggleSidebar => self.sidebar_open = !self.sidebar_open,
             Command::OpenResource(resource) => self.open_resource(resource),

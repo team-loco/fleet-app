@@ -20,6 +20,7 @@ struct Seed {
 
 fn settings(seed: Seed) -> ClusterSettings {
     let preferences = Preferences {
+        namespace_selection: None,
         default_namespace: Some(DEFAULT_NAMESPACE.into()),
         metrics: MetricsSource::Auto,
         confirm_destructive: true,
