@@ -318,13 +318,7 @@ fn cluster_store(
         (None, Some(home)) => ClusterStore::default_dir(home),
         (None, None) => anyhow::bail!("no home directory; pass --data-dir"),
     };
-    match ClusterStore::open(&dir) {
-        Ok(store) => Ok(store),
-        Err(error) => {
-            tracing::error!(%error, dir = %dir.display(), "saved clusters unreadable; starting empty");
-            Ok(ClusterStore::empty(&dir))
-        }
-    }
+    ClusterStore::open(&dir).with_context(|| format!("reading saved clusters in {}", dir.display()))
 }
 
 fn launch(
