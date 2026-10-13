@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use fleet_core::home::ClusterMetrics;
 use fleet_core::{ClusterId, ClusterSummary, Counts, Page, Status};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
@@ -19,7 +20,7 @@ const POD_SUCCEEDED: &str = "Succeeded";
 const POD_PENDING: &str = "Pending";
 const READY_CONDITION: &str = "Ready";
 const CONDITION_TRUE: &str = "True";
-const FAILING_WAIT_REASONS: [&str; 7] = [
+pub const FAILING_WAIT_REASONS: [&str; 7] = [
     "CrashLoopBackOff",
     "ImagePullBackOff",
     "ErrImagePull",
@@ -104,6 +105,14 @@ pub fn node_ready(node: &Node) -> bool {
         .any(|condition| condition.type_ == READY_CONDITION && condition.status == CONDITION_TRUE)
 }
 
+pub fn schedulable(node: &Node) -> bool {
+    !node
+        .spec
+        .as_ref()
+        .and_then(|spec| spec.unschedulable)
+        .unwrap_or_default()
+}
+
 pub fn node_counts(nodes: &[Arc<Node>]) -> Counts {
     let not_ready = nodes.iter().filter(|node| !node_ready(node)).count();
     Counts::total(count(nodes.len())).with_warn(count(not_ready))
@@ -143,6 +152,24 @@ pub fn page_kind(page: Page) -> Option<WatchKind> {
     }
 }
 
+pub const OVERVIEW_KINDS: [WatchKind; 7] = [
+    WatchKind::Namespaces,
+    WatchKind::Events,
+    WatchKind::Deployments,
+    WatchKind::StatefulSets,
+    WatchKind::DaemonSets,
+    WatchKind::Jobs,
+    WatchKind::CronJobs,
+];
+
+pub fn page_kinds(page: Page) -> Vec<WatchKind> {
+    match page {
+        Page::ClusterOverview => OVERVIEW_KINDS.to_vec(),
+        Page::Pods => vec![WatchKind::Pods, WatchKind::Events],
+        other => page_kind(other).into_iter().collect(),
+    }
+}
+
 fn kind_total(handle: &ClusterHandle, kind: &WatchKind) -> Option<u32> {
     let len = match kind {
         WatchKind::Namespaces => handle.objects::<Namespace>().len(),
@@ -165,20 +192,23 @@ fn kind_total(handle: &ClusterHandle, kind: &WatchKind) -> Option<u32> {
     Some(count(len))
 }
 
-pub fn summarize(id: ClusterId, name: String, handle: &ClusterHandle) -> ClusterSummary {
+pub fn summarize(
+    id: ClusterId,
+    name: String,
+    handle: &ClusterHandle,
+    problems: Counts,
+    metrics: Option<ClusterMetrics>,
+) -> ClusterSummary {
     let context = handle.context();
     let info = handle.info();
     let connection = handle.status();
     let pods = handle.objects::<Pod>();
     let nodes = handle.objects::<Node>();
-    let pods_counts = pod_counts(&pods);
-    let nodes_counts = node_counts(&nodes);
-    let problems = Counts {
-        total: None,
-        ..pods_counts + nodes_counts
-    };
     let (status, state) = cluster_state(&connection, problems);
-    let mut nav = BTreeMap::from([(Page::Pods, pods_counts), (Page::Nodes, nodes_counts)]);
+    let mut nav = BTreeMap::from([
+        (Page::Pods, pod_counts(&pods)),
+        (Page::Nodes, node_counts(&nodes)),
+    ]);
     for kind in handle.watched_kinds() {
         let page = kind_page(&kind);
         let total = kind_total(handle, &kind);
@@ -202,7 +232,7 @@ pub fn summarize(id: ClusterId, name: String, handle: &ClusterHandle) -> Cluster
         nodes: synced_nodes.then(|| count(nodes.len())),
         problems,
         nav,
-        metrics: None,
+        metrics,
     }
 }
 
@@ -312,5 +342,11 @@ mod tests {
         assert_eq!(kind_page(&WatchKind::Deployments), Some(Page::Deployments));
         assert_eq!(page_kind(Page::GitOps), None);
         assert_eq!(kind_page(&WatchKind::ReplicaSets), None);
+        assert_eq!(
+            page_kinds(Page::ClusterOverview).len(),
+            OVERVIEW_KINDS.len()
+        );
+        assert_eq!(page_kinds(Page::Secrets), [WatchKind::Secrets]);
+        assert_eq!(page_kinds(Page::Changes), []);
     }
 }

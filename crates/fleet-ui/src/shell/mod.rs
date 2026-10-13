@@ -190,6 +190,8 @@ impl Shell {
             self.state.apply(&command);
             if let Command::OpenAddCluster(step) = command {
                 self.open_add_cluster(step, window, cx);
+            } else {
+                self.send(command);
             }
         }
         let snapshot = &self.state.snapshot;

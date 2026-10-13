@@ -268,7 +268,11 @@ impl ResourcesScreen {
 
     fn select(&mut self, key: Option<(String, String)>, cx: &mut Context<Self>) {
         self.selected = key;
+        let target = self.selected_row().and_then(|row| self.target(row));
         self.refresh_menu(cx);
+        if let Some(target) = target {
+            cx.emit(ScreenEvent::Command(Command::OpenResource(target)));
+        }
         cx.notify();
     }
 

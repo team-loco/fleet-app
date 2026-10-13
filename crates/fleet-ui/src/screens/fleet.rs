@@ -394,12 +394,12 @@ fn cluster_columns() -> Vec<Column<ClusterSummary>> {
         .fixed(CLUSTER_NODES),
         Column::new("Pods", pods_cell).mono().fixed(CLUSTER_PODS),
         Column::new("CPU", |c: &ClusterSummary, palette| {
-            mini_meter(c.metrics.as_ref().map(|m| m.cpu_percent), palette)
+            mini_meter(c.metrics.as_ref().and_then(|m| m.cpu_percent), palette)
         })
         .mono()
         .fixed(CLUSTER_USAGE),
         Column::new("Memory", |c: &ClusterSummary, palette| {
-            mini_meter(c.metrics.as_ref().map(|m| m.memory_percent), palette)
+            mini_meter(c.metrics.as_ref().and_then(|m| m.memory_percent), palette)
         })
         .mono()
         .fixed(CLUSTER_USAGE),

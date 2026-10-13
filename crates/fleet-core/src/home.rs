@@ -6,8 +6,8 @@ use crate::{ClusterId, Counts, ResourceRef, Status};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClusterMetrics {
     pub pods: Counts,
-    pub cpu_percent: u8,
-    pub memory_percent: u8,
+    pub cpu_percent: Option<u8>,
+    pub memory_percent: Option<u8>,
     pub flux: Counts,
     pub revision: Revision,
 }
@@ -247,8 +247,8 @@ mod tests {
     fn flux_ready_subtracts_flagged_objects() {
         let metrics = ClusterMetrics {
             pods: Counts::total(1),
-            cpu_percent: 0,
-            memory_percent: 0,
+            cpu_percent: None,
+            memory_percent: None,
             flux: Counts::total(21).with_err(1),
             revision: Revision {
                 sha: "a41e07c".into(),
