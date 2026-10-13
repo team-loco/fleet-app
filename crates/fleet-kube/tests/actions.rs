@@ -1,11 +1,10 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use fleet_core::compare::{Field, SpecDiff};
 use fleet_core::flux::{FluxAction, FluxKey, FluxKind};
 use fleet_core::{
-    Backend, ClusterId, Command, ContextRef, ExecEvent, ExecRequest, ExecTarget, LogLine,
-    LogRequest, NewCluster, Notice, Receiver, ResourceRef, Seen, Sender, Sink, Snapshot, Source,
-    TermSize, Uid, Update,
+    Backend, ClusterId, Command, ContextRef, ExecEvent, ExecRequest, ExecTarget, NewCluster,
+    Notice, Receiver, ResourceRef, Seen, Sender, Sink, Snapshot, Source, TermSize, Uid, Update,
 };
 use fleet_kube::LiveBackend;
 use fleet_kube::discovery::{DiscoverySources, KubeContext, discover};
@@ -27,9 +26,6 @@ use common::{WAIT, eventually};
 const E2E_VAR: &str = "FLEET_E2E";
 const SUPPORT_DIR: &str = "support";
 const CONTEXT: &str = "kind-fleet-a";
-const CRASHING_NAMESPACE: &str = "payments";
-const CRASHING_SELECTOR: &str = "app.kubernetes.io/name=checkout-api";
-const CRASHING_CONTAINER: &str = "podinfo";
 const PODINFO_NAMESPACE: &str = "apps";
 const PODINFO: &str = "podinfo";
 const PODINFO_SELECTOR: &str = "app.kubernetes.io/name=podinfo";
@@ -43,6 +39,9 @@ const OTHER_CONTEXT: &str = "kind-fleet-b";
 const SCRATCH_DEPLOYMENT: &str = "fleet-compare-e2e";
 const SCRATCH_STATEFUL_SET: &str = "fleet-rollback-e2e";
 const NEWER_IMAGE: &str = "busybox:1.36";
+const CTRL_C: u8 = 0x03;
+const FOREGROUND_SETTLE: Duration = Duration::from_secs(1);
+const SHELL_OUTPUT_TIMEOUT: Duration = Duration::from_secs(20);
 const SHELL_SIZE: TermSize = TermSize { cols: 97, rows: 23 };
 
 fn enabled() -> bool {
@@ -197,44 +196,6 @@ impl Harness {
     }
 }
 
-async fn collect_logs(lines: &Receiver<LogLine>) -> Vec<LogLine> {
-    let mut collected = Vec::new();
-    while let Ok(Ok(line)) = tokio::time::timeout(WAIT, lines.recv()).await {
-        collected.push(line);
-    }
-    collected
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn previous_logs_of_a_crashing_pod_end_with_its_exit() {
-    let Some(harness) = Harness::start().await else {
-        return;
-    };
-    let pod = harness
-        .first_pod(CRASHING_NAMESPACE, CRASHING_SELECTOR)
-        .await;
-    let (sink, lines) = Sink::channel();
-    harness.send(Command::StreamLogs(LogRequest {
-        pod: resource("Pod", Some(CRASHING_NAMESPACE), &pod),
-        container: CRASHING_CONTAINER.into(),
-        previous: true,
-        sink,
-    }));
-    let collected = collect_logs(&lines).await;
-    let Some(last) = collected.last() else {
-        panic!("no previous logs");
-    };
-    assert!(last.time.is_none(), "{collected:#?}");
-    assert!(
-        last.message.starts_with("── container exited"),
-        "{collected:#?}"
-    );
-    assert!(
-        collected.iter().any(|line| line.time.is_some()),
-        "{collected:#?}"
-    );
-}
-
 async fn exec_events(events: &Receiver<ExecEvent>) -> (Vec<ExecEvent>, String) {
     let mut seen = Vec::new();
     let mut output = String::new();
@@ -272,6 +233,82 @@ fn run_shell(harness: &Harness, target: ExecTarget) -> Shell {
         resize,
         events,
     }
+}
+
+async fn shell_output_until(events: &Receiver<ExecEvent>, marker: &str) -> String {
+    let deadline = Instant::now() + SHELL_OUTPUT_TIMEOUT;
+    let mut output = String::new();
+    while !output.contains(marker) {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let event = tokio::time::timeout(left, events.recv()).await;
+        match event {
+            Ok(Ok(ExecEvent::Output(bytes))) => output.push_str(&String::from_utf8_lossy(&bytes)),
+            Ok(Ok(ExecEvent::Started { .. })) => {}
+            other => panic!("shell did not print {marker:?}: {output:?}; {other:?}"),
+        }
+    }
+    output
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn terminal_resizes_colours_edits_completes_and_cancels() {
+    let Some(harness) = Harness::start().await else {
+        return;
+    };
+    let pod = harness.first_pod(PODINFO_NAMESPACE, PODINFO_SELECTOR).await;
+    let target = ExecTarget {
+        pod: resource("Pod", Some(PODINFO_NAMESPACE), &pod),
+        container: PODINFO_CONTAINER.into(),
+        debug_image: None,
+    };
+    let shell = run_shell(&harness, target);
+    shell_output_until(&shell.events, "$ ").await;
+    assert!(shell.resize.send(SHELL_SIZE).await.is_ok());
+    assert!(shell.input.send(b"stty size\r".to_vec()).await.is_ok());
+    let size = format!("{} {}", SHELL_SIZE.rows, SHELL_SIZE.cols);
+    shell_output_until(&shell.events, &size).await;
+    assert!(
+        shell
+            .input
+            .send(b"printf '\\033[31mFLEET-%s\\033[0m\\n' oops\x7f\x7f\x7f\x7fOK\r".to_vec())
+            .await
+            .is_ok()
+    );
+    let colored = shell_output_until(&shell.events, "FLEET-OK").await;
+    assert!(colored.contains("\x1b[31mFLEET-OK\x1b[0m"), "{colored:?}");
+    assert!(
+        shell
+            .input
+            .send(b"printf '%s\\n' ac\x1b[Db\x1b[C\r".to_vec())
+            .await
+            .is_ok()
+    );
+    shell_output_until(&shell.events, "abc\r\n").await;
+    assert!(shell.input.send(b"ech\t".to_vec()).await.is_ok());
+    shell_output_until(&shell.events, "echo ").await;
+    assert!(shell.input.send(b"TAB-OK\r".to_vec()).await.is_ok());
+    shell_output_until(&shell.events, "\nTAB-OK\r\n").await;
+    assert!(shell.input.send(b"sleep 30\r".to_vec()).await.is_ok());
+    shell_output_until(&shell.events, "sleep 30\r\n").await;
+    tokio::time::sleep(FOREGROUND_SETTLE).await;
+    assert!(shell.input.send(vec![CTRL_C]).await.is_ok());
+    shell_output_until(&shell.events, "$ ").await;
+    assert!(
+        shell
+            .input
+            .send(b"echo CTRL-$((20 + 2))\r".to_vec())
+            .await
+            .is_ok()
+    );
+    shell_output_until(&shell.events, "CTRL-22\r\n").await;
+    drop(shell.events);
+    eventually(
+        "exec input closed after receiver dropped",
+        || async { shell.input.is_closed() },
+        |closed| *closed,
+    )
+    .await;
+    assert!(shell.resize.is_closed());
 }
 
 #[tokio::test(flavor = "multi_thread")]

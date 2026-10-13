@@ -1,15 +1,14 @@
-use fleet_core::pods::{Container, ContainerState, Pod};
+use fleet_core::pods::{ContainerState, Pod};
 use fleet_core::{
     Command, ExecEvent, ExecRequest, ExecTarget, LogRequest, ResourceRef, Sender, Sink, Source,
     Status, TermSize,
 };
 use gpui::{
-    AppContext as _, Context, Focusable, IntoElement, ParentElement, Styled, Subscription, Task,
-    Window, div,
+    Context, Focusable, IntoElement, ParentElement, Styled, Subscription, Task, Window, div,
 };
 
 use super::PodsScreen;
-use crate::assets::{DOWNLOAD, PLUS};
+use crate::assets::DOWNLOAD;
 use crate::kit::{
     Button, Dock, DockTab, IconButton, LogView, Terminal, TerminalEvent, TextField, Toast, toast,
 };
@@ -22,25 +21,20 @@ const LOGS_TAB: usize = 0;
 const TERMINAL_TAB: usize = 1;
 const LOGS_LABEL: &str = "Logs";
 const TERMINAL_LABEL: &str = "Terminal";
-const PREVIOUS: &str = "previous";
 const FOLLOW: &str = "follow";
 const WRAP: &str = "wrap";
 const TIMESTAMPS: &str = "timestamps";
 const DEBUG: &str = "debug";
 const DOWNLOAD_TOOLTIP: &str = "Download logs";
-const NEW_TERMINAL_TOOLTIP: &str = "New terminal";
 const DOWNLOADS: &str = "Downloads";
 const SAVE_FAILED: &str = "Could not save the logs";
 const SAVED: &str = "Saved logs";
-const PREVIOUS_TOOLTIP: &str = "Logs of the container instance before the last restart";
-const NO_PREVIOUS_TOOLTIP: &str = "This container has not restarted";
 const DEBUG_IMAGE: &str = "busybox:1.36";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogKey {
     pod: ResourceRef,
     container: String,
-    previous: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -71,17 +65,6 @@ pub fn needs_debug(pod: &Pod, container: &str) -> bool {
         .is_some_and(|c| c.status == Status::Err)
 }
 
-pub fn has_previous(pod: &Pod, container: &str) -> bool {
-    pod.containers
-        .iter()
-        .find(|c| c.name == container)
-        .is_some_and(|c| c.restarts > 0)
-}
-
-pub fn crash_looping(container: &Container) -> bool {
-    container.restarts > 0 && container.state != ContainerState::Running
-}
-
 pub fn debug_reason(container: &str, other: Option<&str>) -> String {
     let debug = format!("start a debug container that shares {container}’s process namespace");
     match other {
@@ -110,11 +93,9 @@ impl PodsScreen {
         let pod = self.selected_pod().map(Pod::resource);
         let container = self.container_name();
         let target = pod.zip(container);
-        let log_key = target.clone().map(|(pod, container)| LogKey {
-            pod,
-            container,
-            previous: self.previous,
-        });
+        let log_key = target
+            .clone()
+            .map(|(pod, container)| LogKey { pod, container });
         if self.log.as_ref().map(|s| &s.key) != log_key.as_ref() {
             self.log = None;
             self.logs.update(cx, LogView::clear);
@@ -123,31 +104,25 @@ impl PodsScreen {
             }
         }
         let shell_key = target.map(|(pod, container)| ShellKey { pod, container });
-        if self.shell.as_ref().map(|s| &s.key) != shell_key.as_ref() && self.shell.take().is_some()
-        {
-            self.terminal = cx.new(|cx| Terminal::new(TERMINAL_ID, cx));
+        let moved = self
+            .shell
+            .as_ref()
+            .is_some_and(|s| Some(&s.key) != shell_key.as_ref());
+        if moved {
+            self.terminal.update(cx, Terminal::clear);
         }
-        let (active, open) = {
-            let dock = self.dock.read(cx);
-            (dock.active(), dock.is_open())
-        };
-        if active == TERMINAL_TAB
-            && open
-            && self.shell.is_none()
-            && let Some(key) = shell_key
-        {
-            self.open_shell(key, cx);
+        if moved || !self.dock.read(cx).is_open() {
+            self.close_shell(cx);
         }
     }
 
     fn open_log(&mut self, key: LogKey, cx: &mut Context<Self>) {
         let (sink, lines) = Sink::channel();
-        let follow = !key.previous;
+        let follow = true;
         self.logs.update(cx, |logs, cx| logs.set_follow(follow, cx));
         cx.emit(Command::StreamLogs(LogRequest {
             pod: key.pod.clone(),
             container: key.container.clone(),
-            previous: key.previous,
             sink,
         }));
         let task = cx.spawn(async move |this, cx| {
@@ -173,7 +148,7 @@ impl PodsScreen {
             container: key.container.clone(),
             debug_image: debug.then(|| DEBUG_IMAGE.to_owned()),
         };
-        let terminal = cx.new(|cx| Terminal::new(TERMINAL_ID, cx));
+        let terminal = self.terminal.clone();
         let command_line = target.command_line();
         let other = self.selected_pod().and_then(|pod| {
             pod.containers
@@ -183,6 +158,7 @@ impl PodsScreen {
         });
         let reason = debug.then(|| debug_reason(&key.container, other.as_deref()));
         terminal.update(cx, |terminal, cx| {
+            terminal.clear(cx);
             if let Some(reason) = reason {
                 terminal.note(reason, cx);
                 terminal.note(String::new(), cx);
@@ -208,7 +184,6 @@ impl PodsScreen {
         if let Some(size) = terminal.read(cx).size() {
             resize.try_send(size).ok();
         }
-        self.terminal = terminal;
         let (output, events) = Sink::channel();
         cx.emit(Command::Exec(ExecRequest {
             target,
@@ -256,9 +231,24 @@ impl PodsScreen {
         }
     }
 
-    fn new_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn close_shell(&mut self, cx: &mut Context<Self>) {
         self.shell = None;
-        self.show_terminal(window, cx);
+        self.terminal
+            .update(cx, |terminal, cx| terminal.set_open(false, cx));
+        cx.notify();
+    }
+
+    fn start_shell(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let target = self
+            .selected_pod()
+            .map(Pod::resource)
+            .zip(self.container_name());
+        if let Some((pod, container)) = target {
+            self.open_shell(ShellKey { pod, container }, cx);
+            let focus = self.terminal.read(cx).focus_handle(cx);
+            window.focus(&focus, cx);
+            cx.notify();
+        }
     }
 
     fn download_logs(&self, cx: &mut Context<Self>) {
@@ -288,19 +278,14 @@ impl PodsScreen {
     }
 
     pub fn show_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.shell.as_ref().is_some_and(|s| !s.open) {
-            self.shell = None;
-        }
         self.dock
             .update(cx, |dock, cx| dock.select(TERMINAL_TAB, cx));
-        self.sync_streams(cx);
         let focus = self.terminal.read(cx).focus_handle(cx);
         window.focus(&focus, cx);
     }
 
-    pub(super) fn show_logs(&mut self, previous: bool, cx: &mut Context<Self>) {
+    pub(super) fn show_logs(&mut self, cx: &mut Context<Self>) {
         self.dock.update(cx, |dock, cx| dock.select(LOGS_TAB, cx));
-        self.previous = previous;
         self.sync_streams(cx);
         cx.notify();
     }
@@ -309,32 +294,12 @@ impl PodsScreen {
         let follow = self.logs.read(cx).follow();
         let wrap = self.logs.read(cx).wrap();
         let timestamps = self.logs.read(cx).timestamps();
-        let container = self.container_name().unwrap_or_default();
-        let can_previous = self
-            .selected_pod()
-            .is_some_and(|pod| has_previous(pod, &container));
-        let previous_tip = if can_previous {
-            PREVIOUS_TOOLTIP
-        } else {
-            NO_PREVIOUS_TOOLTIP
-        };
         div()
             .flex()
             .items_center()
             .gap(SPACE_3)
             .child(self.containers.clone())
             .child(TextField::search(&self.search))
-            .child(
-                Button::new("pod-logs-previous", PREVIOUS)
-                    .small()
-                    .selected(self.previous)
-                    .disabled(!can_previous && !self.previous)
-                    .tooltip(previous_tip)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        let previous = !this.previous;
-                        this.show_logs(previous, cx);
-                    })),
-            )
             .child(
                 Button::new("pod-logs-follow", FOLLOW)
                     .small()
@@ -370,12 +335,29 @@ impl PodsScreen {
             )
     }
 
-    fn terminal_tools(&self) -> impl IntoElement + use<> {
+    fn terminal_tools(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let open = self.shell.as_ref().is_some_and(|session| session.open);
+        let button = if open {
+            Button::new("pod-close-shell", "Close shell")
+                .small()
+                .on_click(cx.listener(|this, _, _, cx| this.close_shell(cx)))
+        } else {
+            Button::new("pod-open-shell", "Open shell")
+                .small()
+                .disabled(self.selected_container().is_none())
+                .on_click(cx.listener(|this, _, window, cx| this.start_shell(window, cx)))
+        };
         div()
             .flex()
             .items_center()
             .gap(SPACE_3)
             .child(self.containers.clone())
+            .child(button)
+            .child(
+                Button::new("pod-copy-terminal", "Copy").small().on_click(
+                    cx.listener(|this, _, _, cx| this.terminal.update(cx, Terminal::copy)),
+                ),
+            )
     }
 
     pub(super) fn dock_view(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -389,10 +371,7 @@ impl PodsScreen {
         } else {
             detail.clone()
         };
-        let new_terminal = IconButton::svg("pod-new-terminal", PLUS, NEW_TERMINAL_TOOLTIP)
-            .on_click(cx.listener(|this, _, window, cx| this.new_terminal(window, cx)));
         Dock::new(&self.dock)
-            .after_tabs(new_terminal)
             .tab(
                 DockTab::new(LOGS_LABEL)
                     .detail(detail.clone())
@@ -402,7 +381,7 @@ impl PodsScreen {
             .tab(
                 DockTab::new(TERMINAL_LABEL)
                     .detail(terminal_detail)
-                    .tools(self.terminal_tools())
+                    .tools(self.terminal_tools(cx))
                     .content(self.terminal.clone()),
             )
     }
@@ -410,6 +389,8 @@ impl PodsScreen {
 
 #[cfg(test)]
 mod tests {
+    use fleet_core::pods::Container;
+
     use super::*;
 
     fn pod(status: Status, restarts: u32) -> Pod {
@@ -431,22 +412,6 @@ mod tests {
         assert!(needs_debug(&pod(Status::Err, 14), "api"));
         assert!(!needs_debug(&pod(Status::Warn, 0), "api"));
         assert!(!needs_debug(&pod(Status::Err, 14), "envoy"));
-    }
-
-    #[test]
-    fn previous_logs_need_a_restart() {
-        assert!(has_previous(&pod(Status::Err, 14), "api"));
-        assert!(!has_previous(&pod(Status::Ok, 0), "api"));
-    }
-
-    #[test]
-    fn crash_looping_containers_open_on_previous_logs() {
-        let crashing = pod(Status::Err, 14);
-        assert!(crash_looping(&crashing.containers[0]));
-        let mut restarted = pod(Status::Ok, 1);
-        restarted.containers[0].state = ContainerState::Running;
-        assert!(!crash_looping(&restarted.containers[0]));
-        assert!(!crash_looping(&pod(Status::Warn, 0).containers[0]));
     }
 
     #[test]

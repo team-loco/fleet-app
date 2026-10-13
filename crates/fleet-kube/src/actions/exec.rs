@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use fleet_core::{ExecEvent, ExecRequest, Sink, TermSize};
+use fleet_core::{ExecEvent, ExecRequest, Sink};
 use k8s_openapi::api::core::v1::Pod;
 use kube::Api;
 use kube::api::{Patch, PatchParams};
@@ -11,10 +11,10 @@ use crate::error::{Error, Result};
 use crate::manager::ClusterHandle;
 use crate::ops::{self, ExecExit, ExecSession, FIELD_MANAGER};
 
-pub const SHELL_FALLBACK: &str = "[ -x /bin/bash ] && exec /bin/bash || exec /bin/sh";
+pub const SHELL_FALLBACK: &str =
+    "export TERM=xterm-256color; [ -x /bin/bash ] && exec /bin/bash -i || exec /bin/sh -i";
 const SHELL: &str = "/bin/sh";
 const SHELL_FLAG: &str = "-c";
-const CLOSE_POLL: Duration = Duration::from_millis(500);
 const DEBUG_POLL: Duration = Duration::from_millis(500);
 const DEBUG_START_TIMEOUT: Duration = Duration::from_secs(90);
 const DEBUG_PREFIX: &str = "debugger-";
@@ -166,46 +166,36 @@ async fn start(handle: &ClusterHandle, request: &ExecRequest) -> Result<(ExecSes
     Ok((session, note))
 }
 
-fn forward_input(request: &ExecRequest, stdin: async_channel::Sender<Vec<u8>>) {
-    let input = request.input.clone();
-    tokio::task::spawn_blocking(move || {
-        while let Some(bytes) = input.recv_blocking() {
-            if stdin.send_blocking(bytes).is_err() {
-                return;
-            }
-        }
-    });
-}
-
-fn forward_resize(request: &ExecRequest, resize: async_channel::Sender<TermSize>) {
-    let sizes = request.resize.clone();
-    tokio::task::spawn_blocking(move || {
-        while let Some(size) = sizes.recv_blocking() {
-            if resize.send_blocking(size).is_err() {
-                return;
-            }
-        }
-    });
-}
-
-async fn pump(session: &ExecSession, output: &Sink<ExecEvent>) -> Option<ExecExit> {
-    let mut poll = tokio::time::interval(CLOSE_POLL);
+async fn pump(session: &ExecSession, request: &ExecRequest) -> Option<ExecExit> {
+    let mut resizing = true;
     loop {
         tokio::select! {
             chunk = session.output.recv() => {
                 let Ok(chunk) = chunk else { break };
-                if !output.send_blocking(ExecEvent::Output(chunk)) {
+                if !request.output.send_blocking(ExecEvent::Output(chunk)) {
                     return None;
                 }
             }
-            _ = poll.tick() => {
-                if output.is_closed() {
+            bytes = request.input.recv() => {
+                let bytes = bytes?;
+                if session.stdin.send(bytes).await.is_err() {
                     return None;
                 }
             }
+            size = request.resize.recv(), if resizing => {
+                let sent = match size {
+                    Some(size) => session.resize.send(size).await.is_ok(),
+                    None => false,
+                };
+                resizing = sent;
+            }
+            () = request.output.closed() => return None,
         }
     }
-    session.exit.recv().await.ok()
+    tokio::select! {
+        exit = session.exit.recv() => exit.ok(),
+        () = request.output.closed() => None,
+    }
 }
 
 pub fn fail(output: &Sink<ExecEvent>, reason: &str) {
@@ -226,7 +216,11 @@ pub async fn run(handle: ClusterHandle, request: ExecRequest) {
 
 async fn session(handle: &ClusterHandle, request: &ExecRequest) {
     let output = request.output.clone();
-    let (session, note) = match start(handle, request).await {
+    let started = tokio::select! {
+        result = start(handle, request) => result,
+        () = output.closed() => return,
+    };
+    let (session, note) = match started {
         Ok(started) => started,
         Err(error) => {
             fail(&output, &action_failure(&error).line());
@@ -236,9 +230,7 @@ async fn session(handle: &ClusterHandle, request: &ExecRequest) {
     if !output.send_blocking(ExecEvent::Started { note }) {
         return;
     }
-    forward_input(request, session.stdin.clone());
-    forward_resize(request, session.resize.clone());
-    let Some(exit) = pump(&session, &output).await else {
+    let Some(exit) = pump(&session, request).await else {
         return;
     };
     if let ExecExit::Failed(message) = &exit {
@@ -280,7 +272,7 @@ mod tests {
             [
                 "/bin/sh",
                 "-c",
-                "[ -x /bin/bash ] && exec /bin/bash || exec /bin/sh"
+                "export TERM=xterm-256color; [ -x /bin/bash ] && exec /bin/bash -i || exec /bin/sh -i"
             ]
         );
     }

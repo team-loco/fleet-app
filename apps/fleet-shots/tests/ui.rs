@@ -694,3 +694,71 @@ fn node_inspector_shows_cpu_and_memory_commitments() -> anyhow::Result<()> {
     assert!(ui.bounds("node-capacity-Memory").is_some());
     Ok(())
 }
+
+#[test]
+fn the_terminal_tab_waits_for_an_open_shell_click() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Workload)?;
+    ui.click("dock-tab-2")?;
+    assert!(ui.bounds("workload-open-shell").is_some());
+    assert!(ui.bounds("workload-close-shell").is_none());
+    let mut pods = Ui::open(Screen::PodsShell)?;
+    assert!(pods.bounds("pod-open-shell").is_some());
+    assert!(pods.bounds("pod-close-shell").is_none());
+    Ok(())
+}
+
+#[test]
+fn keys_typed_in_an_open_shell_reach_it_including_tab_arrows_and_control_c() -> anyhow::Result<()> {
+    for (screen, open, close) in [
+        (
+            Screen::Workload,
+            "workload-open-shell",
+            "workload-close-shell",
+        ),
+        (Screen::PodsShell, "pod-open-shell", "pod-close-shell"),
+    ] {
+        let mut ui = Ui::open(screen)?;
+        if let Screen::Workload = screen {
+            ui.click("dock-tab-2")?;
+        }
+        ui.click(open)?;
+        assert!(ui.bounds(close).is_some());
+        ui.type_text("whoami")?;
+        ui.press("tab left up ctrl-c")?;
+        ui.type_text("exit")?;
+        ui.press("enter")?;
+        assert!(ui.bounds(open).is_some(), "{open}: the shell did not exit");
+        assert!(ui.bounds(close).is_none());
+    }
+    Ok(())
+}
+
+#[test]
+fn close_shell_and_collapsing_the_dock_end_the_session_but_switching_tabs_keeps_it()
+-> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Workload)?;
+    ui.click("dock-tab-2")?;
+    ui.click("workload-open-shell")?;
+    ui.click("workload-close-shell")?;
+    assert!(ui.bounds("workload-open-shell").is_some());
+    ui.click("workload-open-shell")?;
+    ui.click("dock-tab-0")?;
+    ui.click("dock-tab-2")?;
+    assert!(ui.bounds("workload-close-shell").is_some());
+    ui.click("dock-toggle")?;
+    ui.click("dock-toggle")?;
+    assert!(ui.bounds("workload-open-shell").is_some());
+    ui.click("workload-open-shell")?;
+    ui.click("terminal-containers-1")?;
+    assert!(ui.bounds("workload-open-shell").is_some());
+    Ok(())
+}
+
+#[test]
+fn pod_logs_have_no_previous_container_toggle() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::PodsShell)?;
+    ui.click("dock-tab-0")?;
+    assert!(ui.bounds("pod-logs-follow").is_some());
+    assert!(ui.bounds("pod-logs-previous").is_none());
+    Ok(())
+}

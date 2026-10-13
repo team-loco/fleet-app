@@ -128,12 +128,6 @@ pub fn initial_logs(pod: &Pod, request: &LogRequest) -> Vec<LogLine> {
             request.container, pod.name
         ))];
     };
-    if request.previous {
-        return vec![LogLine::marker(format!(
-            "── previous instance of {} exited · {} restarts ──",
-            container.name, container.restarts
-        ))];
-    }
     if container.state == ContainerState::Waiting {
         let waiting = format!(
             "container {} is waiting to start: {}",
@@ -152,9 +146,8 @@ pub fn initial_logs(pod: &Pod, request: &LogRequest) -> Vec<LogLine> {
 }
 
 pub fn tails(pod: &Pod, request: &LogRequest) -> bool {
-    !request.previous
-        && container(pod, &request.container)
-            .is_some_and(|c| c.state == ContainerState::Running && c.status == Status::Ok)
+    container(pod, &request.container)
+        .is_some_and(|c| c.state == ContainerState::Running && c.status == Status::Ok)
 }
 
 pub fn tail_line(n: u64) -> LogLine {
@@ -349,12 +342,11 @@ mod tests {
             .unwrap_or_default()
     }
 
-    fn logs(pod: &Pod, container: &str, previous: bool) -> LogRequest {
+    fn logs(pod: &Pod, container: &str) -> LogRequest {
         let (sink, _rx) = Sink::channel();
         LogRequest {
             pod: pod.resource(),
             container: container.into(),
-            previous,
             sink,
         }
     }
@@ -362,7 +354,7 @@ mod tests {
     #[test]
     fn running_containers_show_the_design_lines_and_tail() {
         let pod = sample("payments-db-0");
-        let request = logs(&pod, "postgres", false);
+        let request = logs(&pod, "postgres");
         let lines = initial_logs(&pod, &request);
         assert_eq!(lines.len(), HEALTHY_LOGS.len());
         assert_eq!(
@@ -381,14 +373,13 @@ mod tests {
     #[test]
     fn waiting_containers_explain_why_there_are_no_logs() {
         let pod = sample("ml-batch-5c7f-9kq2d");
-        let request = logs(&pod, "trainer", false);
+        let request = logs(&pod, "trainer");
         let lines = initial_logs(&pod, &request);
         assert_eq!(
             lines.first().map(|l| l.message.as_str()),
             Some("container trainer is waiting to start: unschedulable · nvidia.com/gpu: 1")
         );
         assert!(!tails(&pod, &request));
-        assert!(!tails(&pod, &logs(&pod, "trainer", true)));
     }
 
     #[test]

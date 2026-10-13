@@ -110,7 +110,6 @@ pub struct LogRequest {
     pub container: Option<String>,
     pub follow: bool,
     pub tail_lines: Option<i64>,
-    pub previous: bool,
     pub timestamps: bool,
     pub since_seconds: Option<i64>,
 }
@@ -342,7 +341,6 @@ impl ClusterHandle {
         let params = LogParams {
             container: request.container.clone(),
             follow: request.follow,
-            previous: request.previous,
             tail_lines: request.tail_lines,
             timestamps: request.timestamps,
             since_seconds: request.since_seconds,
@@ -404,7 +402,7 @@ impl ClusterHandle {
         let task = TaskGuard::spawn(async move {
             let input = async {
                 while let Ok(bytes) = stdin_rx.recv().await {
-                    if writer.write_all(&bytes).await.is_err() {
+                    if writer.write_all(&bytes).await.is_err() || writer.flush().await.is_err() {
                         return;
                     }
                 }
@@ -451,11 +449,13 @@ impl ClusterHandle {
                 }
             };
             let finished = async move {
-                let outcome = match status {
-                    Some(status) => exit_of(status.await),
-                    None => ExecExit::Success,
+                let status = async move {
+                    match status {
+                        Some(status) => exit_of(status.await),
+                        None => ExecExit::Success,
+                    }
                 };
-                let _ = futures::join!(out, err);
+                let (outcome, (), ()) = futures::join!(status, out, err);
                 let _ = exit_tx.send(outcome).await;
             };
             tokio::select! {

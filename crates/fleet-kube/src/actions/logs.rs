@@ -105,7 +105,7 @@ pub fn marker(text: &str) -> LogLine {
     LogLine::marker(format!("── {text} ──"))
 }
 
-pub fn exit_marker(pod: &Pod, container: &str, previous: bool) -> Option<LogLine> {
+pub fn exit_marker(pod: &Pod, container: &str) -> Option<LogLine> {
     let status = pod
         .status
         .as_ref()?
@@ -113,11 +113,7 @@ pub fn exit_marker(pod: &Pod, container: &str, previous: bool) -> Option<LogLine
         .as_ref()?
         .iter()
         .find(|status| status.name == container)?;
-    let state: &ContainerState = if previous {
-        status.last_state.as_ref()?
-    } else {
-        status.state.as_ref()?
-    };
+    let state: &ContainerState = status.state.as_ref()?;
     let terminated = state.terminated.as_ref()?;
     let reason = terminated
         .reason
@@ -141,9 +137,8 @@ fn ops_request(request: &LogRequest) -> Result<ops::LogRequest> {
         namespace,
         pod: request.pod.name.clone(),
         container: Some(request.container.clone()),
-        follow: !request.previous,
+        follow: true,
         tail_lines: Some(TAIL_LINES),
-        previous: request.previous,
         timestamps: true,
         since_seconds: None,
     })
@@ -172,7 +167,7 @@ async fn pump(handle: &ClusterHandle, request: &LogRequest) -> Result<()> {
     }
     let pods: Api<Pod> = Api::namespaced(handle.client()?, &params.namespace);
     let pod = pods.get(&params.pod).await?;
-    if let Some(line) = exit_marker(&pod, &request.container, request.previous) {
+    if let Some(line) = exit_marker(&pod, &request.container) {
         request.sink.send_blocking(line);
     }
     Ok(())
@@ -238,7 +233,7 @@ mod tests {
                 container_statuses: Some(vec![ContainerStatus {
                     name: "api".into(),
                     restart_count: 14,
-                    last_state: last.map(|terminated| ContainerState {
+                    state: last.map(|terminated| ContainerState {
                         terminated: Some(terminated),
                         ..ContainerState::default()
                     }),
@@ -251,25 +246,24 @@ mod tests {
     }
 
     #[test]
-    fn previous_logs_end_with_how_the_container_exited() {
+    fn terminated_logs_end_with_how_the_container_exited() {
         let crashed = pod(Some(ContainerStateTerminated {
             exit_code: 1,
             reason: Some("Error".into()),
             ..ContainerStateTerminated::default()
         }));
         assert_eq!(
-            exit_marker(&crashed, "api", true),
+            exit_marker(&crashed, "api"),
             Some(LogLine::marker(
                 "── container exited 1 (Error) · restart 14 ──"
             ))
         );
-        assert_eq!(exit_marker(&crashed, "api", false), None);
-        assert_eq!(exit_marker(&crashed, "sidecar", true), None);
-        assert_eq!(exit_marker(&pod(None), "api", true), None);
+        assert_eq!(exit_marker(&crashed, "sidecar"), None);
+        assert_eq!(exit_marker(&pod(None), "api"), None);
     }
 
     #[test]
-    fn requests_follow_unless_reading_the_previous_container() {
+    fn requests_follow_the_current_container() {
         let mut request = LogRequest {
             pod: fleet_core::ResourceRef {
                 cluster: fleet_core::ClusterId::new("kind-fleet-a"),
@@ -278,21 +272,14 @@ mod tests {
                 name: "checkout-api-1".into(),
             },
             container: "api".into(),
-            previous: false,
             sink: fleet_core::Sink::channel().0,
         };
         let live = ops_request(&request).ok();
         assert_eq!(
-            live.as_ref().map(|r| (r.follow, r.previous)),
-            Some((true, false))
+            live.as_ref().map(|r| (r.follow, r.timestamps)),
+            Some((true, true))
         );
         assert_eq!(live.and_then(|r| r.container).as_deref(), Some("api"));
-        request.previous = true;
-        let previous = ops_request(&request).ok();
-        assert_eq!(
-            previous.map(|r| (r.follow, r.timestamps)),
-            Some((false, true))
-        );
         request.pod.namespace = None;
         assert!(ops_request(&request).is_err());
     }

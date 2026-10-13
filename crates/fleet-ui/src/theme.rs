@@ -4,6 +4,34 @@ use fleet_core::Status;
 use fleet_core::app_settings::ThemeChoice;
 use gpui::{App, Global, Hsla, Pixels, Window, WindowAppearance, px, rgb, rgba};
 
+const ANSI_BASE: [u32; 16] = [
+    0x001d_2027,
+    0x00c5_3030,
+    0x0016_7a4c,
+    0x0093_5800,
+    0x001f_5fd1,
+    0x00a3_47ba,
+    0x0014_8a99,
+    0x00b3_b9c3,
+    0x005f_6774,
+    0x00f2_6d6d,
+    0x0048_c78e,
+    0x00e8_b04b,
+    0x0074_adff,
+    0x00d3_8ce5,
+    0x0067_d5df,
+    0x00f2_f6fc,
+];
+const ANSI_CUBE_START: u8 = 16;
+const ANSI_GRAY_START: u8 = 232;
+const ANSI_CUBE_SIDE: u32 = 6;
+const ANSI_CUBE_LOW: u32 = 55;
+const ANSI_CUBE_STEP: u32 = 40;
+const ANSI_GRAY_LOW: u32 = 8;
+const ANSI_GRAY_STEP: u32 = 10;
+const RED_SHIFT: u32 = 16;
+const GREEN_SHIFT: u32 = 8;
+
 pub const FONT_SANS: &str = "IBM Plex Sans";
 pub const FONT_STATUS: &str = "Fleet Status";
 pub const FONT_MONO: &str = "IBM Plex Mono";
@@ -422,9 +450,66 @@ pub const EVENT_MESSAGE_MIN: Pixels = px(260.);
 pub const EVENT_COUNT_WIDTH: Pixels = px(40.);
 pub const EVENT_AGE_WIDTH: Pixels = px(44.);
 
+pub fn terminal_color(color: vt100::Color, default: Hsla, palette: &Palette) -> Hsla {
+    match color {
+        vt100::Color::Default => default,
+        vt100::Color::Rgb(red, green, blue) => {
+            let value =
+                (u32::from(red) << RED_SHIFT) | (u32::from(green) << GREEN_SHIFT) | u32::from(blue);
+            rgb(value).into()
+        }
+        vt100::Color::Idx(index) => {
+            if let Some(value) = ANSI_BASE.get(usize::from(index)) {
+                return match index {
+                    1 => palette.err,
+                    2 => palette.ok,
+                    3 => palette.warn,
+                    4 => palette.acc,
+                    7 => palette.fg2,
+                    15 => palette.fg,
+                    _ => rgb(*value).into(),
+                };
+            }
+            let value = if index >= ANSI_GRAY_START {
+                let shade = ANSI_GRAY_LOW + u32::from(index - ANSI_GRAY_START) * ANSI_GRAY_STEP;
+                (shade << RED_SHIFT) | (shade << GREEN_SHIFT) | shade
+            } else {
+                let index = u32::from(index - ANSI_CUBE_START);
+                let channel = |level| {
+                    if level == 0 {
+                        0
+                    } else {
+                        ANSI_CUBE_LOW + ANSI_CUBE_STEP * level
+                    }
+                };
+                let red = channel(index / (ANSI_CUBE_SIDE * ANSI_CUBE_SIDE));
+                let green = channel(index / ANSI_CUBE_SIDE % ANSI_CUBE_SIDE);
+                let blue = channel(index % ANSI_CUBE_SIDE);
+                (red << RED_SHIFT) | (green << GREEN_SHIFT) | blue
+            };
+            rgb(value).into()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_colors_support_theme_ansi_cube_gray_and_rgb() {
+        for palette in [Palette::dark(), Palette::light()] {
+            let color = |value| terminal_color(value, palette.fg, &palette);
+            assert_eq!(color(vt100::Color::Default), palette.fg);
+            assert_eq!(color(vt100::Color::Idx(1)), palette.err);
+            let red: Hsla = rgb(0x00ff_0000).into();
+            assert_eq!(color(vt100::Color::Idx(196)), red);
+            let gray: Hsla = rgb(0x0008_0808).into();
+            assert_eq!(color(vt100::Color::Idx(232)), gray);
+            let custom: Hsla = rgb(0x0012_3456).into();
+            assert_eq!(color(vt100::Color::Rgb(0x12, 0x34, 0x56)), custom);
+        }
+    }
 
     #[test]
     fn status_colours_use_status_tokens() {

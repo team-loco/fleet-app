@@ -10,7 +10,7 @@ use gpui::{
 
 mod streams;
 
-use streams::{LogSession, SEARCH_PLACEHOLDER, ShellSession, TERMINAL_ID, crash_looping};
+use streams::{LogSession, SEARCH_PLACEHOLDER, ShellSession, TERMINAL_ID};
 
 use crate::kit::{
     ActionMenu, Button, Column, ConfirmDialog, DockState, FilterBar, FilterEvent, InputEvent,
@@ -49,7 +49,6 @@ pub struct PodsScreen {
     query: PodQuery,
     selected: Option<ResourceRef>,
     container: Option<String>,
-    previous: bool,
     log: Option<LogSession>,
     shell: Option<ShellSession>,
     table: Entity<Table<Pod>>,
@@ -149,7 +148,6 @@ impl PodsScreen {
             query: PodQuery::default(),
             selected: None,
             container: None,
-            previous: false,
             log: None,
             shell: None,
             table,
@@ -300,7 +298,6 @@ impl PodsScreen {
 
     fn pick_container(&mut self, name: Option<String>) {
         self.container = name;
-        self.previous = self.selected_container().is_some_and(crash_looping);
     }
 
     fn sync_selection(&mut self, cx: &mut Context<Self>) {
@@ -651,23 +648,11 @@ fn events(pod: &Pod, palette: &Palette) -> impl IntoElement {
 fn menu_items(pod: &Pod, cx: &mut Context<PodsScreen>) -> Vec<MenuItem> {
     let screen = cx.entity().downgrade();
     let logs_screen = screen.clone();
-    let previous_screen = screen.clone();
-    let container = pod
-        .containers
-        .first()
-        .map(|c| c.name.clone())
-        .unwrap_or_default();
     let mut items = vec![
         MenuItem::new("Logs", move |_, cx| {
-            let _ = logs_screen.update(cx, |this, cx| this.show_logs(false, cx));
+            let _ = logs_screen.update(cx, PodsScreen::show_logs);
         })
         .description("Follow the selected container's output."),
-        MenuItem::new("Previous container logs", move |_, cx| {
-            let _ = previous_screen.update(cx, |this, cx| this.show_logs(true, cx));
-        })
-        .description(format!(
-            "Output of the last terminated {container} container, for crash loops."
-        )),
     ];
     for (container, port) in pod.ports() {
         let target = pod.resource();

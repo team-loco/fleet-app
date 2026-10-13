@@ -27,43 +27,6 @@ const ENVOY_REQUESTS: [(LogLevel, &str); 3] = [
     (LogLevel::Info, "listener https_8443: 3 active connections"),
 ];
 
-pub fn crash_previous() -> Vec<LogLine> {
-    vec![
-        LogLine::new(
-            "21:12:20.114",
-            LogLevel::Info,
-            "starting checkout-api v2.14.0 (commit 9f3c1ab)",
-        ),
-        LogLine::new(
-            "21:12:20.119",
-            LogLevel::Info,
-            "config: loading /etc/checkout/app.yaml",
-        ),
-        LogLine::new(
-            "21:12:20.125",
-            LogLevel::Info,
-            "postgres: connecting payments-db.payments.svc:5432",
-        ),
-        LogLine::new("21:12:20.228", LogLevel::Info, "postgres: ok (pool 20)"),
-        LogLine::new(
-            "21:12:20.230",
-            LogLevel::Warn,
-            "env STRIPE_WEBHOOK_SECRET is empty; falling back to /etc/checkout/stripe.env",
-        ),
-        LogLine::new(
-            "21:12:20.231",
-            LogLevel::Error,
-            "open /etc/checkout/stripe.env: no such file or directory",
-        ),
-        LogLine::new(
-            "21:12:20.231",
-            LogLevel::Fatal,
-            "config invalid: stripe webhook secret not set; exit 1",
-        ),
-        LogLine::marker("── container exited 1 · restart 14 in 5m0s (back-off) ──"),
-    ]
-}
-
 pub fn crash_waiting() -> Vec<LogLine> {
     vec![LogLine::marker(
         "── container api is waiting to start: CrashLoopBackOff (back-off 5m0s) ──",
@@ -102,28 +65,22 @@ pub fn healthy_api() -> Vec<LogLine> {
     ]
 }
 
-pub fn no_previous(container: &str) -> Vec<LogLine> {
-    vec![LogLine::marker(format!(
-        "── container {container} has not restarted; there is no previous instance ──"
-    ))]
-}
-
 pub struct Script {
     pub initial: Vec<LogLine>,
     pub streams: bool,
 }
 
-pub fn script(pod_status: Status, container: &str, previous: bool) -> Script {
+pub fn script(pod_status: Status, container: &str) -> Script {
     let api = container == API;
     let crashing = pod_status == Status::Err;
-    let initial = match (previous, api && crashing) {
-        (true, true) => crash_previous(),
-        (true, false) => no_previous(container),
-        (false, true) => crash_waiting(),
-        (false, false) if api => healthy_api(),
-        (false, false) => Vec::new(),
+    let initial = if api && crashing {
+        crash_waiting()
+    } else if api {
+        healthy_api()
+    } else {
+        Vec::new()
     };
-    let streams = !(previous || api && crashing);
+    let streams = !(api && crashing);
     Script { initial, streams }
 }
 
@@ -190,22 +147,18 @@ mod tests {
     }
 
     #[test]
-    fn crashing_api_shows_the_previous_crash_and_does_not_stream() {
-        let previous = script(Status::Err, API, true);
-        assert_eq!(previous.initial.len(), 8);
-        assert!(!previous.streams);
-        let current = script(Status::Err, API, false);
+    fn crashing_api_explains_waiting_and_does_not_stream() {
+        let current = script(Status::Err, API);
         assert!(!current.streams);
         assert_eq!(current.initial, crash_waiting());
     }
 
     #[test]
     fn healthy_containers_stream() {
-        let api = script(Status::Ok, API, false);
+        let api = script(Status::Ok, API);
         assert!(api.streams);
         assert_eq!(api.initial, healthy_api());
-        let envoy = script(Status::Err, "envoy", false);
+        let envoy = script(Status::Err, "envoy");
         assert!(envoy.streams);
-        assert!(!script(Status::Ok, API, true).streams);
     }
 }

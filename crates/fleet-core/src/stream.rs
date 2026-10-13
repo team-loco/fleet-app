@@ -16,6 +16,10 @@ impl<T> Sink<T> {
         self.0.send_blocking(value).is_ok()
     }
 
+    pub async fn closed(&self) {
+        self.0.closed().await;
+    }
+
     pub fn is_closed(&self) -> bool {
         self.0.is_closed()
     }
@@ -49,6 +53,10 @@ impl<T> Source<T> {
     pub fn channel() -> (Sender<T>, Self) {
         let (tx, rx) = async_channel::unbounded();
         (tx, Self(rx))
+    }
+
+    pub async fn recv(&self) -> Option<T> {
+        self.0.recv().await.ok()
     }
 
     pub fn recv_blocking(&self) -> Option<T> {
@@ -116,7 +124,6 @@ impl LogLine {
 pub struct LogRequest {
     pub pod: ResourceRef,
     pub container: String,
-    pub previous: bool,
     pub sink: Sink<LogLine>,
 }
 

@@ -71,6 +71,14 @@ Generated from the binding table in `crates/fleet-ui/src/keymap.rs`; run `mise r
 | ⌘T | Terminal |
 | ⌘Y | YAML |
 
+## Terminal
+
+| Keys | Action |
+|---|---|
+| Tab | Complete in the shell |
+| ⇧Tab | Send back-tab to the shell |
+| ⌘C / ⌘V | Copy the transcript, paste into the shell |
+
 ## Flux object page
 
 | Keys | Action |

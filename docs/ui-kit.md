@@ -329,7 +329,6 @@ Dock::new(&self.dock)
     .tab(DockTab::new("Events").detail("7").content(self.events.clone()))
     .tab(DockTab::new("Terminal").detail("debug").content(terminal))
     .height(px)                                    // default DOCK_HEIGHT 250
-    .after_tabs(IconButton::svg("new", assets::PLUS, "New terminal"))   // optional, right after the tabs
 dock.update(cx, |d, cx| d.select(0, cx));          // e.g. clicking a pod opens its logs
 ```
 
@@ -357,15 +356,20 @@ l.clear(cx)
 
 ## Terminal
 
-A line terminal over a byte stream (exec / debug sessions): mono 12, `LOG_LINE` rows, block
-cursor on the last line while open. It strips escape sequences, handles `\r\n` and backspace,
-and keeps UTF-8 split across chunks whole. Notes (the equivalent `kubectl` line, session ended)
-render muted. Keystrokes are emitted as tty bytes; the view does not echo.
+A VT100/xterm terminal over a byte stream (exec / debug sessions), parsed by the `vt100` crate:
+mono 12, `LOG_LINE` rows, a grid sized to the pane (`TerminalEvent::Resize` on every change),
+10 000 rows of scrollback, ANSI 16/256/truecolour mapped onto the palette, bold, dim, italic,
+underline, inverse, the alternate screen and an inverted block cursor while open. Cursor-position
+and device-attribute queries are answered. Keys are emitted as tty bytes (arrows follow the
+application-cursor mode, ⌃ letters, ⌥ as meta, Tab and ⇧Tab bound in the `Terminal` key
+context so focus navigation does not take them); ⌘V pastes (bracketed when asked), ⌘C copies
+the transcript. Notes (the equivalent `kubectl` line, session ended) are muted lines in the
+transcript. The view does not echo. Sessions start only from an explicit "Open shell" button.
 
 ```rust
 let terminal = cx.new(|cx| Terminal::new("shell", cx));
-cx.subscribe(&terminal, |this, _, TerminalEvent::Input(bytes), cx| ..).detach();
-terminal.update(cx, |t, cx| { t.note("$ kubectl debug …", cx); t.set_open(true, cx); });
+cx.subscribe(&terminal, |this, _, event: &TerminalEvent, cx| ..).detach();   // Input(bytes) / Resize(size)
+terminal.update(cx, |t, cx| { t.clear(cx); t.note("$ kubectl exec …", cx); t.set_open(true, cx); });
 terminal.update(cx, |t, cx| t.feed(&bytes, cx));
 ```
 
