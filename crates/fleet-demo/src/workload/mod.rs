@@ -1,5 +1,7 @@
 mod data;
 mod exec;
+#[cfg(feature = "loco")]
+mod loco;
 mod logs;
 mod sim;
 
@@ -58,7 +60,7 @@ impl Default for Workloads {
 impl Workloads {
     pub fn new() -> Self {
         let shared = Shared {
-            workloads: vec![checkout_api()],
+            workloads: sample_workloads(),
             ..Shared::default()
         };
         Self {
@@ -145,6 +147,13 @@ impl Workloads {
     }
 }
 
+fn sample_workloads() -> Vec<Workload> {
+    let workloads = vec![checkout_api()];
+    #[cfg(feature = "loco")]
+    let workloads = [workloads, vec![loco::checkout()]].concat();
+    workloads
+}
+
 fn spawn_exec(request: ExecRequest) {
     spawn("fleet-demo-exec", move || exec::run(&request));
 }
@@ -186,6 +195,19 @@ mod tests {
         assert_eq!(started.map(|w| w.status()), Some(Status::Progress));
         let done = rx.recv_blocking().ok();
         assert_eq!(done.map(|w| w.status()), Some(Status::Ok));
+    }
+
+    #[cfg(feature = "loco")]
+    #[test]
+    fn the_loco_checkout_deployment_has_a_workload_to_open() {
+        let workloads = Workloads::new();
+        let (sink, rx) = Sink::channel();
+        workloads.handle(&Command::WatchWorkload {
+            target: loco::target(),
+            sink,
+        });
+        let workload = rx.recv_blocking().ok();
+        assert_eq!(workload.map(|w| w.target), Some(loco::target()));
     }
 
     #[test]

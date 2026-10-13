@@ -215,6 +215,7 @@ pub struct Table<R: 'static> {
     span: Option<SpanRow<R>>,
     click_opens: bool,
     fit: bool,
+    rules: bool,
     header: Header,
     status: Option<RowStatus<R>>,
     key: Option<RowKey<R>>,
@@ -246,6 +247,7 @@ impl<R: 'static> Table<R> {
             span: None,
             click_opens: false,
             fit: false,
+            rules: true,
             header: Header::Sans,
             status: None,
             key: None,
@@ -293,6 +295,11 @@ impl<R: 'static> Table<R> {
 
     pub fn fit_content(mut self) -> Self {
         self.fit = true;
+        self
+    }
+
+    pub fn unruled(mut self) -> Self {
+        self.rules = false;
         self
     }
 
@@ -559,8 +566,9 @@ impl<R: 'static> Table<R> {
             .h(self.row_height)
             .pl(self.inset)
             .pr(SPACE_8)
-            .border_b(RULE)
-            .border_color(palette.line)
+            .when(self.rules, |row| {
+                row.border_b(RULE).border_color(palette.line)
+            })
             .text_size(TEXT_BODY)
             .text_color(palette.fg)
             .cursor_pointer()

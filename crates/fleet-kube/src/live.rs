@@ -762,7 +762,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
         yaml_task: None,
         workload_task: None,
         #[cfg(feature = "loco")]
-        loco: crate::loco::LocoBackend::new(crate::loco::LocoSettings::default()),
+        loco: crate::loco::LocoBackend::new(crate::loco::LocoSettings::default(), updates.clone()),
     };
     let gitops_changed = live.gitops.changed();
     live.reconcile();

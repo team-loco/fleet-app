@@ -45,6 +45,7 @@ const ENVOY_PROXY: &str = "envoy-proxy";
 const DEGRADED: &str = "Degraded";
 const CONDITION_TRUE: &str = "True";
 const MISSING: &str = "—";
+const SHARED_POLICY: &str = "workspace isolation";
 const NOT_FOUND: &str = "not found";
 const ACCEPTED: &str = "Accepted";
 const NO_READY_ENDPOINTS: &str = "no ready endpoints";
@@ -77,6 +78,9 @@ pub struct Inputs {
     pub statefulsets: Vec<StatefulSet>,
     pub jobs: Vec<Job>,
     pub pods: Vec<Pod>,
+    pub secrets: Vec<ObjectMeta>,
+    pub service_accounts: Vec<ObjectMeta>,
+    pub network_policies: Vec<ObjectMeta>,
     pub workloads_watched: bool,
     pub agent: Option<WorkloadHealth>,
     pub builds_enabled: Option<bool>,
@@ -329,10 +333,11 @@ fn related(
     if metadata.namespace.as_deref() != Some(namespace) {
         return None;
     }
-    related_object(resource, kind, metadata)
-        .ok()
-        .flatten()
-        .filter(|object| object.relationship == ObjectRelationship::Application)
+    related_object(resource, kind, metadata).ok().flatten()
+}
+
+fn owned_by_application(found: &RelatedObject) -> bool {
+    found.relationship == ObjectRelationship::Application
 }
 
 fn controller_objects(
@@ -352,7 +357,9 @@ fn controller_objects(
     };
     let mut objects = Vec::new();
     for deployment in &inputs.deployments {
-        let Some(found) = related(resource, "Deployment", &deployment.metadata, namespace) else {
+        let Some(found) = related(resource, "Deployment", &deployment.metadata, namespace)
+            .filter(owned_by_application)
+        else {
             continue;
         };
         let (status, detail) = deployment_health(deployment).map_or_else(
@@ -368,7 +375,9 @@ fn controller_objects(
         objects.push(object(status, found, detail));
     }
     for service in &inputs.services {
-        let Some(found) = related(resource, "Service", &service.metadata, namespace) else {
+        let Some(found) =
+            related(resource, "Service", &service.metadata, namespace).filter(owned_by_application)
+        else {
             continue;
         };
         let port = service
@@ -382,7 +391,9 @@ fn controller_objects(
     }
     let mut app_route = None;
     for (route, raw) in routes {
-        let Some(found) = related(resource, "HTTPRoute", &raw.metadata, namespace) else {
+        let Some(found) =
+            related(resource, "HTTPRoute", &raw.metadata, namespace).filter(owned_by_application)
+        else {
             continue;
         };
         let (status, detail) = route_status(route);
@@ -393,6 +404,33 @@ fn controller_objects(
         };
         app_route = app_route.or_else(|| application_route(route, listeners));
         objects.push(object(status, found, detail));
+    }
+    let owned = [
+        ("Secret", &inputs.secrets),
+        ("ServiceAccount", &inputs.service_accounts),
+    ];
+    for (kind, metadata) in owned {
+        for meta in metadata {
+            let Some(found) = related(resource, kind, meta, namespace).filter(owned_by_application)
+            else {
+                continue;
+            };
+            objects.push(object(Status::Ok, found, String::new()));
+        }
+    }
+    let policies = inputs
+        .network_policies
+        .iter()
+        .filter_map(|meta| related(resource, "NetworkPolicy", meta, namespace));
+    let (owned_policies, shared_policies): (Vec<_>, Vec<_>) =
+        policies.partition(owned_by_application);
+    for found in owned_policies {
+        objects.push(object(Status::Ok, found, String::new()));
+    }
+    if let Some(shared) = shared_policies.into_iter().next() {
+        let mut policy = object(Status::Ok, shared, SHARED_POLICY.to_owned());
+        policy.name = None;
+        objects.push(policy);
     }
     (objects, app_route)
 }
@@ -920,6 +958,9 @@ mod tests {
             statefulsets: Vec::new(),
             jobs: parse(include_str!("fixtures/jobs.json")),
             pods: parse(include_str!("fixtures/pods.json")),
+            secrets: Vec::new(),
+            service_accounts: Vec::new(),
+            network_policies: Vec::new(),
             workloads_watched: true,
             agent: None,
             builds_enabled: Some(true),
@@ -1036,6 +1077,84 @@ mod tests {
         assert_eq!(
             web.route.as_ref().map(AppRoute::summary).as_deref(),
             Some("web.onloco.app → Gateway eg · https-apps-0 → ws-0192c3f1/resource-web:80")
+        );
+    }
+
+    fn meta(name: &str, labels: &[(&str, &str)], annotations: &[(&str, &str)]) -> ObjectMeta {
+        let pairs = |items: &[(&str, &str)]| {
+            items
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .collect()
+        };
+        ObjectMeta {
+            name: Some(name.to_owned()),
+            namespace: Some("ws-0192c3f1".to_owned()),
+            labels: Some(pairs(labels)),
+            annotations: Some(pairs(annotations)),
+            ..ObjectMeta::default()
+        }
+    }
+
+    #[test]
+    fn secrets_service_accounts_and_shared_policies_join_the_owned_objects() {
+        let managed = ("app.kubernetes.io/managed-by", "loco-controller");
+        let owner = [
+            ("loco.io/application-name", "resource-web"),
+            ("loco.io/application-namespace", "loco-system"),
+        ];
+        let mut inputs = inputs();
+        inputs.secrets = vec![
+            meta(
+                "resource-web-env",
+                &[managed, ("app", "resource-web")],
+                &owner,
+            ),
+            meta("unrelated", &[], &[]),
+        ];
+        inputs.service_accounts = vec![meta(
+            "resource-web",
+            &[managed, ("app", "resource-web")],
+            &owner,
+        )];
+        inputs.network_policies = vec![
+            meta(
+                "isolation",
+                &[managed, ("loco.io/workspace-id", "0192c3f1")],
+                &[],
+            ),
+            meta(
+                "ingress",
+                &[managed, ("loco.io/workspace-id", "0192c3f1")],
+                &[],
+            ),
+            meta(
+                "other",
+                &[managed, ("loco.io/workspace-id", "elsewhere")],
+                &[],
+            ),
+        ];
+        let loco = loco_cluster(&inputs, now(), &TimeZone::UTC);
+        let Some((_, web)) = loco
+            .applications
+            .iter()
+            .find(|(_, a)| a.name == "resource-web")
+        else {
+            panic!("resource-web missing");
+        };
+        let rows: Vec<String> = web
+            .objects
+            .iter()
+            .skip(3)
+            .map(|object| format!("{} {}", object.kind, object.label()))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                "Secret ws-0192c3f1/resource-web-env",
+                "ServiceAccount ws-0192c3f1/resource-web",
+                "NetworkPolicy ws-0192c3f1 · workspace isolation",
+            ]
         );
     }
 

@@ -6,9 +6,9 @@ use futures::StreamExt;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Event, Namespace, Node, PersistentVolumeClaim, Pod, Secret, Service,
+    ConfigMap, Event, Namespace, Node, PersistentVolumeClaim, Pod, Secret, Service, ServiceAccount,
 };
-use k8s_openapi::api::networking::v1::Ingress;
+use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use kube::api::{DynamicObject, PartialObjectMeta};
 use kube::core::{ApiResource, GroupVersionKind};
 use kube::runtime::reflector::{self, Store};
@@ -57,6 +57,8 @@ pub enum WatchKind {
     Ingresses,
     ConfigMaps,
     Secrets,
+    ServiceAccounts,
+    NetworkPolicies,
     Events,
     PersistentVolumeClaims,
     Custom(CustomKind),
@@ -88,6 +90,8 @@ watched! {
     Ingress => Ingresses,
     PartialObjectMeta<ConfigMap> => ConfigMaps,
     PartialObjectMeta<Secret> => Secrets,
+    PartialObjectMeta<ServiceAccount> => ServiceAccounts,
+    PartialObjectMeta<NetworkPolicy> => NetworkPolicies,
     Event => Events,
     PersistentVolumeClaim => PersistentVolumeClaims,
 }
@@ -202,6 +206,12 @@ pub fn spawn_builtin(
             spawn_full::<PartialObjectMeta<ConfigMap>>(runtime, client, signals)
         }
         WatchKind::Secrets => spawn_full::<PartialObjectMeta<Secret>>(runtime, client, signals),
+        WatchKind::ServiceAccounts => {
+            spawn_full::<PartialObjectMeta<ServiceAccount>>(runtime, client, signals)
+        }
+        WatchKind::NetworkPolicies => {
+            spawn_full::<PartialObjectMeta<NetworkPolicy>>(runtime, client, signals)
+        }
         WatchKind::Events => spawn_full::<Event>(runtime, client, signals),
         WatchKind::PersistentVolumeClaims => {
             spawn_full::<PersistentVolumeClaim>(runtime, client, signals)

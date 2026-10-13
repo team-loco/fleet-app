@@ -71,11 +71,11 @@ impl Placement {
     pub fn detail(&self) -> String {
         match (self.applied, self.desired) {
             (Some(applied), Some(desired)) if applied != desired => {
-                format!("rev {desired} desired · rev {applied} applied")
+                format!("rev {desired} desired · rev {applied} applied by agent")
             }
             (None, Some(desired)) => format!("rev {desired} desired · not applied yet"),
-            (_, Some(desired)) => format!("rev {desired} applied"),
-            (Some(applied), None) => format!("rev {applied} applied"),
+            (_, Some(desired)) => format!("rev {desired} desired · rev {desired} applied by agent"),
+            (Some(applied), None) => format!("rev {applied} applied by agent"),
             (None, None) => MISSING.to_owned(),
         }
     }
@@ -369,8 +369,11 @@ pub(crate) mod tests {
     fn placement_reads_applied_then_desired() {
         assert_eq!(rev(14, 14).short(), "r14");
         assert_eq!(rev(21, 22).short(), "r21 → r22");
-        assert_eq!(rev(9, 9).detail(), "rev 9 applied");
-        assert_eq!(rev(21, 22).detail(), "rev 22 desired · rev 21 applied");
+        assert_eq!(rev(9, 9).detail(), "rev 9 desired · rev 9 applied by agent");
+        assert_eq!(
+            rev(21, 22).detail(),
+            "rev 22 desired · rev 21 applied by agent"
+        );
         let pending = Placement {
             desired: Some(3),
             applied: None,

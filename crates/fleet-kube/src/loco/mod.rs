@@ -7,8 +7,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
+use fleet_core::Update;
+use fleet_core::action::Notice;
 use fleet_core::loco::{LocoCluster, LocoCommand};
-use fleet_core::{ClusterId, ClusterSummary, Page, ResourceRef};
+use fleet_core::{ClusterId, ClusterSummary, Page, ResourceRef, Sender};
 use fleet_loco::platform::{
     Observation, WorkloadHealth, agent_sync, component_catalog, deployment_health,
 };
@@ -17,11 +19,14 @@ use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::batch::v1::Job;
-use k8s_openapi::api::core::v1::{Pod, Service};
-use kube::api::{DynamicObject, PropagationPolicy};
-use kube::{Api, Client};
+use k8s_openapi::api::core::v1::{Pod, Secret, Service, ServiceAccount};
+use k8s_openapi::api::networking::v1::NetworkPolicy;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+use kube::api::{DynamicObject, PartialObjectMeta, PropagationPolicy};
+use kube::{Api, Client, Resource};
 use serde::de::DeserializeOwned;
 
+use crate::actions::failed_notice;
 use crate::error::Error;
 use crate::manager::{ClusterHandle, Shared, Subscription, lock};
 use crate::ops::{LogRequest, ObjectRef};
@@ -41,13 +46,18 @@ const GATEWAY_VERSION: &str = "v1";
 const DISCOVERY_GROUP: &str = "discovery.k8s.io";
 const DISCOVERY_VERSION: &str = "v1";
 const NOT_FOUND: u16 = 404;
-const BUILTIN_KINDS: [WatchKind; 6] = [
+const RESTART: &str = "Restart";
+const NOT_LOADED: &str = "the Application is not loaded yet";
+const BUILTIN_KINDS: [WatchKind; 9] = [
     WatchKind::Deployments,
     WatchKind::DaemonSets,
     WatchKind::StatefulSets,
     WatchKind::Jobs,
     WatchKind::Pods,
     WatchKind::Services,
+    WatchKind::Secrets,
+    WatchKind::ServiceAccounts,
+    WatchKind::NetworkPolicies,
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,11 +141,13 @@ pub struct LocoBackend {
     watch: Option<PageWatch>,
     pending: Arc<Mutex<BTreeMap<ResourceRef, Pending>>>,
     changed: Arc<AtomicBool>,
+    updates: Sender<Update>,
 }
 
 impl LocoBackend {
-    pub fn new(settings: LocoSettings) -> Self {
+    pub fn new(settings: LocoSettings, updates: Sender<Update>) -> Self {
         Self {
+            updates,
             settings,
             probes: BTreeMap::new(),
             selection: None,
@@ -344,6 +356,12 @@ impl LocoBackend {
             found.and_then(|found| fleet_loco::applications::application_model(&found).ok());
         let Some(model) = model else {
             tracing::warn!(application = %application, "restart skipped: Application not loaded");
+            let title = format!("{RESTART} {} failed", application.name);
+            let detail = format!("{} · {NOT_LOADED}", application.cluster);
+            let notice = Notice::failed(title, detail);
+            if self.updates.try_send(Update::Notice(notice)).is_err() {
+                tracing::debug!("UI stopped listening for updates");
+            }
             return;
         };
         let target = ObjectRef {
@@ -358,12 +376,17 @@ impl LocoBackend {
         let handle = handle.clone();
         let pending = self.pending.clone();
         let changed = self.changed.clone();
+        let updates = self.updates.clone();
         let application = application.clone();
         tokio::spawn(async move {
             if let Err(error) = handle.rollout_restart(&target).await {
                 tracing::warn!(%error, application = %application, "restart failed");
                 lock(&pending).remove(&application);
                 changed.store(true, Ordering::Relaxed);
+                let notice = failed_notice(RESTART, &application, &error);
+                if updates.send(Update::Notice(notice)).await.is_err() {
+                    tracing::debug!("UI stopped listening for updates");
+                }
             }
         });
     }
@@ -499,6 +522,19 @@ where
         .collect()
 }
 
+fn metadata<K>(handle: &ClusterHandle, keep: impl Fn(&str) -> bool) -> Vec<ObjectMeta>
+where
+    K: Resource<DynamicType = ()> + Clone + std::fmt::Debug + Send + Sync + 'static,
+    PartialObjectMeta<K>: Watched + Resource<DynamicType = ()>,
+{
+    handle
+        .objects::<PartialObjectMeta<K>>()
+        .into_iter()
+        .filter(|object| object.metadata.namespace.as_deref().is_some_and(&keep))
+        .map(|object| object.metadata.clone())
+        .collect()
+}
+
 fn typed<T: DeserializeOwned>(object: &DynamicObject) -> Option<T> {
     let parsed = serde_json::to_value(object).and_then(serde_json::from_value);
     match parsed {
@@ -549,6 +585,9 @@ fn gather(cluster: &ClusterId, watch: &PageWatch, observed: &Observed) -> Inputs
         statefulsets: owned::<StatefulSet>(handle, |ns| platform.contains(ns)),
         jobs: owned::<Job>(handle, |ns| ns == BUILD_NAMESPACE),
         pods: owned::<Pod>(handle, |ns| pod_namespaces.contains(ns)),
+        secrets: metadata::<Secret>(handle, workspace),
+        service_accounts: metadata::<ServiceAccount>(handle, workspace),
+        network_policies: metadata::<NetworkPolicy>(handle, workspace),
         workloads_watched: true,
         agent: observed.agent.clone(),
         builds_enabled: observed.builds_enabled,

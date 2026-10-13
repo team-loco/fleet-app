@@ -67,7 +67,11 @@ impl PlatformScreen {
                 .row_height(ROW_TABLE)
                 .fit_content()
         });
-        let log = cx.new(|_| LogView::new("loco-agent-log").inset(SPACE_8));
+        let log = cx.new(|_| {
+            LogView::new("loco-agent-log")
+                .inset(SPACE_8)
+                .timestamp_width(Pixels::ZERO)
+        });
         let subscription = cx.subscribe(&placements, |_, table, event: &TableEvent, cx| {
             let TableEvent::Opened(ix) = *event else {
                 return;
