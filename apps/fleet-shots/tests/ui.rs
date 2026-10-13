@@ -635,3 +635,62 @@ fn yaml_scrolls_in_both_axes_and_the_gutter_stays_fixed_horizontally() -> anyhow
     assert_eq!(scrolled_gutter.origin.x, gutter.origin.x);
     Ok(())
 }
+
+#[test]
+fn overview_sections_navigate_to_their_lists() -> anyhow::Result<()> {
+    for (selector, page) in [
+        ("overview-pods", Page::Pods),
+        ("overview-nodes", Page::Nodes),
+        ("overview-deployments", Page::Deployments),
+        ("overview-statefulsets", Page::StatefulSets),
+        ("overview-daemonsets", Page::DaemonSets),
+        ("overview-jobs", Page::Jobs),
+        ("overview-cronjobs", Page::CronJobs),
+    ] {
+        let mut ui = Ui::open(Screen::Cluster)?;
+        let cluster = ui.state().cluster;
+        ui.click(selector)?;
+        assert_eq!(ui.state().page, page);
+        assert_eq!(ui.state().cluster, cluster);
+    }
+    Ok(())
+}
+
+#[test]
+fn overview_sections_accept_keyboard_activation() -> anyhow::Result<()> {
+    for key in ["enter", "space"] {
+        let mut ui = Ui::open(Screen::Cluster)?;
+        ui.press("cmd-2")?;
+        ui.press(key)?;
+        assert_eq!(ui.state().page, Page::Pods);
+    }
+    Ok(())
+}
+
+#[test]
+fn selected_nav_rows_fill_the_panel_between_the_design_insets() -> anyhow::Result<()> {
+    use fleet_ui::theme::{ROW_NAV, SIDEBAR, SPACE_4};
+
+    let mut ui = Ui::open(Screen::Cluster)?;
+    let overview = ui
+        .bounds("nav-overview")
+        .ok_or_else(|| anyhow::anyhow!("missing overview row"))?;
+    ui.click("nav-nodes")?;
+    let nodes = ui
+        .bounds("nav-nodes")
+        .ok_or_else(|| anyhow::anyhow!("missing nodes row"))?;
+    assert_eq!(nodes.origin.x, overview.origin.x);
+    assert_eq!(nodes.size.width, SIDEBAR - SPACE_4 - SPACE_4);
+    assert_eq!(nodes.size.width, overview.size.width);
+    assert_eq!(nodes.size.height, ROW_NAV);
+    Ok(())
+}
+
+#[test]
+fn node_inspector_shows_cpu_and_memory_commitments() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Nodes)?;
+    ui.click("nodes-row-0")?;
+    assert!(ui.bounds("node-capacity-CPU").is_some());
+    assert!(ui.bounds("node-capacity-Memory").is_some());
+    Ok(())
+}

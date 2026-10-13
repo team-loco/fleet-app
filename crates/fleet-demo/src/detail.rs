@@ -305,6 +305,8 @@ fn node(seed: &NodeSeed) -> Node {
             used: seed.memory,
             allocatable: memory,
         },
+        cpu_commitment: overview().cpu,
+        memory_commitment: overview().memory,
         pods: seed.pods,
         pod_capacity: POD_CAPACITY,
         age: days(seed.age_days),

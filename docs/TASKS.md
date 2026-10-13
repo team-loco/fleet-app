@@ -71,3 +71,4 @@ Spec column points at `design/`.
 | SAFE1 | confirmed mutations carry the UID of the object the user saw; drain evicts by UID (#103, #104) | claude | mutation-safety | done |
 | CXE | resizable inspectors and scrollable YAML (#133) | claude | inspector-resize | done |
 | SAFE2 | cluster identity pinned (server + CA), Context changed prompt, disconnect tears down forwards/streams/supervisor, credential/CA rotation reconnects (#105, #106, #108) | claude | cluster-identity | done |
+| CXC | Overview resource visuals and navigation; full nav selection (#125, #126, #122) | claude | overview-visuals | done |

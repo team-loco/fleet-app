@@ -1,8 +1,9 @@
 use fleet_core::Status;
+use fleet_core::overview::{Capacity, percent};
 use gpui::{
-    AnyElement, App, Bounds, Hsla, IntoElement, ParentElement, PathBuilder, Pixels, Point,
-    RenderOnce, SharedString, Styled, Window, canvas, div, fill, point, prelude::FluentBuilder,
-    relative,
+    AnyElement, App, Bounds, Hsla, InteractiveElement, IntoElement, ParentElement, PathBuilder,
+    Pixels, Point, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, canvas,
+    div, fill, point, prelude::FluentBuilder, relative,
 };
 
 use crate::theme::{
@@ -31,6 +32,7 @@ pub struct Meter {
     value: f32,
     request: Option<f32>,
     limit: Option<f32>,
+    scale: f32,
     color: Option<Hsla>,
 }
 
@@ -40,8 +42,14 @@ impl Meter {
             value,
             request: None,
             limit: None,
+            scale: 1.,
             color: None,
         }
+    }
+
+    fn scale(mut self, scale: f32) -> Self {
+        self.scale = scale;
+        self
     }
 
     pub fn request(mut self, at: f32) -> Self {
@@ -60,10 +68,11 @@ impl Meter {
     }
 }
 
-fn marker(at: f32, color: Hsla) -> impl IntoElement {
+fn marker(at: f32, color: Hsla) -> gpui::Div {
     div()
         .absolute()
         .left(relative(fraction(at)))
+        .when(at >= 1., |marker| marker.ml(-METER_MARKER_WIDTH))
         .top((METER - METER_MARKER) / 2.)
         .w(METER_MARKER_WIDTH)
         .h(METER_MARKER)
@@ -74,17 +83,131 @@ impl RenderOnce for Meter {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = cx.palette();
         let color = self.color.unwrap_or(palette.acc);
+        let scale = capacity_scale(&[self.scale]);
         div()
             .relative()
             .w_full()
             .h(METER)
             .bg(palette.line2)
-            .child(div().h_full().w(relative(fraction(self.value))).bg(color))
+            .child(
+                div()
+                    .h_full()
+                    .w(relative(fraction(self.value / scale)))
+                    .bg(color),
+            )
+            .when(scale > 1., |meter| {
+                meter
+                    .child(
+                        div()
+                            .absolute()
+                            .left(relative(1. / scale))
+                            .right_0()
+                            .h_full()
+                            .bg(palette.warnbg),
+                    )
+                    .child(marker(1. / scale, palette.mute))
+            })
             .when_some(self.request, |meter, at| {
-                meter.child(marker(at, palette.fg2))
+                meter.child(marker(at / scale, palette.fg2))
             })
             .when_some(self.limit, |meter, at| {
-                meter.child(marker(at, palette.warn))
+                meter.child(marker(at / scale, palette.warn).top(Pixels::ZERO))
+            })
+    }
+}
+
+fn capacity_scale(values: &[f32]) -> f32 {
+    values
+        .iter()
+        .copied()
+        .filter(|v| v.is_finite())
+        .fold(1., f32::max)
+}
+
+#[derive(IntoElement)]
+pub struct CapacityMeter {
+    id: gpui::ElementId,
+    capacity: Capacity,
+    color: Hsla,
+}
+
+impl CapacityMeter {
+    pub fn new(id: impl Into<gpui::ElementId>, capacity: Capacity, color: Hsla) -> Self {
+        Self {
+            id: id.into(),
+            capacity,
+            color,
+        }
+    }
+}
+
+impl RenderOnce for CapacityMeter {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let palette = *cx.palette();
+        let capacity = self.capacity;
+        let usage = capacity.fraction();
+        let scale = capacity_scale(&[usage, capacity.requests, capacity.limits]);
+        let tooltip = format!(
+            "Usage: {} {}\nRequests: {} {} ({})\nLimits: {} {} ({})\nCapacity: {} {}",
+            capacity.used,
+            capacity.unit,
+            capacity.requests * capacity.total,
+            capacity.unit,
+            percent(capacity.requests),
+            capacity.limits * capacity.total,
+            capacity.unit,
+            percent(capacity.limits),
+            capacity.total,
+            capacity.unit,
+        );
+        let legend = [
+            ("Usage", usage, self.color),
+            ("Requests", capacity.requests, palette.fg2),
+            ("Limits", capacity.limits, palette.warn),
+        ]
+        .into_iter()
+        .map(|(label, value, color)| {
+            let swatch = if label == "Usage" {
+                div().w(LEGEND_SWATCH).h(RULE).bg(color)
+            } else {
+                div().w(METER_MARKER_WIDTH).h(LEGEND_SWATCH).bg(color)
+            };
+            div()
+                .flex()
+                .items_center()
+                .gap(SPACE_3)
+                .child(swatch)
+                .child(format!("{label} {}", percent(value)))
+        });
+        let meter = Meter::new(usage)
+            .request(capacity.requests)
+            .limit(capacity.limits)
+            .color(self.color)
+            .scale(scale);
+        div()
+            .debug_selector(|| self.id.to_string())
+            .id(self.id)
+            .flex()
+            .flex_col()
+            .gap(SPACE_4)
+            .tooltip(super::Tooltip::text(tooltip))
+            .child(meter)
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap(SPACE_4)
+                    .text_size(TEXT_CONTROL)
+                    .text_color(palette.mute)
+                    .children(legend),
+            )
+            .when(scale > 1., |row| {
+                row.child(
+                    div()
+                        .text_size(TEXT_CONTROL)
+                        .text_color(palette.warn)
+                        .child(format!("100% capacity · overcommit to {}", percent(scale))),
+                )
             })
     }
 }
@@ -464,5 +587,18 @@ mod tests {
     fn a_single_value_and_zero_max_stay_inside() {
         let bounds = Bounds::new(point(px(0.), px(0.)), gpui::size(px(10.), px(10.)));
         assert_eq!(plot_points(&[5.], 0., bounds), [point(px(0.), px(10.))]);
+    }
+}
+
+#[cfg(test)]
+mod capacity_tests {
+    use super::*;
+
+    #[test]
+    fn capacity_scale_preserves_overcommit_and_ignores_invalid_values() {
+        assert_eq!(capacity_scale(&[0.61, 0.74, 1.31]), 1.31);
+        assert_eq!(capacity_scale(&[0.61, 0.66, 0.92]), 1.);
+        assert_eq!(capacity_scale(&[f32::NAN, f32::INFINITY, -1.]), 1.);
+        assert_eq!(capacity_scale(&[2., 1.5, 1.31]), 2.);
     }
 }
