@@ -6,14 +6,12 @@ use fleet_core::flux::{
 };
 use fleet_core::{ClusterId, FluxKey, FluxKind, FluxObject, Status};
 use fleet_flux::revision::{self, short};
-use fleet_flux::{GitOpsObject, InventoryEntry, ObjectKind, Summary, summarize};
+use fleet_flux::{GitOpsObject, InventoryEntry, ObjectKind, Summary, redact, summarize};
 use jiff::Timestamp;
 use kube::api::DynamicObject;
 use serde_json::Value;
 
 use crate::flux::FluxHealth;
-use crate::ops::strip_managed_fields;
-
 const API_VERSION: &str = "apiVersion";
 const KIND: &str = "kind";
 const READY: &str = "Ready";
@@ -444,7 +442,7 @@ fn spec_rows(parsed: &Parsed, objects: &[Parsed]) -> Vec<SpecRow> {
             push("upgrade", remediation(parsed));
         }
         ObjectKind::GitRepository => {
-            push("url", parsed.spec_str("/url").map(str::to_owned));
+            push("url", parsed.spec_str("/url").map(redact::credentials));
             push("ref", reference_row(parsed));
             push("every", every(parsed));
             push(
@@ -453,7 +451,7 @@ fn spec_rows(parsed: &Parsed, objects: &[Parsed]) -> Vec<SpecRow> {
             );
         }
         ObjectKind::HelmRepository => {
-            push("url", parsed.spec_str("/url").map(str::to_owned));
+            push("url", parsed.spec_str("/url").map(redact::credentials));
             push("every", every(parsed));
         }
         ObjectKind::HelmChart => {
@@ -461,7 +459,7 @@ fn spec_rows(parsed: &Parsed, objects: &[Parsed]) -> Vec<SpecRow> {
             push("every", every(parsed));
         }
         ObjectKind::OCIRepository => {
-            push("url", parsed.spec_str("/url").map(str::to_owned));
+            push("url", parsed.spec_str("/url").map(redact::credentials));
             push("ref", reference_row(parsed));
             push("every", every(parsed));
         }
@@ -526,7 +524,7 @@ fn source_detail(parsed: &Parsed, reference: String, now: Timestamp) -> FluxDeta
         .map(|then| elapsed(then, now))
         .unwrap_or_default();
     FluxDetail::Source(SourceDetail {
-        url: parsed.spec_str("/url").unwrap_or_default().to_owned(),
+        url: redact::credentials(parsed.spec_str("/url").unwrap_or_default()),
         reference,
         fetched,
     })
@@ -738,7 +736,7 @@ fn history_entry(entry: &Value, now: Timestamp) -> HistoryEntry {
 
 pub fn yaml(raw: &Value) -> String {
     let mut value = raw.clone();
-    strip_managed_fields(&mut value);
+    redact::object(&mut value);
     serde_norway::to_string(&value).unwrap_or_default()
 }
 

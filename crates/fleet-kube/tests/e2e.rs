@@ -196,7 +196,7 @@ async fn check_patch_yaml_apply(handle: &ClusterHandle) {
         patched.labels().get("fleet-e2e").map(String::as_str),
         Some("patched")
     );
-    let Ok(yaml) = handle.get_yaml(&target, true).await else {
+    let Ok(yaml) = handle.get_yaml(&target).await else {
         panic!("yaml");
     };
     assert!(yaml.contains("fleet-e2e: patched"));

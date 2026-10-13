@@ -4,7 +4,7 @@ use fleet_core::gitops::{FluxInstall, FluxKind, Source, SyncCell, SyncGroup, Syn
 use fleet_core::{ClusterId, GitOps, Status};
 use fleet_flux::matrix::{self, ClusterObjects};
 use fleet_flux::revision::short;
-use fleet_flux::{ObjectIdentity, ObjectKind, Summary};
+use fleet_flux::{ObjectIdentity, ObjectKind, Summary, redact};
 use jiff::Timestamp;
 use serde_json::Value;
 
@@ -222,13 +222,14 @@ fn sources(clusters: &[&ClusterFluxView<'_>], now: Timestamp) -> Vec<Source> {
                 kind: identity.kind.as_str().to_owned(),
                 namespace: identity.namespace.clone(),
                 name: identity.name.clone(),
-                url: first
-                    .object
-                    .spec
-                    .get("url")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned(),
+                url: redact::credentials(
+                    first
+                        .object
+                        .spec
+                        .get("url")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                ),
                 reference,
                 revision: first
                     .object

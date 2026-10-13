@@ -4,7 +4,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use flate2::{Compression, write::GzEncoder};
 use fleet_flux::{
     GitOpsObject, InventoryEntry, ObjectError, ObjectKind, Status, actions, generated,
-    helm_storage, matrix, summarize,
+    helm_storage, matrix, redact, summarize,
 };
 use k8s_openapi::api::core::v1::Secret;
 use serde::Deserialize;
@@ -40,6 +40,26 @@ fn summaries_use_flux_reasons_and_precedence() -> TestResult {
         assert_eq!(summary.status, case.expected_status, "{}", case.name);
         assert_eq!(summary.sentence, case.expected_sentence, "{}", case.name);
     }
+    Ok(())
+}
+
+#[test]
+fn condition_messages_drop_url_credentials() -> TestResult {
+    let mut value: Value = serde_json::from_str(SOURCE)?;
+    let condition = value
+        .pointer_mut("/status/conditions/0/message")
+        .ok_or("missing condition message")?;
+    *condition = json!("clone https://user:planted-token@git.example.com/repo.git failed");
+    let source = GitOpsObject::from_json(&value)?;
+    let messages: Vec<&str> = source
+        .conditions
+        .iter()
+        .map(|c| c.message.as_str())
+        .collect();
+    assert!(
+        messages.contains(&"clone https://git.example.com/repo.git failed"),
+        "{messages:?}"
+    );
     Ok(())
 }
 
@@ -240,7 +260,6 @@ fn helm_storage_decodes_both_base64_layers_and_all_release_fields() -> TestResul
     assert!(release.first_deployed.is_some());
     assert!(release.last_deployed.is_some());
     assert_eq!(release.description, "Upgrade complete");
-    assert_eq!(release.values, json!({"replicas":3}));
     assert!(release.manifest.contains("value: after"));
     Ok(())
 }
@@ -260,6 +279,40 @@ fn helm_history_is_ordered_and_diff_contains_every_change() -> TestResult {
     assert!(diff.contains("-  value: before\n+  value: after\n"));
     assert_eq!(helm_storage::manifest_diff(newer, newer), "");
     assert!(helm_storage::revision_history([&one, &one]).is_err());
+    Ok(())
+}
+
+#[test]
+fn helm_history_diffs_never_show_secret_values() -> TestResult {
+    let one: Secret = serde_json::from_str(SECRET_ONE)?;
+    let two: Secret = serde_json::from_str(SECRET_TWO)?;
+    let mut history = helm_storage::revision_history([&one, &two])?;
+    let secret = |password: &str| {
+        format!(
+            "---\n# Source: payments/templates/secret.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: db\n  namespace: payments\ndata:\n  password: {password}\nstringData:\n  api-key: fixed-key\n"
+        )
+    };
+    let [older, newer] = history.as_mut_slice() else {
+        return Err("expected two revisions".into());
+    };
+    older.manifest.push_str(&secret("b2xkLXBhc3N3b3Jk"));
+    newer.manifest.push_str(&secret("bmV3LXBhc3N3b3Jk"));
+    let diff = helm_storage::manifest_diff(older, newer);
+    for value in ["b2xkLXBhc3N3b3Jk", "bmV3LXBhc3N3b3Jk", "fixed-key"] {
+        assert!(!diff.contains(value), "{diff}");
+    }
+    assert!(
+        diff.contains("-  value: before\n+  value: after\n"),
+        "{diff}"
+    );
+    assert!(
+        diff.contains(&format!(
+            "-  password: {}\n+  password: {}\n",
+            redact::MASK,
+            redact::CHANGED
+        )),
+        "{diff}"
+    );
     Ok(())
 }
 

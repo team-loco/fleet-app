@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::generated;
+use crate::{generated, redact};
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ObjectKind {
@@ -294,12 +294,19 @@ impl GitOpsObject {
             .cloned()
             .ok_or(ObjectError::InvalidField("spec"))?;
         let status = value.get("status").unwrap_or(&Value::Null);
-        let conditions = status
+        let conditions: Vec<Condition> = status
             .get("conditions")
             .cloned()
             .map(serde_json::from_value)
             .transpose()?
             .unwrap_or_default();
+        let conditions = conditions
+            .into_iter()
+            .map(|condition| Condition {
+                message: redact::credentials(&condition.message),
+                ..condition
+            })
+            .collect();
         let source_ref = source_reference(kind, &spec, status, &namespace)?;
         let dependencies = spec
             .get("dependsOn")

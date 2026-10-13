@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use kube::config::Kubeconfig;
 
 use crate::discovery::looks_like_kubeconfig;
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, kubeconfig_reason};
 
 const FILE_EXTENSION: &str = "yaml";
 const FILE_MODE: u32 = 0o600;
@@ -17,8 +17,8 @@ pub fn save(dir: &Path, name: &str, yaml: &str) -> Result<PathBuf> {
     if !valid_name(name) {
         return Err(Error::InvalidKubeconfigName);
     }
-    let config =
-        Kubeconfig::from_yaml(yaml).map_err(|error| Error::InvalidKubeconfig(error.to_string()))?;
+    let config = Kubeconfig::from_yaml(yaml)
+        .map_err(|error| Error::InvalidKubeconfig(kubeconfig_reason(&error)))?;
     if !looks_like_kubeconfig(&config) {
         return Err(Error::InvalidKubeconfig(NO_CONTEXTS.to_owned()));
     }

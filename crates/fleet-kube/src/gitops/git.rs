@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use fleet_core::changes::{FilePatch, LineChange, PatchLine};
+use fleet_flux::redact;
 use jiff::Timestamp;
 use tokio::process::Command;
 use tokio::sync::watch;
@@ -166,7 +167,7 @@ async fn sync(cache: &Path, key: &RepoKey, timeout: Duration) -> MirrorState {
             fetched: Timestamp::now(),
         },
         Err(reason) => {
-            tracing::info!(url = %key.url, %reason, "git mirror unavailable");
+            tracing::info!(url = %redact::credentials(&key.url), %reason, "git mirror unavailable");
             MirrorState::Unavailable(reason)
         }
     }
@@ -235,7 +236,7 @@ async fn git(dir: &Path, args: &[&str], timeout: Duration) -> Result<String, Str
         return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(first_line(&stderr))
+    Err(redact::credentials(&first_line(&stderr)))
 }
 
 pub fn first_line(stderr: &str) -> String {
@@ -247,7 +248,9 @@ pub fn first_line(stderr: &str) -> String {
 }
 
 pub fn repo_name(url: &str) -> String {
-    let trimmed = url.trim_end_matches('/');
+    let clean = redact::credentials(url);
+    let path = clean.split(['?', '#']).next().unwrap_or_default();
+    let trimmed = path.trim_end_matches('/');
     let last = trimmed.rsplit(['/', ':']).next().unwrap_or(trimmed);
     last.strip_suffix(".git").unwrap_or(last).to_owned()
 }
@@ -362,7 +365,68 @@ pub fn parse_patch(text: &str) -> Vec<FilePatch> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
+    use tracing_subscriber::fmt::MakeWriter;
+
     use super::*;
+
+    const PLANTED_USER: &str = "planted-user-token";
+    const PLANTED_QUERY: &str = "planted-query-token";
+    const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
+
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Captured {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            lock(&self.0).extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> MakeWriter<'a> for Captured {
+        type Writer = Self;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_fetches_never_log_or_report_url_credentials() {
+        let Ok(cache) = tempfile::tempdir() else {
+            panic!("tempdir");
+        };
+        let key = RepoKey {
+            url: format!(
+                "https://x-access-token:{PLANTED_USER}@127.0.0.1:9/acme/repo.git?access_token={PLANTED_QUERY}"
+            ),
+            branch: "main".to_owned(),
+        };
+        let captured = Captured::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(captured.clone())
+            .with_ansi(false)
+            .finish();
+        let state = {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            sync(cache.path(), &key, FETCH_TIMEOUT).await
+        };
+        let MirrorState::Unavailable(reason) = state else {
+            panic!("fetch from a closed port succeeded");
+        };
+        let logged = String::from_utf8_lossy(&lock(&captured.0)).into_owned();
+        assert!(logged.contains("git mirror unavailable"), "{logged}");
+        for output in [&logged, &reason, &key.name()] {
+            assert!(!output.contains(PLANTED_USER), "{output}");
+            assert!(!output.contains(PLANTED_QUERY), "{output}");
+        }
+    }
 
     const LOG: &str = "\u{1e}3e0ff8ae123b\u{1f}Stefan Prodan\u{1f}1791870000\u{1f}Release v6.15.0\n\ndiff --git a/kustomize/deployment.yaml b/kustomize/deployment.yaml\nindex 1..2 100644\n--- a/kustomize/deployment.yaml\n+++ b/kustomize/deployment.yaml\n@@ -21,3 +21,4 @@ spec:\n       containers:\n-        image: podinfo:6.14.0\n+        image: podinfo:6.15.0\n+        args: []\n       ports:\n\u{1e}aaaa111\u{1f}Bot\u{1f}1791860000\u{1f}docs: typo\n\ndiff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-colour\n+color\n";
 
@@ -461,5 +525,14 @@ mod tests {
             "fatal: could not read Username"
         );
         assert_eq!(first_line(""), STDERR_FALLBACK);
+    }
+
+    #[test]
+    fn repo_names_ignore_credentials_and_queries() {
+        assert_eq!(
+            repo_name("https://user:secret@host/acme/repo.git?token=secret"),
+            "repo"
+        );
+        assert_eq!(repo_name("https://user:secret@host"), "host");
     }
 }

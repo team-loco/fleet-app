@@ -1,6 +1,6 @@
 use fleet_core::ResourceRef;
 use fleet_core::resources::ResourceKind;
-use fleet_flux::ObjectKind;
+use fleet_flux::{ObjectKind, redact};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{
@@ -14,12 +14,9 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 use crate::flux::custom_kind;
 use crate::manager::ClusterHandle;
-use crate::ops::{ObjectRef, strip_managed_fields};
+use crate::ops::ObjectRef;
 use crate::resources::Watched;
 
-const SECRET_KIND: &str = "Secret";
-const SECRET_FIELDS: [&str; 2] = ["data", "stringData"];
-pub const SECRET_MASK: &str = "••••••";
 const POD_KIND: &str = "Pod";
 const NODE_KIND: &str = "Node";
 const NAMESPACE_KIND: &str = "Namespace";
@@ -78,22 +75,8 @@ pub fn object_ref(target: &ResourceRef) -> Option<ObjectRef> {
     })
 }
 
-pub fn mask_secret(object: &mut Value) {
-    for field in SECRET_FIELDS {
-        let Some(entries) = object.get_mut(field).and_then(Value::as_object_mut) else {
-            continue;
-        };
-        for value in entries.values_mut() {
-            *value = Value::from(SECRET_MASK);
-        }
-    }
-}
-
-pub fn render(object: &mut Value, kind: &str) -> Result<String> {
-    strip_managed_fields(object);
-    if kind == SECRET_KIND {
-        mask_secret(object);
-    }
+pub fn render(object: &mut Value) -> Result<String> {
+    redact::object(object);
     Ok(serde_norway::to_string(object)?)
 }
 
@@ -110,7 +93,7 @@ pub async fn yaml(handle: &ClusterHandle, target: &ResourceRef) -> Result<Inspec
     let object = handle.get(&reference).await?;
     let version = object.metadata.resource_version.clone();
     let mut value = serde_json::to_value(&object)?;
-    let yaml = render(&mut value, &target.kind)?;
+    let yaml = render(&mut value)?;
     Ok(Inspected { version, yaml })
 }
 
@@ -180,18 +163,34 @@ mod tests {
 
     #[test]
     fn secrets_render_without_their_values() {
+        let applied = json!({
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": { "name": "stripe" },
+            "stringData": { "webhook-secret": "planted-password" }
+        });
         let mut secret = json!({
             "apiVersion": "v1",
             "kind": "Secret",
-            "metadata": { "name": "stripe", "managedFields": [{ "manager": "kubectl" }] },
+            "metadata": {
+                "name": "stripe",
+                "managedFields": [{ "manager": "kubectl" }],
+                "annotations": {
+                    "kubectl.kubernetes.io/last-applied-configuration": applied.to_string()
+                }
+            },
             "type": "Opaque",
             "data": { "webhook-secret": "c2VjcmV0" }
         });
-        let Ok(text) = render(&mut secret, "Secret") else {
+        let Ok(text) = render(&mut secret) else {
             panic!("render");
         };
-        assert!(text.contains("webhook-secret: ••••••"), "{text}");
+        assert!(
+            text.contains(&format!("webhook-secret: {}", redact::MASK)),
+            "{text}"
+        );
         assert!(!text.contains("c2VjcmV0"));
+        assert!(!text.contains("planted-password"), "{text}");
         assert!(!text.contains("managedFields"));
     }
 

@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 
 use fleet_core::TermSize;
+use fleet_flux::redact;
 use futures::{AsyncBufReadExt, SinkExt, StreamExt};
 use k8s_openapi::api::core::v1::Pod;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Status;
@@ -27,7 +28,6 @@ const LOG_CHANNEL_CAPACITY: usize = 1024;
 const EXEC_CHANNEL_CAPACITY: usize = 256;
 const EXEC_READ_BUFFER: usize = 8192;
 const LOOPBACK: &str = "127.0.0.1";
-const MANAGED_FIELDS: &str = "managedFields";
 const EXIT_SUCCESS: &str = "Success";
 const EXIT_CODE_CAUSE: &str = "ExitCode";
 
@@ -155,12 +155,6 @@ fn exit_of(status: Option<Status>) -> ExecExit {
     }
 }
 
-pub fn strip_managed_fields(object: &mut Value) {
-    if let Some(metadata) = object.get_mut("metadata").and_then(Value::as_object_mut) {
-        metadata.remove(MANAGED_FIELDS);
-    }
-}
-
 pub fn restart_patch(now: jiff::Timestamp) -> Value {
     json!({
         "spec": {
@@ -234,12 +228,10 @@ impl ClusterHandle {
         Ok(api.get(&target.name).await?)
     }
 
-    pub async fn get_yaml(&self, target: &ObjectRef, strip_managed: bool) -> Result<String> {
+    pub async fn get_yaml(&self, target: &ObjectRef) -> Result<String> {
         let object = self.get(target).await?;
         let mut value = serde_json::to_value(&object)?;
-        if strip_managed {
-            strip_managed_fields(&mut value);
-        }
+        redact::object(&mut value);
         Ok(serde_norway::to_string(&value)?)
     }
 
@@ -523,17 +515,6 @@ mod tests {
             patch["spec"]["template"]["metadata"]["annotations"][RESTARTED_AT_ANNOTATION],
             json!("2026-10-12T10:00:00Z")
         );
-    }
-
-    #[test]
-    fn strips_managed_fields_only() {
-        let mut object = json!({
-            "metadata": { "name": "x", "managedFields": [{"manager": "kubectl"}] },
-            "spec": { "managedFields": 1 }
-        });
-        strip_managed_fields(&mut object);
-        assert_eq!(object["metadata"], json!({ "name": "x" }));
-        assert_eq!(object["spec"]["managedFields"], json!(1));
     }
 
     #[test]

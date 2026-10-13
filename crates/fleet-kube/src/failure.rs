@@ -2,6 +2,7 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::io::ErrorKind;
 
+use fleet_flux::redact;
 use kube::client::AuthError;
 
 use crate::discovery::KubeContext;
@@ -38,6 +39,8 @@ const UNREACHABLE_MARKERS: [&str; 8] = [
 ];
 const TLS_MARKERS: [&str; 4] = ["certificate", "tls", "handshake", "unknownissuer"];
 const AWS_PROFILE_FLAG: &str = "--profile";
+const EXEC_PARSE_FAILED: &str =
+    "the credential plugin printed output that is not an ExecCredential";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FailureKind {
@@ -161,6 +164,18 @@ fn install_command(program: &str) -> Option<String> {
     }
 }
 
+fn auth_message(auth: &AuthError, context: &KubeContext) -> String {
+    let label = exec_label(&context.auth);
+    match auth {
+        AuthError::AuthExecRun { status, out, .. } => {
+            let stderr = redact::credentials(&String::from_utf8_lossy(&out.stderr));
+            format!("{label} failed with {status}: {}", stderr.trim())
+        }
+        AuthError::AuthExecParse(_) => format!("{label}: {EXEC_PARSE_FAILED}"),
+        _ => redact::credentials(&chain_text(auth)),
+    }
+}
+
 fn classify_auth(auth: &AuthError, context: &KubeContext, message: String) -> Failure {
     let label = exec_label(&context.auth);
     match auth {
@@ -177,13 +192,12 @@ fn classify_auth(auth: &AuthError, context: &KubeContext, message: String) -> Fa
                 message,
             }
         }
-        AuthError::AuthExecRun { out, .. } => {
+        AuthError::AuthExecRun { status, out, .. } => {
             let stderr = String::from_utf8_lossy(&out.stderr);
-            let stdout = String::from_utf8_lossy(&out.stdout);
             let output = if stderr.trim().is_empty() {
-                stdout
+                status.to_string()
             } else {
-                stderr
+                redact::credentials(&stderr)
             };
             if contains_any(&output, &EXPIRED_MARKERS) {
                 Failure {
@@ -201,6 +215,12 @@ fn classify_auth(auth: &AuthError, context: &KubeContext, message: String) -> Fa
                 }
             }
         }
+        AuthError::AuthExecParse(_) => Failure {
+            kind: FailureKind::AuthFailed,
+            detail: format!("{label}: {EXEC_PARSE_FAILED}"),
+            remedy: login_command(context),
+            message,
+        },
         _ => Failure {
             kind: FailureKind::AuthFailed,
             detail: format!("{label}: {}", first_line(&auth.to_string())),
@@ -268,6 +288,7 @@ pub fn classify(err: &Error, context: &KubeContext) -> Failure {
         };
     }
     if let Some(auth) = find_auth_error(err) {
+        let message = auth_message(auth, context);
         return classify_auth(auth, context, message);
     }
     if let Some(kube::Error::Api(status)) = kube_error(err) {
@@ -374,6 +395,32 @@ mod tests {
             Some("aws sso login --profile sandbox")
         );
         assert!(failure.kind.is_auth());
+    }
+
+    #[test]
+    fn exec_plugin_output_never_reaches_the_failure() {
+        let ctx = context(Provider::Eks, "aws", &["eks", "get-token"]);
+        let auth = AuthError::AuthExecRun {
+            cmd: "aws".to_owned(),
+            status: ExitStatus::from_raw(EXIT_FAILURE_RAW),
+            out: Output {
+                status: ExitStatus::from_raw(EXIT_FAILURE_RAW),
+                stdout: br#"{"status":{"token":"planted-exec-token"}}"#.to_vec(),
+                stderr: Vec::new(),
+            },
+        };
+        let failure = classify(&Error::Kube(kube::Error::Auth(auth)), &ctx);
+        assert_eq!(failure.kind, FailureKind::AuthFailed);
+        assert!(
+            !failure.message.contains("planted-exec-token"),
+            "{}",
+            failure.message
+        );
+        assert!(
+            !failure.detail.contains("planted-exec-token"),
+            "{}",
+            failure.detail
+        );
     }
 
     #[test]
