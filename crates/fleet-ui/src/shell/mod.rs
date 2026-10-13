@@ -143,5 +143,6 @@ impl Render for Shell {
                     .child(self.page(cx)),
             )
             .child(self.status_bar(cx))
+            .child(crate::kit::overlay_layer(cx))
     }
 }

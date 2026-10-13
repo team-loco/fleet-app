@@ -9,16 +9,24 @@ pub const FONT_MONO: &str = "IBM Plex Mono";
 pub const TEXT_UI: Pixels = px(13.);
 pub const TEXT_MONO: Pixels = px(12.);
 pub const TEXT_LABEL: Pixels = px(11.);
-pub const TEXT_BADGE: Pixels = px(11.5);
+pub const TEXT_SMALL: Pixels = px(11.5);
 pub const TEXT_GLYPH: Pixels = px(10.);
 pub const TEXT_TITLE: Pixels = px(14.);
+pub const TEXT_BODY: Pixels = px(12.5);
+pub const TEXT_CONTROL: Pixels = px(12.);
+pub const TEXT_AXIS: Pixels = px(10.5);
+pub const TEXT_HEADING: Pixels = px(16.);
+pub const LINE_PROSE: f32 = 1.5;
 
 pub const RADIUS: Pixels = px(3.);
 pub const RADIUS_MENU: Pixels = px(4.);
+pub const RADIUS_SMALL: Pixels = px(2.);
 pub const RULE: Pixels = px(1.);
 
 pub const ROW_TABLE_MIN: Pixels = px(24.);
 pub const ROW_TABLE_MAX: Pixels = px(28.);
+pub const ROW_TABLE: Pixels = px(26.);
+pub const ROW_MENU_PAD_Y: Pixels = px(6.);
 pub const ROW_NAV: Pixels = px(26.);
 pub const ROW_CLUSTER: Pixels = px(28.);
 
@@ -45,7 +53,54 @@ pub const SPACE_6: Pixels = px(12.);
 pub const SPACE_7: Pixels = px(14.);
 pub const SPACE_8: Pixels = px(16.);
 
+pub const CONTROL: Pixels = px(24.);
+pub const CONTROL_SMALL: Pixels = px(20.);
+pub const SEGMENT: Pixels = px(22.);
+pub const MORE_BUTTON: Pixels = px(28.);
+pub const SEARCH_WIDTH: Pixels = px(180.);
+pub const MENU_WIDTH: Pixels = px(300.);
+pub const MENU_MAX_HEIGHT: Pixels = px(360.);
+pub const DIALOG_WIDTH: Pixels = px(440.);
+pub const DIALOG_TOP: Pixels = px(84.);
+pub const TOAST_WIDTH: Pixels = px(320.);
+pub const SHADOW_OFFSET: Pixels = px(12.);
+pub const SHADOW_BLUR: Pixels = px(32.);
+pub const POPOVER_SLIDE: Pixels = px(4.);
+pub const TOOLTIP_MAX_WIDTH: Pixels = px(280.);
+
+pub const TOGGLE_WIDTH: Pixels = px(28.);
+pub const TOGGLE_HEIGHT: Pixels = px(16.);
+pub const TOGGLE_KNOB: Pixels = px(12.);
+pub const CHECKBOX: Pixels = px(14.);
+
+pub const KV_LABEL: Pixels = px(72.);
+pub const DOCK_HEIGHT: Pixels = px(250.);
+pub const DOCK_BAR: Pixels = px(30.);
+pub const SPLITTER: Pixels = px(5.);
+pub const SPLIT_MIN: Pixels = px(160.);
+pub const LOG_LINE: Pixels = px(19.);
+pub const LOG_LEVEL: Pixels = px(40.);
+pub const LOG_TIMESTAMP: Pixels = px(96.);
+pub const CODE_LINE: Pixels = px(20.);
+pub const GUTTER_NUMBER: Pixels = px(40.);
+pub const GUTTER_SIGN: Pixels = px(16.);
+pub const DIFF_HEADER: Pixels = px(28.);
+
+pub const METER: Pixels = px(6.);
+pub const METER_MINI: Pixels = px(4.);
+pub const METER_MINI_WIDTH: Pixels = px(36.);
+pub const METER_MARKER: Pixels = px(12.);
+pub const METER_MARKER_WIDTH: Pixels = px(2.);
+pub const CHART_HEIGHT: Pixels = px(170.);
+pub const CHART_AXIS: Pixels = px(30.);
+pub const CHART_STROKE: Pixels = px(2.);
+pub const CHART_DASH: Pixels = px(4.);
+pub const LEGEND_SWATCH: Pixels = px(10.);
+
 pub const COLLAPSE: Duration = Duration::from_millis(150);
+pub const POPOVER_IN: Duration = Duration::from_millis(120);
+pub const FLASH: Duration = Duration::from_millis(900);
+pub const TOAST_TIMEOUT: Duration = Duration::from_secs(4);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Appearance {
@@ -87,6 +142,16 @@ pub struct Palette {
     pub okbg: Hsla,
     pub warnbg: Hsla,
     pub errbg: Hsla,
+    pub raise: Hsla,
+    pub guide: Hsla,
+    pub sep: Hsla,
+    pub accbg: Hsla,
+    pub addbg: Hsla,
+    pub delbg: Hsla,
+    pub addfg: Hsla,
+    pub delfg: Hsla,
+    pub shadow: Hsla,
+    pub scrim: Hsla,
 }
 
 impl Palette {
@@ -113,6 +178,16 @@ impl Palette {
             okbg: rgba(0x48C7_8E1A).into(),
             warnbg: rgba(0xE8B0_4B1A).into(),
             errbg: rgba(0xF26D_6D1C).into(),
+            raise: rgb(0x0020_242A).into(),
+            guide: rgb(0x002A_2E35).into(),
+            sep: rgb(0x004C_525C).into(),
+            accbg: rgba(0x74AD_FF1F).into(),
+            addbg: rgba(0x48C7_8E1F).into(),
+            delbg: rgba(0xF26D_6D21).into(),
+            addfg: rgb(0x007F_DDB2).into(),
+            delfg: rgb(0x00FF_9C9C).into(),
+            shadow: rgba(0x0000_0080).into(),
+            scrim: rgba(0x0405_078C).into(),
         }
     }
 
@@ -139,6 +214,16 @@ impl Palette {
             okbg: rgba(0x167A_4C14).into(),
             warnbg: rgba(0x9358_0014).into(),
             errbg: rgba(0xC530_3012).into(),
+            raise: rgb(0x00E9_EBEE).into(),
+            guide: rgb(0x00E4_E6EA).into(),
+            sep: rgb(0x00A5_ABB5).into(),
+            accbg: rgba(0x1F5F_D114).into(),
+            addbg: rgba(0x167A_4C1A).into(),
+            delbg: rgba(0xC530_3017).into(),
+            addfg: rgb(0x000F_5E3A).into(),
+            delfg: rgb(0x00A1_2626).into(),
+            shadow: rgba(0x1418_202E).into(),
+            scrim: rgba(0x1418_2038).into(),
         }
     }
 
@@ -157,6 +242,17 @@ impl Palette {
             Status::Progress => self.acc,
             Status::Suspended => self.sus,
             Status::Offline => self.mute,
+        }
+    }
+
+    pub fn tint(&self, status: Status) -> Option<Hsla> {
+        match status {
+            Status::Ok => Some(self.okbg),
+            Status::Warn => Some(self.warnbg),
+            Status::Err => Some(self.errbg),
+            Status::Progress => None,
+            Status::Suspended => None,
+            Status::Offline => None,
         }
     }
 }

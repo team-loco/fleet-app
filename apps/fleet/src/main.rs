@@ -7,7 +7,7 @@ use fleet_core::{Backend, ClusterId, Command, Page};
 use fleet_demo::DemoBackend;
 use fleet_ui::actions::{ToggleClustersPanel, ToggleResourcesPanel};
 use fleet_ui::theme::{Appearance, TRAFFIC_LIGHT_X, TRAFFIC_LIGHT_Y};
-use fleet_ui::{Root, Shell, assets};
+use fleet_ui::{Gallery, Root, Shell, assets};
 use gpui::{
     App, AppContext as _, Bounds, KeyBinding, Size, TitlebarOptions, WindowBounds, WindowOptions,
     point, px, size,
@@ -42,6 +42,8 @@ enum Screen {
     Fleet,
     Cluster,
     Collapsed,
+    Kit,
+    KitOverlays,
 }
 
 impl Screen {
@@ -55,6 +57,8 @@ impl Screen {
                 Command::ToggleClustersPanel,
                 Command::ToggleResourcesPanel,
             ],
+            Self::Kit => Vec::new(),
+            Self::KitOverlays => Vec::new(),
         }
     }
 }
@@ -87,13 +91,13 @@ fn main() -> anyhow::Result<()> {
     Box::new(DemoBackend).start(update_tx, command_rx);
 
     let forced = args.appearance.map(Appearance::from);
-    let initial = args.screen.commands();
+    let screen = args.screen;
     let failure = Rc::new(RefCell::new(None));
     let failed = failure.clone();
     gpui_platform::application()
         .with_assets(assets::Assets)
         .run(move |cx: &mut App| {
-            if let Err(error) = launch(cx, forced, update_rx, command_tx, initial) {
+            if let Err(error) = launch(cx, forced, update_rx, command_tx, screen) {
                 failed.replace(Some(error));
                 cx.quit();
             }
@@ -106,7 +110,7 @@ fn launch(
     forced: Option<Appearance>,
     updates: async_channel::Receiver<fleet_core::Update>,
     commands: async_channel::Sender<Command>,
-    initial: Vec<Command>,
+    screen: Screen,
 ) -> anyhow::Result<()> {
     fleet_ui::init(forced, cx)?;
     cx.bind_keys([
@@ -133,10 +137,28 @@ fn launch(
         ..WindowOptions::default()
     };
     cx.open_window(options, |window, cx| {
-        let shell = cx.new(|cx| Shell::new(updates, commands, initial, window, cx));
-        cx.new(|cx| Root::new(shell, window, cx))
+        let view: gpui::AnyView = match screen {
+            Screen::Kit => cx.new(|cx| Gallery::new(false, window, cx)).into(),
+            Screen::KitOverlays => cx.new(|cx| Gallery::new(true, window, cx)).into(),
+            Screen::Fleet => shell_view(updates, commands, screen, window, cx),
+            Screen::Cluster => shell_view(updates, commands, screen, window, cx),
+            Screen::Collapsed => shell_view(updates, commands, screen, window, cx),
+        };
+        cx.new(|cx| Root::new(view, window, cx))
     })
     .context("opening the Fleet window")?;
     cx.activate(true);
     Ok(())
+}
+
+fn shell_view(
+    updates: async_channel::Receiver<fleet_core::Update>,
+    commands: async_channel::Sender<Command>,
+    screen: Screen,
+    window: &mut gpui::Window,
+    cx: &mut App,
+) -> gpui::AnyView {
+    let initial = screen.commands();
+    cx.new(|cx| Shell::new(updates, commands, initial, window, cx))
+        .into()
 }

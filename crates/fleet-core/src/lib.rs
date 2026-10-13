@@ -3,6 +3,7 @@ pub mod id;
 pub mod nav;
 pub mod state;
 pub mod status;
+pub mod time;
 
 pub use async_channel::{Receiver, Sender};
 pub use fleet::{ClusterSummary, Snapshot};

@@ -3,7 +3,7 @@ use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, div};
 
 use super::Shell;
 use crate::theme::{
-    ActiveTheme, FONT_MONO, RULE, SPACE_5, SPACE_6, SPACE_8, STATUS_BAR, TEXT_BADGE,
+    ActiveTheme, FONT_MONO, RULE, SPACE_5, SPACE_6, SPACE_8, STATUS_BAR, TEXT_SMALL,
 };
 
 const SEPARATOR: &str = " · ";
@@ -35,7 +35,7 @@ impl Shell {
             .border_color(palette.line)
             .bg(palette.chrome)
             .font_family(FONT_MONO)
-            .text_size(TEXT_BADGE)
+            .text_size(TEXT_SMALL)
             .text_color(palette.mute)
             .whitespace_nowrap()
             .overflow_hidden()

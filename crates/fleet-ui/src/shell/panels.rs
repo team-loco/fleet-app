@@ -12,7 +12,7 @@ use crate::assets::{CHEVRON_LEFT, CHEVRON_RIGHT};
 use crate::theme::{
     ActiveTheme, CLUSTERS_PANEL, COLLAPSE, FONT_MONO, GLYPH_SLOT, ICON, ICON_BUTTON, PANEL_HEADER,
     Palette, RADIUS, RESOURCES_PANEL, ROW_CLUSTER, ROW_NAV, RULE, SPACE_1, SPACE_2, SPACE_3,
-    SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8, STRIP, TEXT_BADGE, TEXT_GLYPH, TEXT_LABEL,
+    SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8, STRIP, TEXT_GLYPH, TEXT_LABEL, TEXT_SMALL,
     TEXT_UI,
 };
 
@@ -254,7 +254,7 @@ fn badge(text: String, color: Hsla) -> AnyElement {
     div()
         .ml(SPACE_4)
         .font_family(FONT_MONO)
-        .text_size(TEXT_BADGE)
+        .text_size(TEXT_SMALL)
         .text_color(color)
         .child(text)
         .into_any_element()

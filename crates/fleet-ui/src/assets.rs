@@ -4,6 +4,8 @@ use gpui::{App, AssetSource, SharedString};
 
 pub const CHEVRON_LEFT: &str = "icons/chevron-left.svg";
 pub const CHEVRON_RIGHT: &str = "icons/chevron-right.svg";
+pub const CHEVRON_DOWN: &str = "icons/chevron-down.svg";
+pub const CHEVRON_UP: &str = "icons/chevron-up.svg";
 
 const ICONS: &[(&str, &[u8])] = &[
     (
@@ -14,6 +16,11 @@ const ICONS: &[(&str, &[u8])] = &[
         CHEVRON_RIGHT,
         include_bytes!("../assets/icons/chevron-right.svg"),
     ),
+    (
+        CHEVRON_DOWN,
+        include_bytes!("../assets/icons/chevron-down.svg"),
+    ),
+    (CHEVRON_UP, include_bytes!("../assets/icons/chevron-up.svg")),
 ];
 
 const FONTS: &[&[u8]] = &[
