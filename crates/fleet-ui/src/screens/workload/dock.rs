@@ -3,7 +3,7 @@ use std::ops::Range;
 use fleet_core::workload::{Event, Pod};
 use fleet_core::{
     Command, ExecEvent, ExecRequest, ExecTarget, LogLevel, LogRequest, ResourceRef, Sink, Source,
-    Workload,
+    TermSize, Workload,
 };
 use gpui::{
     AnyElement, Context, Entity, Focusable, IntoElement, ParentElement, Pixels, Styled,
@@ -45,6 +45,7 @@ const EVENT_COUNT: Pixels = px(34.);
 
 pub struct ExecSession {
     input: async_channel::Sender<Vec<u8>>,
+    resize: async_channel::Sender<TermSize>,
     debug: bool,
     open: bool,
     _task: gpui::Task<()>,
@@ -74,9 +75,16 @@ pub fn subscribe(
             }
         }),
         cx.subscribe(terminal, |this, _, event: &TerminalEvent, _| {
-            let TerminalEvent::Input(bytes) = event;
-            if let Some(session) = this.exec.as_ref().filter(|session| session.open) {
-                session.input.try_send(bytes.clone()).ok();
+            let Some(session) = this.exec.as_ref().filter(|session| session.open) else {
+                return;
+            };
+            match event {
+                TerminalEvent::Input(bytes) => {
+                    session.input.try_send(bytes.clone()).ok();
+                }
+                TerminalEvent::Resize(size) => {
+                    session.resize.try_send(*size).ok();
+                }
             }
         }),
     ]
@@ -186,6 +194,10 @@ impl WorkloadScreen {
             debug_image: debug.then(|| DEBUG_IMAGE.to_owned()),
         };
         let (input, source) = Source::channel();
+        let (resize, sizes) = Source::channel();
+        if let Some(size) = self.terminal.read(cx).size() {
+            resize.try_send(size).ok();
+        }
         let (output, events) = Sink::channel();
         let command_line = target.command_line();
         self.terminal.update(cx, |terminal, cx| {
@@ -195,6 +207,7 @@ impl WorkloadScreen {
         cx.emit(Command::Exec(ExecRequest {
             target,
             input: source,
+            resize: sizes,
             output,
         }));
         let task = cx.spawn(async move |this, cx| {
@@ -207,6 +220,7 @@ impl WorkloadScreen {
         });
         self.exec = Some(ExecSession {
             input,
+            resize,
             debug,
             open: true,
             _task: task,

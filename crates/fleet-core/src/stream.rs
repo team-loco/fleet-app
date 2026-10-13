@@ -153,10 +153,17 @@ pub enum ExecEvent {
     Exited { code: Option<i32> },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TermSize {
+    pub cols: u16,
+    pub rows: u16,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecRequest {
     pub target: ExecTarget,
     pub input: Source<Vec<u8>>,
+    pub resize: Source<TermSize>,
     pub output: Sink<ExecEvent>,
 }
 

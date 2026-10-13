@@ -266,13 +266,18 @@ async fn perform(handle: &ClusterHandle, mutation: &Mutation) -> Result<Vec<drai
                 .namespace
                 .as_deref()
                 .ok_or(Error::MissingField("metadata.namespace"))?;
-            if target.kind != rollout::DEPLOYMENT {
-                return Err(Error::Unsupported {
-                    action: "Roll back",
-                    kind: target.kind.clone(),
-                });
+            if target.kind == rollout::DEPLOYMENT {
+                rollout::rollback(handle, namespace, &target.name, *revision).await?;
+            } else {
+                rollout::rollback_controller(
+                    handle,
+                    &target.kind,
+                    namespace,
+                    &target.name,
+                    *revision,
+                )
+                .await?;
             }
-            rollout::rollback(handle, namespace, &target.name, *revision).await?;
         }
         Mutation::Flux(key, action) => mutate::flux(handle, key, *action).await?,
     }

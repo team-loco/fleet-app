@@ -1,9 +1,11 @@
 use std::ops::Range;
 
+use fleet_core::TermSize;
 use gpui::{
     AnyElement, App, Context, ElementId, EventEmitter, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, KeyDownEvent, ParentElement, Render, SharedString, StatefulInteractiveElement,
-    Styled, UniformListScrollHandle, Window, div, uniform_list,
+    IntoElement, KeyDownEvent, ParentElement, Pixels, Render, SharedString,
+    StatefulInteractiveElement, Styled, UniformListScrollHandle, Window, canvas, div, font,
+    uniform_list,
 };
 
 use crate::theme::{
@@ -170,11 +172,36 @@ pub fn key_bytes(key: &str, key_char: Option<&str>, control: bool) -> Option<Vec
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TerminalEvent {
     Input(Vec<u8>),
+    Resize(TermSize),
+}
+
+pub fn grid(width: Pixels, height: Pixels, cell: Pixels) -> TermSize {
+    let usable_width = f32::from(width) - 2. * f32::from(SPACE_6);
+    let usable_height = f32::from(height) - 2. * f32::from(SPACE_3);
+    let cols = (usable_width / f32::from(cell)).floor();
+    let rows = (usable_height / f32::from(LOG_LINE)).floor();
+    TermSize {
+        cols: cells(cols),
+        rows: cells(rows),
+    }
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "clamped to the u16 range first"
+)]
+fn cells(count: f32) -> u16 {
+    if count.is_nan() {
+        return 1;
+    }
+    count.clamp(1., f32::from(u16::MAX)) as u16
 }
 
 pub struct Terminal {
     id: SharedString,
     buffer: TerminalBuffer,
+    size: Option<TermSize>,
     scroll: UniformListScrollHandle,
     focus: FocusHandle,
 }
@@ -186,6 +213,7 @@ impl Terminal {
         Self {
             id: id.into(),
             buffer: TerminalBuffer::default(),
+            size: None,
             scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle(),
         }
@@ -208,6 +236,17 @@ impl Terminal {
 
     pub fn is_open(&self) -> bool {
         self.buffer.is_open()
+    }
+
+    pub fn size(&self) -> Option<TermSize> {
+        self.size
+    }
+
+    fn measured(&mut self, size: TermSize, cx: &mut Context<Self>) {
+        if self.size != Some(size) {
+            self.size = Some(size);
+            cx.emit(TerminalEvent::Resize(size));
+        }
     }
 
     fn after_change(&mut self, cx: &mut Context<Self>) {
@@ -279,8 +318,24 @@ impl Focusable for Terminal {
 }
 
 impl Render for Terminal {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
+        let font_id = window.text_system().resolve_font(&font(FONT_MONO));
+        let cell = window.text_system().em_advance(font_id, TEXT_MONO).ok();
+        let this = cx.entity().downgrade();
+        let measure = canvas(
+            move |bounds, _, cx| {
+                let Some(cell) = cell else {
+                    return;
+                };
+                let size = grid(bounds.size.width, bounds.size.height, cell);
+                this.update(cx, |terminal, cx| terminal.measured(size, cx))
+                    .ok();
+            },
+            |_, (), _, _| {},
+        )
+        .absolute()
+        .size_full();
         let list = uniform_list(
             ElementId::Name(self.id.clone()),
             self.buffer.lines().len(),
@@ -294,6 +349,7 @@ impl Render for Terminal {
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
             .on_click(cx.listener(|this, _, window, cx| window.focus(&this.focus, cx)))
+            .relative()
             .size_full()
             .flex()
             .flex_col()
@@ -301,12 +357,15 @@ impl Render for Terminal {
             .bg(palette.editor)
             .font_family(FONT_MONO)
             .text_size(TEXT_MONO)
+            .child(measure)
             .child(list)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use gpui::px;
+
     use super::*;
 
     fn texts(buffer: &TerminalBuffer) -> Vec<&str> {
@@ -315,6 +374,18 @@ mod tests {
             .iter()
             .map(|line| line.text.as_str())
             .collect()
+    }
+
+    #[test]
+    fn grid_fits_whole_cells_inside_the_padding() {
+        let width = SPACE_6 * 2. + px(7.5) * 80.;
+        let height = SPACE_3 * 2. + LOG_LINE * 24.;
+        assert_eq!(
+            grid(width + px(5.), height + px(3.), px(7.5)),
+            TermSize { cols: 80, rows: 24 }
+        );
+        assert_eq!(grid(px(0.), px(0.), px(7.5)), TermSize { cols: 1, rows: 1 });
+        assert_eq!(grid(width, height, px(0.)).rows, 24);
     }
 
     #[test]

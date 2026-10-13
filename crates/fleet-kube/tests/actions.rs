@@ -3,16 +3,17 @@ use std::time::Instant;
 use fleet_core::flux::{FluxAction, FluxKey, FluxKind};
 use fleet_core::{
     Backend, ClusterId, Command, ContextRef, ExecEvent, ExecRequest, ExecTarget, LogLine,
-    LogRequest, NewCluster, Receiver, ResourceRef, Sender, Sink, Snapshot, Source, Update,
+    LogRequest, NewCluster, Receiver, ResourceRef, Sender, Sink, Snapshot, Source, TermSize,
+    Update,
 };
 use fleet_kube::LiveBackend;
 use fleet_kube::discovery::{DiscoverySources, KubeContext, discover};
 use fleet_kube::settings::KubeSettings;
 use fleet_kube::store::ClusterStore;
-use k8s_openapi::api::apps::v1::Deployment;
+use k8s_openapi::api::apps::v1::{ControllerRevision, Deployment, StatefulSet};
 use k8s_openapi::api::core::v1::{ConfigMap, Node, Pod, PodTemplateSpec};
 use kube::api::{ApiResource, DynamicObject, GroupVersionKind};
-use kube::api::{DeleteParams, ListParams, PostParams};
+use kube::api::{DeleteParams, ListParams, Patch, PatchParams, PostParams};
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::{Api, Client, Config, ResourceExt};
 use serde_json::json;
@@ -37,6 +38,9 @@ const DEBUG_NAMESPACE: &str = "default";
 const DEBUG_POD: &str = "fleet-actions-e2e";
 const DEBUG_IMAGE: &str = "busybox:1.37";
 const ECHO_MARKER: &str = "fleet-e2e-exec";
+const SCRATCH_STATEFUL_SET: &str = "fleet-rollback-e2e";
+const NEWER_IMAGE: &str = "busybox:1.36";
+const SHELL_SIZE: TermSize = TermSize { cols: 97, rows: 23 };
 
 fn enabled() -> bool {
     std::env::var(E2E_VAR).is_ok_and(|value| value == "1")
@@ -235,15 +239,27 @@ async fn exec_events(events: &Receiver<ExecEvent>) -> (Vec<ExecEvent>, String) {
     (seen, output)
 }
 
-fn run_shell(harness: &Harness, target: ExecTarget) -> (Sender<Vec<u8>>, Receiver<ExecEvent>) {
+struct Shell {
+    input: Sender<Vec<u8>>,
+    resize: Sender<TermSize>,
+    events: Receiver<ExecEvent>,
+}
+
+fn run_shell(harness: &Harness, target: ExecTarget) -> Shell {
     let (input, source) = Source::channel();
+    let (resize, sizes) = Source::channel();
     let (output, events) = Sink::channel();
     harness.send(Command::Exec(ExecRequest {
         target,
         input: source,
+        resize: sizes,
         output,
     }));
-    (input, events)
+    Shell {
+        input,
+        resize,
+        events,
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -257,15 +273,21 @@ async fn exec_runs_a_shell_with_a_tty() {
         container: PODINFO_CONTAINER.into(),
         debug_image: None,
     };
-    let (input, events) = run_shell(&harness, target);
-    let script = format!("echo {ECHO_MARKER}-$((40 + 2))\rexit\r");
+    let Shell {
+        input,
+        resize,
+        events,
+    } = run_shell(&harness, target);
+    assert!(resize.send(SHELL_SIZE).await.is_ok());
+    let script = format!("echo {ECHO_MARKER}-$((40 + 2)) $(stty size)\rexit\r");
     assert!(input.send(script.into_bytes()).await.is_ok());
     let (seen, output) = exec_events(&events).await;
     assert!(
         matches!(seen.first(), Some(ExecEvent::Started { .. })),
         "{seen:?}"
     );
-    assert!(output.contains(&format!("{ECHO_MARKER}-42")), "{output}");
+    let size = format!("{ECHO_MARKER}-42 {} {}", SHELL_SIZE.rows, SHELL_SIZE.cols);
+    assert!(output.contains(&size), "{output}");
     assert_eq!(seen.last(), Some(&ExecEvent::Exited { code: Some(0) }));
 }
 
@@ -318,7 +340,7 @@ async fn debug_shell_attaches_an_ephemeral_container() {
         container: "main".into(),
         debug_image: Some(DEBUG_IMAGE.into()),
     };
-    let (input, events) = run_shell(&harness, target);
+    let Shell { input, events, .. } = run_shell(&harness, target);
     let Ok(Ok(started)) = tokio::time::timeout(WAIT, events.recv()).await else {
         panic!("debug session never started");
     };
@@ -529,6 +551,103 @@ async fn restart_then_roll_back_to_the_original_template() {
     )
     .await;
     no_notices(&harness);
+}
+
+fn scratch_stateful_set(image: &str) -> StatefulSet {
+    let Ok(set) = serde_json::from_value(json!({
+        "metadata": { "name": SCRATCH_STATEFUL_SET },
+        "spec": {
+            "replicas": 0,
+            "serviceName": SCRATCH_STATEFUL_SET,
+            "selector": { "matchLabels": { "app": SCRATCH_STATEFUL_SET } },
+            "template": {
+                "metadata": { "labels": { "app": SCRATCH_STATEFUL_SET } },
+                "spec": { "containers": [{ "name": "main", "image": image, "command": ["sleep", "3600"] }] }
+            }
+        }
+    })) else {
+        panic!("statefulset fixture");
+    };
+    set
+}
+
+async fn stateful_image(sets: &Api<StatefulSet>) -> Option<String> {
+    let set = sets.get(SCRATCH_STATEFUL_SET).await.ok()?;
+    set.spec?.template.spec?.containers.first()?.image.clone()
+}
+
+async fn revisions_of(client: &Client) -> usize {
+    let history: Api<ControllerRevision> = Api::namespaced(client.clone(), DEBUG_NAMESPACE);
+    let listed = history.list(&ListParams::default()).await;
+    listed.map_or(0, |list| {
+        list.items
+            .iter()
+            .filter(|revision| {
+                revision
+                    .metadata
+                    .name
+                    .as_deref()
+                    .is_some_and(|name| name.starts_with(SCRATCH_STATEFUL_SET))
+            })
+            .count()
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stateful_set_rolls_back_through_controller_revisions() {
+    let Some(harness) = Harness::start().await else {
+        return;
+    };
+    let sets: Api<StatefulSet> = Api::namespaced(harness.client.clone(), DEBUG_NAMESPACE);
+    let _ = sets
+        .delete(SCRATCH_STATEFUL_SET, &DeleteParams::default())
+        .await;
+    eventually(
+        "old statefulset gone",
+        || async { sets.get_opt(SCRATCH_STATEFUL_SET).await.ok().flatten() },
+        Option::is_none,
+    )
+    .await;
+    let created = sets
+        .create(&PostParams::default(), &scratch_stateful_set(DEBUG_IMAGE))
+        .await;
+    assert!(created.is_ok(), "{created:?}");
+    eventually(
+        "first revision",
+        || revisions_of(&harness.client),
+        |count| *count == 1,
+    )
+    .await;
+    let changed = json!({ "spec": { "template": { "spec": { "containers": [{ "name": "main", "image": NEWER_IMAGE }] } } } });
+    let patched = sets
+        .patch(
+            SCRATCH_STATEFUL_SET,
+            &PatchParams::default(),
+            &Patch::Strategic(changed),
+        )
+        .await;
+    assert!(patched.is_ok(), "{patched:?}");
+    eventually(
+        "second revision",
+        || revisions_of(&harness.client),
+        |count| *count == 2,
+    )
+    .await;
+    harness.send(Command::Rollback {
+        target: resource("StatefulSet", Some(DEBUG_NAMESPACE), SCRATCH_STATEFUL_SET),
+        revision: 0,
+    });
+    eventually(
+        "rolled back",
+        || stateful_image(&sets),
+        |image| image.as_deref() == Some(DEBUG_IMAGE),
+    )
+    .await;
+    no_notices(&harness);
+    let deleted = sets
+        .delete(SCRATCH_STATEFUL_SET, &DeleteParams::default())
+        .await;
+    assert!(deleted.is_ok(), "{deleted:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

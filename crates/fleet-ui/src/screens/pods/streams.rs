@@ -1,7 +1,7 @@
 use fleet_core::pods::{Container, ContainerState, Pod};
 use fleet_core::{
     Command, ExecEvent, ExecRequest, ExecTarget, LogRequest, ResourceRef, Sender, Sink, Source,
-    Status,
+    Status, TermSize,
 };
 use gpui::{
     AppContext as _, Context, Focusable, IntoElement, ParentElement, Styled, Subscription, Task,
@@ -58,6 +58,7 @@ pub struct ShellSession {
     key: ShellKey,
     debug: bool,
     input: Sender<Vec<u8>>,
+    resize: Sender<TermSize>,
     open: bool,
     _task: Task<()>,
     _input: Subscription,
@@ -190,17 +191,29 @@ impl PodsScreen {
             terminal.set_open(true, cx);
         });
         let forward = cx.subscribe(&terminal, |this, _, event: &TerminalEvent, _| {
-            let TerminalEvent::Input(bytes) = event;
-            if let Some(session) = this.shell.as_ref().filter(|s| s.open) {
-                session.input.try_send(bytes.clone()).ok();
+            let Some(session) = this.shell.as_ref().filter(|s| s.open) else {
+                return;
+            };
+            match event {
+                TerminalEvent::Input(bytes) => {
+                    session.input.try_send(bytes.clone()).ok();
+                }
+                TerminalEvent::Resize(size) => {
+                    session.resize.try_send(*size).ok();
+                }
             }
         });
-        self.terminal = terminal;
         let (input, source) = Source::channel();
+        let (resize, sizes) = Source::channel();
+        if let Some(size) = terminal.read(cx).size() {
+            resize.try_send(size).ok();
+        }
+        self.terminal = terminal;
         let (output, events) = Sink::channel();
         cx.emit(Command::Exec(ExecRequest {
             target,
             input: source,
+            resize: sizes,
             output,
         }));
         let task = cx.spawn(async move |this, cx| {
@@ -215,6 +228,7 @@ impl PodsScreen {
             key,
             debug,
             input,
+            resize,
             open: true,
             _task: task,
             _input: forward,
