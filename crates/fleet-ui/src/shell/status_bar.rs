@@ -13,6 +13,7 @@ use crate::theme::{
 };
 
 const SEPARATOR: &str = " · ";
+const FLUX: &str = "flux";
 #[cfg(feature = "loco")]
 const LOCO_SYNC_UNKNOWN: &str = "loco agent · sync not observable in-cluster";
 
@@ -25,7 +26,15 @@ impl Shell {
             None if self.state.page == Page::Changes => snapshot.changes.fetched_label(),
             Some(cluster) => {
                 let version = cluster.version.as_deref().unwrap_or("—");
-                [cluster.distro.as_str(), cluster.region.as_str(), version].join(SEPARATOR)
+                let flux = snapshot
+                    .gitops
+                    .flux_version(&cluster.id)
+                    .map(|flux| format!("{FLUX} {flux}"));
+                [cluster.distro.as_str(), cluster.region.as_str(), version]
+                    .into_iter()
+                    .chain(flux.as_deref())
+                    .collect::<Vec<_>>()
+                    .join(SEPARATOR)
             }
             None if self.state.page == Page::GitOps => {
                 let flux = flux_ready(&snapshot.clusters);

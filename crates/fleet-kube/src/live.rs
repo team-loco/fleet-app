@@ -19,6 +19,7 @@ use crate::checks::{self, CheckResult, run_checks_streaming};
 use crate::discovery::{
     ContextRef, Discovery, DiscoveryEvent, DiscoverySources, KubeContext, discover,
 };
+use crate::gitops::GitOpsState;
 use crate::manager::{
     COALESCE_INTERVAL, ClusterHandle, ClusterManager, ConnectionStatus, Subscription,
 };
@@ -90,6 +91,7 @@ struct Live {
     page: Page,
     page_subscription: Option<Subscription>,
     actions: Actions,
+    gitops: GitOpsState,
 }
 
 impl Live {
@@ -139,6 +141,8 @@ impl Live {
                 },
             );
         }
+        self.gitops
+            .sync(self.clusters.values().map(|c| (&c.id, &c.handle)));
         self.resubscribe_page();
     }
 
@@ -160,6 +164,7 @@ impl Live {
     }
 
     fn apply(&mut self, command: &Command) -> bool {
+        self.gitops.command(command);
         match command {
             Command::SelectCluster(id) => {
                 self.selected.clone_from(id);
@@ -364,6 +369,7 @@ impl Live {
             forwards: Vec::new(),
         };
         self.actions.overlay(&mut snapshot);
+        self.gitops.fill(&mut snapshot);
         snapshot
     }
 }
@@ -435,7 +441,9 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
         page: Page::Overview,
         page_subscription: None,
         actions,
+        gitops: GitOpsState::default(),
     };
+    let gitops_changed = live.gitops.changed();
     live.reconcile();
     let mut dirty = true;
     let mut publish = tokio::time::interval(COALESCE_INTERVAL);
@@ -455,6 +463,11 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
                 }
             }
             changed = action_changes.recv() => {
+                if changed.is_ok() {
+                    dirty = true;
+                }
+            }
+            changed = gitops_changed.recv() => {
                 if changed.is_ok() {
                     dirty = true;
                 }
