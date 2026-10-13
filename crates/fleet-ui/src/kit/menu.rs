@@ -76,6 +76,7 @@ enum Trigger {
 pub struct ActionMenu {
     id: SharedString,
     trigger: Trigger,
+    bordered: bool,
     items: Vec<MenuItem>,
     open: bool,
     highlighted: Option<usize>,
@@ -90,6 +91,7 @@ impl ActionMenu {
         Self {
             id: id.into(),
             trigger: Trigger::More,
+            bordered: true,
             items: Vec::new(),
             open: false,
             highlighted: None,
@@ -109,6 +111,11 @@ impl ActionMenu {
             label: label.into(),
             shortcut,
         };
+        self
+    }
+
+    pub fn plain(mut self) -> Self {
+        self.bordered = false;
         self
     }
 
@@ -265,7 +272,7 @@ impl ActionMenu {
         });
         match &self.trigger {
             Trigger::More => IconButton::glyph(id, MORE, MORE_TOOLTIP)
-                .bordered()
+                .when(self.bordered, IconButton::bordered)
                 .selected(self.open)
                 .on_click(click)
                 .into_any_element(),

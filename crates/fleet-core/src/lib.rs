@@ -1,3 +1,4 @@
+pub mod add_cluster;
 pub mod changes;
 pub mod cluster;
 pub mod events;
@@ -15,6 +16,10 @@ pub mod state;
 pub mod status;
 pub mod time;
 
+pub use add_cluster::{
+    AddClusterFlow, AddClusterStep, Candidate, CheckLine, CheckStatus, ContextChoice, ContextRef,
+    KubeconfigFile, NewCluster, Verdict,
+};
 pub use async_channel::{Receiver, Sender};
 pub use changes::ChangesLog;
 pub use cluster::ClusterDetail;

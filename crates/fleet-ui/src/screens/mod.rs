@@ -1,3 +1,4 @@
+pub mod add_cluster;
 pub mod changes;
 pub mod command;
 mod events;

@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use anyhow::Context as _;
 use clap::{Parser, ValueEnum};
-use fleet_core::{Backend, ClusterId, Command, Page};
+use fleet_core::{AddClusterStep, Backend, ClusterId, Command, Page};
 use fleet_demo::DemoBackend;
 use fleet_kube::LiveBackend;
 use fleet_kube::discovery::DiscoverySources;
@@ -56,6 +56,8 @@ enum Screen {
     Kit,
     KitOverlays,
     KitPanes,
+    AddCluster,
+    AddClusterCheck,
 }
 
 impl Screen {
@@ -79,6 +81,8 @@ impl Screen {
             Self::Kit => Vec::new(),
             Self::KitOverlays => Vec::new(),
             Self::KitPanes => Vec::new(),
+            Self::AddCluster => vec![Command::OpenAddCluster(AddClusterStep::Pick)],
+            Self::AddClusterCheck => vec![Command::OpenAddCluster(AddClusterStep::Check)],
         }
     }
 }
@@ -183,6 +187,8 @@ fn launch(
             Screen::Namespaces => shell_view(updates, commands, screen, window, cx),
             Screen::Events => shell_view(updates, commands, screen, window, cx),
             Screen::Resources => shell_view(updates, commands, screen, window, cx),
+            Screen::AddCluster => shell_view(updates, commands, screen, window, cx),
+            Screen::AddClusterCheck => shell_view(updates, commands, screen, window, cx),
         };
         cx.new(|cx| Root::new(view, window, cx))
     })

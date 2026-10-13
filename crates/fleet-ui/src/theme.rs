@@ -112,6 +112,14 @@ pub const CHART_STROKE: Pixels = px(2.);
 pub const CHART_DASH: Pixels = px(4.);
 pub const LEGEND_SWATCH: Pixels = px(10.);
 
+pub const DIALOG_WIDE: Pixels = px(720.);
+pub const PICK_CHECK_COLUMN: Pixels = px(20.);
+pub const PICK_NAME_COLUMN: Pixels = px(180.);
+pub const PICK_ROW_PAD_Y: Pixels = px(7.);
+pub const CHECK_GLYPH_COLUMN: Pixels = px(14.);
+pub const CODE_PAD_Y: Pixels = px(3.);
+pub const EMPTY_WIDTH: Pixels = px(520.);
+
 pub const COLLAPSE: Duration = Duration::from_millis(150);
 pub const POPOVER_IN: Duration = Duration::from_millis(120);
 pub const PALETTE_IN: Duration = Duration::from_millis(140);

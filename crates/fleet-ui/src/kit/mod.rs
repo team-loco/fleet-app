@@ -8,6 +8,7 @@ mod input;
 mod inspector;
 mod log;
 mod menu;
+mod modal;
 mod overlay;
 mod popover;
 mod select;
@@ -29,6 +30,7 @@ pub use input::{
 pub use inspector::Inspector;
 pub use log::{LOG_CAPACITY, Level, LogLine, LogView, strip_ansi};
 pub use menu::{ActionMenu, MenuItem};
+pub use modal::Modal;
 pub use overlay::{ConfirmDialog, Overlays, Toast, confirm, layer as overlay_layer, toast};
 pub(crate) use popover::{Step, shadow, step};
 pub use select::{Select, SelectEvent};
