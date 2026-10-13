@@ -1,5 +1,6 @@
 pub mod assets;
 mod gallery;
+pub mod keymap;
 pub mod kit;
 pub mod prefs;
 pub mod screens;
@@ -10,7 +11,7 @@ pub mod theme;
 
 pub use gallery::{Gallery, GalleryPage};
 pub use gpui_component::Root;
-pub use shell::{NewWindowRequest, Shell, key_bindings};
+pub use shell::{NewWindowRequest, Shell};
 pub use store::Store;
 
 pub mod actions {
@@ -26,7 +27,19 @@ pub mod actions {
             OpenSelectedNewWindow,
             CloseWindow,
             OpenSettings,
-            FocusFilter
+            QuickOpen,
+            ShowCommands,
+            ToggleDock,
+            CloseInspector,
+            NextRecent,
+            PreviousRecent,
+            GoBack,
+            GoForward,
+            FocusFilter,
+            FocusSidebar,
+            FocusContent,
+            Quit,
+            NewWindow
         ]
     );
 }

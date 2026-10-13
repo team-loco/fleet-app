@@ -1,3 +1,4 @@
+mod keys;
 mod page;
 mod sidebar;
 mod status_bar;
@@ -8,15 +9,15 @@ use fleet_core::resource::short_kind;
 use fleet_core::{AddClusterStep, AppState, Command, Page, Sender, Status, Update};
 use gpui::{
     App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
-    KeyBinding, ParentElement, Render, Styled, Subscription, Task, Window, div,
+    ParentElement, Render, Styled, Subscription, Task, Window, div,
 };
 
 use crate::Store;
 use crate::actions::{
-    CloseWindow, CompareAcrossClusters, FocusFilter, FollowLogs, OpenSettings, ShowFluxOwner,
+    CompareAcrossClusters, FocusFilter, FollowLogs, OpenSettings, ShowFluxOwner,
     ToggleClusterSwitcher, ToggleCommandPalette, ToggleSidebar,
 };
-use crate::kit::{FilterBar, TERMINAL_CONTEXT, Toast, toast};
+use crate::kit::{FilterBar, Toast, toast};
 use crate::screens::add_cluster::{AddClusterDialog, AddClusterEvent};
 use crate::screens::app_settings::AppSettingsScreen;
 use crate::screens::changes::ChangesScreen;
@@ -32,14 +33,7 @@ use crate::screens::{ClusterPages, ScreenEvent};
 use crate::theme::{self, ActiveTheme, TEXT_UI};
 use switcher::{ClusterSwitcher, SwitcherEvent};
 
-const KEY_CONTEXT: &str = "Shell";
-const INPUT_CONTEXT: &str = "Input";
-const FILTER_KEY: &str = "/";
-
-pub fn key_bindings() -> Vec<KeyBinding> {
-    let context = format!("{KEY_CONTEXT} && !{INPUT_CONTEXT} && !{TERMINAL_CONTEXT}");
-    vec![KeyBinding::new(FILTER_KEY, FocusFilter, Some(&context))]
-}
+pub(crate) const KEY_CONTEXT: &str = "Shell";
 
 pub struct NewWindowRequest(pub Vec<Command>);
 
@@ -47,6 +41,7 @@ impl gpui::EventEmitter<NewWindowRequest> for Shell {}
 
 pub struct Shell {
     state: AppState,
+    keys: keys::Keyboard,
     window_id: u64,
     commands: Sender<Command>,
     pending: Vec<Command>,
@@ -152,6 +147,7 @@ impl Shell {
         });
         Self {
             state: AppState::default(),
+            keys: keys::Keyboard::new(cx),
             window_id,
             commands,
             pending: initial,
@@ -453,6 +449,7 @@ impl Shell {
         self.sync_page(cx);
         self.send(command);
         self.sync_palette(cx);
+        self.record_visit();
         cx.notify();
     }
 
@@ -531,15 +528,16 @@ impl Shell {
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
+        self.keep_keyboard_focus(window, cx);
         let page = self.page(window, cx);
-        div()
+        let root = div()
             .id("shell")
             .key_context(KEY_CONTEXT)
             .track_focus(&self.focus)
             .on_action(cx.listener(|this, _: &FocusFilter, window, cx| {
                 this.focus_filter(window, cx);
-            }))
-            .on_action(|_: &CloseWindow, window, _| window.remove_window())
+            }));
+        Self::key_actions(root, cx)
             .on_action(cx.listener(|this, _: &OpenSettings, _, cx| {
                 this.dispatch(Command::SelectPage(Page::Settings), cx);
             }))
@@ -574,7 +572,7 @@ impl Render for Shell {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .child(self.sidebar(cx))
+                    .child(self.sidebar(window, cx))
                     .child(page),
             )
             .child(self.status_bar(cx))
@@ -618,7 +616,7 @@ mod tests {
                     crate::actions::OpenSelectedNewWindow,
                     Some("CommandPalette"),
                 ),
-                KeyBinding::new("cmd-w", CloseWindow, None),
+                KeyBinding::new("cmd-w", crate::actions::CloseWindow, None),
             ]);
         });
         let (backend, updates) = async_channel::unbounded();

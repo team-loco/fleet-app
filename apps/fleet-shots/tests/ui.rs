@@ -363,3 +363,131 @@ fn right_clicking_a_row_opens_its_actions_and_destructive_ones_confirm() -> anyh
     );
     Ok(())
 }
+
+#[test]
+fn command_p_quick_opens_a_page_and_command_shift_p_runs_a_command() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.press("cmd-p")?;
+    ui.type_text("nodes")?;
+    ui.press("enter")?;
+    assert_eq!(ui.state().page, Page::Nodes);
+    assert!(ui.state().sidebar_open);
+    ui.press("cmd-shift-p")?;
+    ui.type_text("toggle sidebar")?;
+    ui.press("enter")?;
+    assert!(!ui.state().sidebar_open);
+    Ok(())
+}
+
+#[test]
+fn back_forward_and_control_tab_walk_the_visited_pages() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    assert_eq!(ui.state().page, Page::ClusterOverview);
+    ui.press("cmd-p")?;
+    ui.type_text("nodes")?;
+    ui.press("enter")?;
+    ui.press("cmd-p")?;
+    ui.type_text("events")?;
+    ui.press("enter")?;
+    assert_eq!(ui.state().page, Page::Events);
+    ui.press("cmd-[")?;
+    assert_eq!(ui.state().page, Page::Nodes);
+    ui.press("cmd-[")?;
+    assert_eq!(ui.state().page, Page::ClusterOverview);
+    ui.press("cmd-]")?;
+    assert_eq!(ui.state().page, Page::Nodes);
+    ui.press("ctrl-tab")?;
+    assert_eq!(ui.state().page, Page::ClusterOverview);
+    ui.press("ctrl-tab")?;
+    assert_eq!(ui.state().page, Page::Events);
+    ui.press("ctrl-shift-tab")?;
+    assert_eq!(ui.state().page, Page::ClusterOverview);
+    Ok(())
+}
+
+#[test]
+fn arrow_keys_home_end_and_type_ahead_move_through_a_table() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Fleet)?;
+    let clusters: Vec<ClusterId> = ui
+        .state()
+        .snapshot
+        .clusters
+        .iter()
+        .map(|c| c.id.clone())
+        .collect();
+    let (Some(first), Some(second), Some(last)) =
+        (clusters.first(), clusters.get(1), clusters.last())
+    else {
+        anyhow::bail!("the demo has too few clusters");
+    };
+    let mut open = |keys: &str| -> anyhow::Result<Option<ClusterId>> {
+        ui.press(&format!("cmd-2 {keys} enter"))?;
+        let cluster = ui.state().cluster;
+        ui.press("cmd-[")?;
+        assert_eq!(ui.state().page, Page::Overview);
+        Ok(cluster)
+    };
+    assert_eq!(open("down")?.as_ref(), Some(first));
+    assert_eq!(open("home down")?.as_ref(), Some(second));
+    assert_eq!(open("end")?.as_ref(), Some(last));
+    assert_eq!(open("end up home")?.as_ref(), Some(first));
+    assert_eq!(open("home pagedown")?.as_ref(), Some(last));
+    assert_eq!(open("end pageup")?.as_ref(), Some(first));
+    ui.press("cmd-2 home")?;
+    ui.type_text("stag")?;
+    ui.press("enter")?;
+    assert_eq!(ui.state().cluster, Some(ClusterId::new("staging")));
+    Ok(())
+}
+
+#[test]
+fn escape_and_command_w_close_the_inspector_before_the_window() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Nodes)?;
+    ui.press("cmd-2 down")?;
+    assert!(ui.bounds("close-node").is_some());
+    ui.press("escape")?;
+    assert!(ui.bounds("close-node").is_none());
+    ui.press("cmd-2 down")?;
+    assert!(ui.bounds("close-node").is_some());
+    ui.press("cmd-w")?;
+    assert!(ui.bounds("close-node").is_none());
+    assert_eq!(ui.state().page, Page::Nodes);
+    Ok(())
+}
+
+#[test]
+fn command_j_toggles_the_dock_and_command_w_closes_it_first() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Workload)?;
+    let dock = |ui: &Ui| ui.read(Shell::dock_open);
+    assert_eq!(dock(&ui), Some(true));
+    ui.press("cmd-j")?;
+    assert_eq!(dock(&ui), Some(false));
+    ui.press("cmd-j")?;
+    assert_eq!(dock(&ui), Some(true));
+    ui.press("cmd-w")?;
+    assert_eq!(dock(&ui), Some(false));
+    assert!(ui.state().workload().is_some());
+    Ok(())
+}
+
+#[test]
+fn command_1_focuses_the_sidebar_where_arrows_and_enter_pick_a_page() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.press("cmd-1 down down enter")?;
+    assert_eq!(ui.state().page, Page::Namespaces);
+    ui.press("cmd-1 end enter")?;
+    let last = ui.read(|shell, _| {
+        shell
+            .state()
+            .snapshot
+            .nav_sections(shell.state().cluster.as_ref())
+            .last()
+            .and_then(|s| s.pages.last().copied())
+    });
+    assert_eq!(Some(ui.state().page), last);
+    ui.press("cmd-1 home")?;
+    ui.type_text("ev")?;
+    ui.press("enter")?;
+    assert_eq!(ui.state().page, Page::Events);
+    Ok(())
+}

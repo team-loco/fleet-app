@@ -68,3 +68,13 @@ Settled; change only with a new entry that says why.
     warnings on request); a problem that returns within `notify::COOLDOWN` or appears during a
     cluster's first `CONNECT_GRACE` stays quiet, and a cluster's "Notify about new problems"
     preference mutes it. Notifications need the app bundle; unbundled builds say so on the page.
+20. **Keyboard** (#114): one binding table, `fleet_ui::keymap::BINDINGS`, binds every key, draws
+    the Keyboard shortcuts section of Settings and generates `docs/keyboard.md` (`mise run
+    gen:keys`; a test fails when the file is stale). VS Code bindings where they map: ⌘P quick open,
+    ⌘⇧P the palette in `>` mode, ⌘B sidebar, ⌘J dock, ⌘, settings, ⌃Tab / ⌃⇧Tab recent pages,
+    ⌘[ / ⌘] history, / or ⌘F the page filter; ⌘K stays. ⌘W now closes the inspector, then the
+    dock, then the window (amends 17). History and the recent-page cycle live in
+    `fleet_core::history`; a page restored from history replays the commands that reach it.
+    ⌘1 focuses the sidebar (arrows move a focus ring, Enter opens), ⌘2 the page's main list,
+    and Tab / ⇧Tab walk gpui's tab stops. After any navigation the shell takes keyboard focus
+    back so keys keep working when the focused list disappears.

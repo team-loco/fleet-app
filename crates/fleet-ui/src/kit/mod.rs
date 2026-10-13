@@ -7,6 +7,7 @@ mod filter;
 mod header;
 mod input;
 mod inspector;
+pub mod list_keys;
 mod log;
 mod matrix;
 mod menu;
@@ -31,8 +32,8 @@ pub use dock::{Dock, DockState, DockTab};
 pub use filter::{FilterBar, FilterEvent, chip_label, match_note};
 pub use header::{Lede, PageHeader, PageTitle};
 pub use input::{
-    InputEvent, TextArea, TextAreaState, TextField, TextFieldDown, TextFieldEscape, TextFieldState,
-    TextFieldUp,
+    InputEvent, TextArea, TextAreaState, TextField, TextFieldDown, TextFieldEnd, TextFieldEscape,
+    TextFieldHome, TextFieldPageDown, TextFieldPageUp, TextFieldState, TextFieldUp,
 };
 pub use inspector::Inspector;
 pub use log::{LOG_CAPACITY, Level, LogLine, LogView, strip_ansi};
@@ -50,7 +51,8 @@ pub(crate) use status::STATUSES;
 pub(crate) use status::status_symbols;
 pub use status::{StatusGlyph, StatusText};
 pub use table::{
-    Align, Column, RowActions, SortDirection, Table, TableEvent, Width, min_row_width, resized,
+    Align, Column, RowActions, SortDirection, TABLE_CONTEXT, Table, TableEvent, Width,
+    min_row_width, resized,
 };
 pub use terminal::{TERMINAL_CONTEXT, Terminal, TerminalEvent};
 pub use text::{

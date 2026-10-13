@@ -46,6 +46,10 @@ pub struct ChangesScreen {
 }
 
 impl ChangesScreen {
+    pub fn list_focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
+        gpui::Focusable::focus_handle(&self.commits, cx)
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let clusters = cx.new(|cx| {
             Select::new("changes-cluster", vec![ALL_CLUSTERS.into()], cx)

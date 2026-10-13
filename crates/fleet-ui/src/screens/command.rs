@@ -8,10 +8,11 @@ use gpui::{
 };
 
 use crate::actions::{CompareAcrossClusters, FollowLogs, OpenSelectedNewWindow, ShowFluxOwner};
+use crate::kit::list_keys::Nav;
 use crate::kit::status_symbols;
 use crate::kit::{
     Highlighted, InputEvent, SectionLabel, Step, TextField, TextFieldDown, TextFieldEscape,
-    TextFieldState, TextFieldUp, shadow, step,
+    TextFieldPageDown, TextFieldPageUp, TextFieldState, TextFieldUp, shadow, step,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, PALETTE_CLUSTER, PALETTE_IN, PALETTE_INPUT, PALETTE_KIND,
@@ -22,7 +23,7 @@ use crate::theme::{
 
 const PLACEHOLDER: &str = "Go to anything";
 const NO_MATCHES: &str = "No matches.";
-const KEY_CONTEXT: &str = "CommandPalette";
+pub(crate) const PALETTE_CONTEXT: &str = "CommandPalette";
 const OVERLAY_PRIORITY: usize = 5;
 const HINTS: &[(&str, &str)] = &[
     ("@", "cluster"),
@@ -150,6 +151,15 @@ impl CommandPalette {
     fn move_selection(&mut self, direction: Step, cx: &mut Context<Self>) {
         let len = self.results.hits.len();
         self.selected = step(self.selected, len, |_| true, direction);
+        if let Some(ix) = self.selected {
+            self.scroll
+                .scroll_to_item(child_index(&self.results.hits, ix));
+        }
+        cx.notify();
+    }
+
+    fn jump(&mut self, nav: Nav, cx: &mut Context<Self>) {
+        self.selected = nav.target(self.selected, self.results.hits.len());
         if let Some(ix) = self.selected {
             self.scroll
                 .scroll_to_item(child_index(&self.results.hits, ix));
@@ -415,7 +425,7 @@ impl Render for CommandPalette {
         };
         let panel = div()
             .id("command-palette")
-            .key_context(KEY_CONTEXT)
+            .key_context(PALETTE_CONTEXT)
             .capture_action(cx.listener(|this, _: &OpenSelectedNewWindow, _, cx| {
                 if let Some(hit) = this.selected.and_then(|ix| this.results.hits.get(ix)) {
                     cx.emit(PaletteEvent::NewWindow(hit.command.clone()));
@@ -437,6 +447,14 @@ impl Render for CommandPalette {
             }))
             .capture_action(cx.listener(|this, _: &TextFieldDown, _, cx| {
                 this.move_selection(Step::Next, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|this, _: &TextFieldPageUp, _, cx| {
+                this.jump(Nav::PageUp, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|this, _: &TextFieldPageDown, _, cx| {
+                this.jump(Nav::PageDown, cx);
                 cx.stop_propagation();
             }))
             .on_action(cx.listener(|this, _: &TextFieldEscape, window, cx| {

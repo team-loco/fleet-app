@@ -1,12 +1,9 @@
 use clap::ValueEnum;
 use fleet_core::{AddClusterStep, ClusterId, Command, FluxKey, FluxKind, Page, ResourceRef};
-use fleet_ui::actions::{
-    CloseWindow, CompareAcrossClusters, FollowLogs, OpenSelectedNewWindow, OpenSettings,
-    ShowFluxOwner, ToggleClusterSwitcher, ToggleCommandPalette, ToggleSidebar,
-};
+use fleet_ui::actions::{NewWindow, OpenSettings, Quit};
 use fleet_ui::theme::Appearance;
 use fleet_ui::{Gallery, GalleryPage, Shell, Store};
-use gpui::{AnyView, App, AppContext as _, Entity, KeyBinding, Menu, MenuItem, Window};
+use gpui::{AnyView, App, AppContext as _, Entity, Menu, MenuItem, Window};
 
 pub const WINDOW_WIDTH: f32 = 1440.;
 pub const WINDOW_HEIGHT: f32 = 900.;
@@ -16,8 +13,6 @@ const SAMPLE_RELEASE_CLUSTER: &str = "staging";
 const SAMPLE_NAMESPACE: &str = "payments";
 const SAMPLE_DEPLOYMENT: &str = "checkout-api";
 const DEPLOYMENT: &str = "Deployment";
-
-gpui::actions!(fleet, [Quit, NewWindow]);
 
 pub const APP_ID: &str = "dev.fleet.app";
 pub const APP_NAME: &str = "Fleet";
@@ -43,21 +38,7 @@ pub fn bundled(executable: &std::path::Path) -> bool {
 }
 
 pub fn bind_keys(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new("cmd-shift-c", ToggleClusterSwitcher, None),
-        KeyBinding::new("cmd-b", ToggleSidebar, None),
-        KeyBinding::new("cmd-k", ToggleCommandPalette, None),
-        KeyBinding::new("cmd-l", FollowLogs, None),
-        KeyBinding::new("cmd-shift-d", CompareAcrossClusters, None),
-        KeyBinding::new("cmd-shift-g", ShowFluxOwner, None),
-        KeyBinding::new("cmd-q", Quit, None),
-        KeyBinding::new("cmd-n", NewWindow, None),
-        KeyBinding::new("cmd-w", CloseWindow, None),
-        KeyBinding::new("cmd-,", OpenSettings, None),
-        KeyBinding::new("alt-enter", OpenSelectedNewWindow, Some("CommandPalette")),
-    ]);
-    cx.bind_keys(fleet_ui::screens::workload::key_bindings());
-    cx.bind_keys(fleet_ui::key_bindings());
+    cx.bind_keys(fleet_ui::keymap::key_bindings());
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -252,6 +252,13 @@ cx.subscribe(&pods, |this, table, event: &TableEvent, cx| match event {
 pods.update(cx, |t, cx| t.set_rows(new_rows, cx));
 ```
 
+Keyboard (in `kit::list_keys`, shared with the sidebar, switcher and palette): ↑ ↓, Home / End and
+PageUp / PageDown move the selection, Enter emits `Opened`, typed letters jump to the first row whose
+`.type_ahead(|row| name)` (or `row_key`, or the part of it after the last `/`) starts with them, and Esc
+dispatches `actions::CloseInspector` (open row menus take Esc first). The table is a tab stop;
+while it has focus the selected row's outline (or, with nothing selected, the table's) is drawn in the
+`focus` token.
+
 Column options: `.fixed(px)`, `.flex(weight, min)`, `.end()`, `.center()`, `.mono()` (Plex Mono 12;
 rows are otherwise Sans 12.5), `.sortable(cmp)` / `.sort_by_key(key)`, `.highlight()` (text columns
 draw the filter's matches in `acc`, see `set_highlight`), `.fit_by(text, extra)` (what a custom cell

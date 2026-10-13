@@ -6,11 +6,12 @@ use gpui::{
     Subscription, Window, div, relative,
 };
 
-use crate::kit::{Link, SectionLabel, Segmented, Toast, Toggle, toast};
+use crate::keymap;
+use crate::kit::{Kbd, Link, SectionLabel, Segmented, Toast, Toggle, toast};
 use crate::settings::{self, Settings};
 use crate::theme::{
-    ActiveTheme, LINE_PROSE, PAGE_HEADER, Palette, RULE, SETTINGS_COLUMN, SPACE_1, SPACE_6,
-    SPACE_7, SPACE_8, TEXT_SMALL, TEXT_TITLE,
+    ActiveTheme, LINE_PROSE, PAGE_HEADER, Palette, ROW_DOCUMENT, RULE, SETTINGS_COLUMN, SPACE_1,
+    SPACE_2, SPACE_6, SPACE_7, SPACE_8, TEXT_SMALL, TEXT_TITLE,
 };
 
 const APPEARANCE: &str = "Appearance";
@@ -36,6 +37,7 @@ const MUTE_SUFFIX: &str = ".";
 const UNBUNDLED: &str =
     "Fleet is running outside Fleet.app, so macOS will not show notifications from this copy.";
 const SAVE_FAILED: &str = "Settings could not be saved";
+const SHORTCUTS: &str = "Keyboard shortcuts";
 
 pub struct AppSettingsScreen {
     _settings: Subscription,
@@ -178,6 +180,44 @@ impl AppSettingsScreen {
     }
 }
 
+fn shortcuts(palette: &Palette) -> impl IntoElement {
+    let groups = keymap::grouped().into_iter().map(|(group, bindings)| {
+        let rows = bindings.into_iter().map(|binding| {
+            let keys = binding
+                .keys
+                .iter()
+                .map(|keys| Kbd::new(keymap::display(keys)));
+            div()
+                .flex()
+                .items_center()
+                .gap(SPACE_8)
+                .h(ROW_DOCUMENT)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(palette.fg2)
+                        .child(binding.description),
+                )
+                .child(div().flex().flex_none().gap(SPACE_2).children(keys))
+        });
+        div()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .pb(SPACE_2)
+                    .text_size(TEXT_SMALL)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(palette.fg)
+                    .child(group.label()),
+            )
+            .children(rows)
+    });
+    section(SHORTCUTS, palette).children(groups)
+}
+
 fn change(cx: &mut App, edit: impl FnOnce(&mut AppSettings)) {
     if let Err(error) = settings::update(cx, edit) {
         tracing::warn!(%error, "saving settings");
@@ -259,7 +299,8 @@ impl Render for AppSettingsScreen {
             .pb(SPACE_8)
             .child(Self::appearance(&current, &palette))
             .child(Self::refresh(&current, &palette, cx))
-            .child(Self::notifications(&current, &palette, cx));
+            .child(Self::notifications(&current, &palette, cx))
+            .child(shortcuts(&palette));
         div()
             .flex()
             .flex_col()

@@ -7,7 +7,7 @@ use fleet_core::workload::{ContainerSpec, EnvVar, Pod, Revision, short_image, sh
 use fleet_core::{Command, ResourceRef, Sink, Status, Workload};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
-    InteractiveElement, IntoElement, KeyBinding, ParentElement, Pixels, Render, SharedString,
+    InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Task, WeakEntity, Window, div,
     prelude::FluentBuilder, px, relative,
 };
@@ -26,15 +26,6 @@ use crate::theme::{
 pub const KEY_CONTEXT: &str = "Workload";
 
 gpui::actions!(workload, [ToggleActions, ShowLogs, ShowTerminal, ViewYaml]);
-
-pub fn key_bindings() -> Vec<KeyBinding> {
-    vec![
-        KeyBinding::new("cmd-.", ToggleActions, Some(KEY_CONTEXT)),
-        KeyBinding::new("cmd-l", ShowLogs, Some(KEY_CONTEXT)),
-        KeyBinding::new("cmd-t", ShowTerminal, Some(KEY_CONTEXT)),
-        KeyBinding::new("cmd-y", ViewYaml, Some(KEY_CONTEXT)),
-    ]
-}
 
 const PODS: &str = "Pods";
 const PODS_HINT: &str = "click to follow logs";
@@ -120,6 +111,23 @@ pub struct WorkloadScreen {
 impl EventEmitter<Command> for WorkloadScreen {}
 
 impl WorkloadScreen {
+    pub fn close_inspector(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.showing_yaml {
+            return false;
+        }
+        self.showing_yaml = false;
+        cx.notify();
+        true
+    }
+
+    pub fn list_focus(&self, cx: &gpui::App) -> FocusHandle {
+        Focusable::focus_handle(&self.pods, cx)
+    }
+
+    pub fn dock(&self) -> &Entity<DockState> {
+        &self.dock
+    }
+
     pub fn new(target: ResourceRef, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let pods = cx.new(|cx| {
             Table::new("pods", pod_columns(), cx)

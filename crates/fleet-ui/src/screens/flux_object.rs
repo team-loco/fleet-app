@@ -5,7 +5,7 @@ use fleet_core::flux::{
 use fleet_core::{Command, FluxAction, FluxKind, FluxObject, FluxPage, Page, Status, time};
 use gpui::{
     AnyElement, App, AppContext, ClipboardItem, Context, Entity, EventEmitter, FocusHandle,
-    InteractiveElement, IntoElement, KeyBinding, ParentElement, Pixels, Render, SharedString,
+    InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
     prelude::FluentBuilder, px, relative,
 };
@@ -21,7 +21,7 @@ use crate::theme::{
     TEXT_SMALL,
 };
 
-const KEY_CONTEXT: &str = "FluxObject";
+pub(crate) const FLUX_CONTEXT: &str = "FluxObject";
 const GLYPH_COLUMN: Pixels = px(14.);
 const KIND_COLUMN: Pixels = px(170.);
 const NAME_MIN: Pixels = px(200.);
@@ -50,16 +50,6 @@ gpui::actions!(
     flux_object,
     [Reconcile, ReconcileWithSource, DiffAgainstGit, ViewYaml]
 );
-
-pub fn bind_keys(cx: &mut App) {
-    let context = Some(KEY_CONTEXT);
-    cx.bind_keys([
-        KeyBinding::new("cmd-r", Reconcile, context),
-        KeyBinding::new("cmd-shift-r", ReconcileWithSource, context),
-        KeyBinding::new("cmd-d", DiffAgainstGit, context),
-        KeyBinding::new("cmd-y", ViewYaml, context),
-    ]);
-}
 
 pub struct FluxObjectPage {
     page: Option<FluxPage>,
@@ -645,7 +635,7 @@ impl Render for FluxObjectPage {
         });
         div()
             .id("flux-object")
-            .key_context(KEY_CONTEXT)
+            .key_context(FLUX_CONTEXT)
             .track_focus(&self.focus)
             .on_action(cx.listener(|page, _: &Reconcile, _, cx| {
                 let suspended = page.object().is_some_and(|o| o.phase.is_suspended());

@@ -3,11 +3,12 @@ use std::collections::BTreeMap;
 use fleet_core::{ClusterSummary, Command, Counts, NavSection, Page};
 use gpui::{
     Animation, AnimationExt, AnyElement, Context, ElementId, FontWeight, Hsla, InteractiveElement,
-    IntoElement, MouseButton, ParentElement, Pixels, StatefulInteractiveElement, Styled, div,
-    ease_out_quint, prelude::FluentBuilder, svg,
+    IntoElement, MouseButton, ParentElement, Pixels, StatefulInteractiveElement, Styled, Window,
+    div, ease_out_quint, prelude::FluentBuilder, svg,
 };
 
 use super::Shell;
+use super::keys::SIDEBAR_CONTEXT;
 use crate::assets::{CHEVRON_LEFT, CHEVRON_RIGHT};
 use crate::kit::{Tooltip, status_symbols};
 use crate::theme::{
@@ -19,11 +20,16 @@ const COLLAPSE_TOOLTIP: &str = "Collapse sidebar  ⌘B";
 const EXPAND_TOOLTIP: &str = "Expand sidebar  ⌘B";
 
 impl Shell {
-    pub(super) fn sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn sidebar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let palette = *cx.palette();
         let open = self.state.sidebar_open;
+        let cursor = self
+            .keys
+            .sidebar_focus
+            .is_focused(window)
+            .then(|| self.keys.nav_cursor.unwrap_or(self.state.page));
         let content = if open {
-            self.sidebar_open(&palette, cx).into_any_element()
+            self.sidebar_open(cursor, &palette, cx).into_any_element()
         } else {
             sidebar_collapsed(&palette, cx).into_any_element()
         };
@@ -67,7 +73,12 @@ impl Shell {
         }
     }
 
-    fn sidebar_open(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    fn sidebar_open(
+        &self,
+        cursor: Option<Page>,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let sections = self
             .state
             .snapshot
@@ -78,7 +89,14 @@ impl Shell {
             if let Some(label) = section.label {
                 items.push(section_head(label, palette).into_any_element());
             }
-            items.extend(section_rows(section, self.state.page, counts, palette, cx));
+            items.extend(section_rows(
+                section,
+                self.state.page,
+                cursor,
+                counts,
+                palette,
+                cx,
+            ));
         }
         let collapse = icon_button("collapse-sidebar", CHEVRON_LEFT, COLLAPSE_TOOLTIP, palette)
             .on_click(cx.listener(|this, _, _, cx| this.dispatch(Command::ToggleSidebar, cx)));
@@ -91,6 +109,10 @@ impl Shell {
             .child(
                 div()
                     .id("sidebar-scroll")
+                    .debug_selector(|| "sidebar-nav".to_owned())
+                    .key_context(SIDEBAR_CONTEXT)
+                    .track_focus(&self.keys.sidebar_focus)
+                    .on_key_down(cx.listener(Self::sidebar_key))
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
@@ -129,6 +151,7 @@ fn top_strip(palette: &Palette) -> gpui::Div {
 fn section_rows(
     section: &NavSection,
     current: Page,
+    cursor: Option<Page>,
     counts: &BTreeMap<Page, Counts>,
     palette: &Palette,
     cx: &mut Context<Shell>,
@@ -145,6 +168,12 @@ fn section_rows(
             let key = ElementId::NamedInteger("page".into(), page as u64);
             nav_row(key, ROW_NAV, selected, palette)
                 .when(!selected, |row| row.text_color(palette.fg2))
+                .border(RULE)
+                .border_color(if cursor == Some(page) {
+                    palette.focus
+                } else {
+                    gpui::transparent_black()
+                })
                 .child(div().flex_1().truncate().child(page.label()))
                 .children(badges)
                 .on_click(cx.listener(move |this, _, _, cx| {
