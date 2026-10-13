@@ -11,6 +11,7 @@ use jiff::Timestamp;
 use kube::api::DynamicObject;
 use serde_json::Value;
 
+use crate::flux::FluxHealth;
 use crate::ops::strip_managed_fields;
 
 const API_VERSION: &str = "apiVersion";
@@ -137,6 +138,24 @@ pub fn source<'a>(parsed: &Parsed, objects: &'a [Parsed]) -> Option<&'a Parsed> 
 
 pub fn summary(parsed: &Parsed, objects: &[Parsed]) -> Summary {
     summarize(&parsed.object, source(parsed, objects).map(|s| &s.object))
+}
+
+pub fn health(parsed: &Parsed, objects: &[Parsed], now: Timestamp) -> FluxHealth {
+    let summary = summary(parsed, objects);
+    let identity = &parsed.object.identity;
+    FluxHealth {
+        kind: identity.kind,
+        namespace: identity.namespace.clone(),
+        name: identity.name.clone(),
+        status: core_status(summary.status),
+        sentence: summary.sentence,
+        suspended: parsed.object.suspended,
+        revision: parsed.object.revision().map(str::to_owned),
+        since: parsed
+            .ready_since()
+            .map(|then| elapsed(then, now))
+            .unwrap_or_default(),
+    }
 }
 
 pub struct Inputs<'a> {

@@ -1,12 +1,11 @@
 use fleet_core::home::{ClusterMetrics, Problem, problem_counts};
 use fleet_core::overview::{Overview, Utilization};
 use fleet_core::{ClusterDetail, ClusterId, ClusterSummary, Counts, Page, ResourceRef};
-use fleet_flux::ObjectKind;
 use jiff::Timestamp;
 use k8s_openapi::api::core::v1::{Event, Namespace, Node, Pod};
 
 use crate::detail::{self, PodIndex, capacity};
-use crate::flux::{self, FluxObject, custom_kind, flux_object};
+use crate::flux::{self, FluxHealth};
 use crate::lists::watched_lists;
 use crate::manager::{ClusterHandle, ConnectionStatus};
 use crate::metrics::{NodeUsage, PodUsage};
@@ -27,7 +26,6 @@ pub struct Prometheus {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Extras {
-    pub flux: Vec<ObjectKind>,
     pub node_usage: Option<Vec<NodeUsage>>,
     pub pod_usage: Vec<PodUsage>,
     pub ring: UsageRing,
@@ -37,7 +35,6 @@ pub struct Extras {
 impl Extras {
     pub fn new(samples: usize) -> Self {
         Self {
-            flux: Vec::new(),
             node_usage: None,
             pod_usage: Vec::new(),
             ring: UsageRing::new(samples),
@@ -66,18 +63,6 @@ pub struct Built {
     pub detail: Option<ClusterDetail>,
 }
 
-fn flux_objects(handle: &ClusterHandle, kinds: &[ObjectKind], now: Timestamp) -> Vec<FluxObject> {
-    kinds
-        .iter()
-        .flat_map(|kind| {
-            handle
-                .custom_objects(&custom_kind(*kind))
-                .into_iter()
-                .filter_map(move |object| flux_object(&object, *kind, now))
-        })
-        .collect()
-}
-
 fn reachable(status: &ConnectionStatus) -> bool {
     matches!(
         status,
@@ -89,29 +74,26 @@ pub fn cluster(
     id: &ClusterId,
     handle: &ClusterHandle,
     extras: &Extras,
+    flux: Option<&[FluxHealth]>,
     selection: Option<&Selection<'_>>,
     now: Timestamp,
 ) -> Built {
     let connection = handle.status();
     let pods = handle.objects::<Pod>();
     let nodes = handle.objects::<Node>();
-    let objects = flux_objects(handle, &extras.flux, now);
+    let objects = flux.unwrap_or_default();
     let mut problems = pod_problems(id, &pods, now);
     problems.extend(node_problems(id, &nodes, now));
-    problems.extend(flux::problems(id, &objects));
+    problems.extend(flux::problems(id, objects));
     problems.extend(connection_problem(id, &connection));
-    let flux_counts = if extras.flux.is_empty() {
-        Counts::default()
-    } else {
-        flux::counts(&objects)
-    };
+    let flux_counts = flux.map(flux::counts).unwrap_or_default();
     let percents = extras.ring.latest().map(|s| s.percents());
     let metrics = reachable(&connection).then(|| ClusterMetrics {
         pods: pod_counts(&pods),
         cpu_percent: percents.map(|(cpu, _)| cpu),
         memory_percent: percents.map(|(_, memory)| memory),
         flux: flux_counts,
-        revision: flux::revision(&objects),
+        revision: flux::revision(objects),
     });
     let counts = problem_counts(&problems);
     let mut summary = summarize(id.clone(), id.to_string(), handle, counts, metrics);
