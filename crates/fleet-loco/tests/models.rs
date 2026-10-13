@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use chrono::{DateTime, Utc};
 use fleet_loco::{
     Error, ObjectRef,
@@ -308,12 +310,8 @@ fn backend_not_found_condition_is_preserved_and_weight_zero_ignored() {
         .first_mut()
         .unwrap()
         .weight = Some(0);
-    assert!(
-        route_model(&route, "loco-system", &[], &[])
-            .unwrap()
-            .backends
-            .is_empty()
-    );
+    let model = route_model(&route, "loco-system", &[], &[]).unwrap();
+    assert_eq!(model.backends.len(), 0);
 }
 
 #[test]
@@ -482,11 +480,33 @@ fn rollout_with_all_old_replicas_ready_is_still_progressing() {
 #[test]
 fn dual_stack_endpoint_slices_count_each_pod_once() {
     let mut ipv4 = endpoints(true);
-    ipv4.endpoints.first_mut().unwrap().target_ref =
-        Some(serde_json::from_value(json!({"uid": "pod-uid"})).unwrap());
+    ipv4.endpoints
+        .as_mut()
+        .unwrap()
+        .first_mut()
+        .unwrap()
+        .target_ref = Some(serde_json::from_value(json!({"uid": "pod-uid"})).unwrap());
     let mut ipv6 = ipv4.clone();
     ipv6.address_type = "IPv6".into();
-    ipv6.endpoints.first_mut().unwrap().addresses = vec!["::1".into()];
+    ipv6.endpoints
+        .as_mut()
+        .unwrap()
+        .first_mut()
+        .unwrap()
+        .addresses = vec!["::1".into()];
     let model = route_model(&route(), "loco-system", &[service()], &[ipv4, ipv6]).unwrap();
     assert_eq!(model.backends.first().unwrap().ready_endpoints, Some(1));
+}
+
+#[test]
+fn omitted_go_replica_counters_mean_zero_when_status_exists() {
+    let mut app = application();
+    app.status.as_mut().unwrap().ready_replicas = None;
+    app.status.as_mut().unwrap().desired_replicas = None;
+    let model = application_model(&app).unwrap();
+    assert_eq!(model.ready_replicas, Some(0));
+    assert_eq!(model.desired_replicas, Some(0));
+    app.status = None;
+    let model = application_model(&app).unwrap();
+    assert_eq!(model.ready_replicas, None);
 }

@@ -205,13 +205,11 @@ pub struct RouteModel {
     pub messages: Vec<String>,
 }
 
-pub fn route_model(
-    route: &HttpRoute,
+fn gateway_conditions<'a>(
+    route: &'a HttpRoute,
     gateway_namespace: &str,
-    services: &[Service],
-    slices: &[EndpointSlice],
-) -> Result<RouteModel, Error> {
-    let reference = ObjectRef::from_metadata("HTTPRoute", &route.metadata)?;
+    reference: &ObjectRef,
+) -> Vec<&'a Condition> {
     let parents: Vec<_> = route
         .status
         .parents
@@ -234,11 +232,97 @@ pub fn route_model(
                 && parent.controller_name == "gateway.envoyproxy.io/gatewayclass-controller"
         })
         .collect();
-    let conditions: Vec<_> = parents
+    parents
         .iter()
         .flat_map(|parent| &parent.conditions)
         .filter(|condition| condition.observed_generation == route.metadata.generation)
+        .collect()
+}
+
+fn service_backend(
+    backend: &BackendRef,
+    route_namespace: &str,
+    services: &[Service],
+    slices: &[EndpointSlice],
+) -> (BackendModel, RouteProblem) {
+    let namespace = backend.namespace.as_deref().unwrap_or(route_namespace);
+    let service = ObjectRef {
+        kind: "Service".to_owned(),
+        namespace: namespace.to_owned(),
+        name: backend.name.clone(),
+    };
+    let matched_service = services.iter().find(|candidate| {
+        candidate.metadata.namespace.as_deref() == Some(namespace)
+            && candidate.metadata.name.as_deref() == Some(backend.name.as_str())
+    });
+    let exists = matched_service.is_some();
+    let external = matched_service
+        .and_then(|service| service.spec.as_ref())
+        .is_some_and(|spec| spec.type_.as_deref() == Some("ExternalName"));
+    let endpoint_slices: Vec<_> = slices
+        .iter()
+        .filter(|slice| {
+            slice.metadata.namespace.as_deref() == Some(namespace)
+                && label(&slice.metadata, SERVICE_NAME_LABEL) == Some(backend.name.as_str())
+        })
         .collect();
+    let counts = if exists && !external {
+        let mut endpoints = std::collections::BTreeMap::new();
+        for endpoint in endpoint_slices
+            .iter()
+            .flat_map(|slice| slice.endpoints.iter().flatten())
+        {
+            let key = endpoint
+                .target_ref
+                .as_ref()
+                .and_then(|target| target.uid.clone())
+                .unwrap_or_else(|| {
+                    let mut addresses = endpoint.addresses.clone();
+                    addresses.sort();
+                    addresses.join(",")
+                });
+            let ready = endpoint
+                .conditions
+                .as_ref()
+                .and_then(|conditions| conditions.ready)
+                .unwrap_or(true);
+            endpoints
+                .entry(key)
+                .and_modify(|value| *value = *value || ready)
+                .or_insert(ready);
+        }
+        let ready = endpoints.values().filter(|ready| **ready).count();
+        Some((ready, endpoints.len()))
+    } else {
+        None
+    };
+    let mut problem = RouteProblem::None;
+    if !exists {
+        problem = RouteProblem::BackendNotFound;
+    }
+    if counts.is_some_and(|(ready, _)| ready == 0) {
+        problem = problem.min(RouteProblem::NoReadyEndpoints);
+    }
+    if exists && counts.is_none() {
+        problem = problem.min(RouteProblem::Unknown);
+    }
+    let model = BackendModel {
+        service,
+        port: backend.port,
+        ready_endpoints: counts.map(|counts| counts.0),
+        total_endpoints: counts.map(|counts| counts.1),
+    };
+    (model, problem)
+}
+
+pub fn route_model(
+    route: &HttpRoute,
+    gateway_namespace: &str,
+    services: &[Service],
+    slices: &[EndpointSlice],
+) -> Result<RouteModel, Error> {
+    let reference = ObjectRef::from_metadata("HTTPRoute", &route.metadata)?;
+    let conditions = gateway_conditions(route, gateway_namespace, &reference);
     let accepted = conditions
         .iter()
         .any(|condition| condition.type_ == "Accepted" && condition.status == "True");
@@ -276,69 +360,10 @@ pub fn route_model(
             problem = problem.min(RouteProblem::Unknown);
             continue;
         }
-        let namespace = backend.namespace.as_deref().unwrap_or(&reference.namespace);
-        let service = ObjectRef {
-            kind: "Service".to_owned(),
-            namespace: namespace.to_owned(),
-            name: backend.name.clone(),
-        };
-        let matched_service = services.iter().find(|candidate| {
-            candidate.metadata.namespace.as_deref() == Some(namespace)
-                && candidate.metadata.name.as_deref() == Some(backend.name.as_str())
-        });
-        let exists = matched_service.is_some();
-        let external = matched_service
-            .and_then(|service| service.spec.as_ref())
-            .is_some_and(|spec| spec.type_.as_deref() == Some("ExternalName"));
-        let endpoint_slices: Vec<_> = slices
-            .iter()
-            .filter(|slice| {
-                slice.metadata.namespace.as_deref() == Some(namespace)
-                    && label(&slice.metadata, SERVICE_NAME_LABEL) == Some(backend.name.as_str())
-            })
-            .collect();
-        let counts = if exists && !external {
-            let mut endpoints = std::collections::BTreeMap::new();
-            for endpoint in endpoint_slices.iter().flat_map(|slice| &slice.endpoints) {
-                let key = endpoint
-                    .target_ref
-                    .as_ref()
-                    .and_then(|target| target.uid.clone())
-                    .unwrap_or_else(|| {
-                        let mut addresses = endpoint.addresses.clone();
-                        addresses.sort();
-                        addresses.join(",")
-                    });
-                let ready = endpoint
-                    .conditions
-                    .as_ref()
-                    .and_then(|conditions| conditions.ready)
-                    .unwrap_or(true);
-                endpoints
-                    .entry(key)
-                    .and_modify(|value| *value = *value || ready)
-                    .or_insert(ready);
-            }
-            let ready = endpoints.values().filter(|ready| **ready).count();
-            Some((ready, endpoints.len()))
-        } else {
-            None
-        };
-        if !exists {
-            problem = problem.min(RouteProblem::BackendNotFound);
-        }
-        if counts.is_some_and(|(ready, _)| ready == 0) {
-            problem = problem.min(RouteProblem::NoReadyEndpoints);
-        }
-        if exists && counts.is_none() {
-            problem = problem.min(RouteProblem::Unknown);
-        }
-        backends.push(BackendModel {
-            service,
-            port: backend.port,
-            ready_endpoints: counts.map(|counts| counts.0),
-            total_endpoints: counts.map(|counts| counts.1),
-        });
+        let (model, backend_problem) =
+            service_backend(backend, &reference.namespace, services, slices);
+        problem = problem.min(backend_problem);
+        backends.push(model);
     }
     Ok(RouteModel {
         route: reference,
