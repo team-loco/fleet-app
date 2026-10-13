@@ -25,7 +25,7 @@ const CONDITION_FALSE: &str = "False";
 const DEFAULT_PROTOCOL: &str = "TCP";
 const BYTES_PER_MIB: f64 = 1_048_576.;
 
-type PodKey = (String, String);
+type PodLookup<'a, T> = HashMap<&'a str, HashMap<&'a str, T>>;
 
 pub fn phase(text: Option<&str>) -> PodPhase {
     match text {
@@ -266,27 +266,30 @@ pub fn pod(
     }
 }
 
-fn pod_events(events: &[Arc<core::Event>], now: Timestamp) -> HashMap<PodKey, Vec<PodEvent>> {
-    let mut by_pod: HashMap<PodKey, Vec<PodEvent>> = HashMap::new();
+fn pod_events(events: &[Arc<core::Event>], now: Timestamp) -> PodLookup<'_, Vec<PodEvent>> {
+    let mut by_pod: PodLookup<'_, Vec<PodEvent>> = HashMap::new();
     for event in events {
         let involved = &event.involved_object;
         if involved.kind.as_deref() != Some(POD_KIND) {
             continue;
         }
-        let key = (
-            involved.namespace.clone().unwrap_or_default(),
-            involved.name.clone().unwrap_or_default(),
-        );
+        let namespace = involved.namespace.as_deref().unwrap_or_default();
+        let name = involved.name.as_deref().unwrap_or_default();
         let row = detail::event(event, now);
-        by_pod.entry(key).or_default().push(PodEvent {
-            status: row.status,
-            reason: row.reason,
-            message: row.message,
-            count: row.count,
-            age: row.age,
-        });
+        by_pod
+            .entry(namespace)
+            .or_default()
+            .entry(name)
+            .or_default()
+            .push(PodEvent {
+                status: row.status,
+                reason: row.reason,
+                message: row.message,
+                count: row.count,
+                age: row.age,
+            });
     }
-    for rows in by_pod.values_mut() {
+    for rows in by_pod.values_mut().flat_map(HashMap::values_mut) {
         rows.sort_by_key(|e| e.age);
     }
     by_pod
@@ -299,26 +302,28 @@ pub fn pods(
     usage: &[PodUsage],
     now: Timestamp,
 ) -> Vec<Pod> {
-    let used: HashMap<PodKey, Usage> = usage
-        .iter()
-        .map(|u| {
-            let usage = Usage {
-                cpu_millis: whole(u.usage.cpu_millicores),
-                memory_mib: whole(u.usage.memory_bytes / BYTES_PER_MIB),
-            };
-            ((u.namespace.clone(), u.name.clone()), usage)
-        })
-        .collect();
+    let mut used: PodLookup<'_, Usage> = HashMap::new();
+    for entry in usage {
+        let usage = Usage {
+            cpu_millis: whole(entry.usage.cpu_millicores),
+            memory_mib: whole(entry.usage.memory_bytes / BYTES_PER_MIB),
+        };
+        used.entry(&entry.namespace)
+            .or_default()
+            .insert(&entry.name, usage);
+    }
     let mut events = pod_events(events, now);
     let mut rows: Vec<Pod> = pods
         .iter()
         .map(|p| {
-            let key = (
-                p.metadata.namespace.clone().unwrap_or_default(),
-                p.metadata.name.clone().unwrap_or_default(),
-            );
-            let own = events.remove(&key).unwrap_or_default();
-            pod(cluster, p, used.get(&key), own, now)
+            let namespace = p.metadata.namespace.as_deref().unwrap_or_default();
+            let name = p.metadata.name.as_deref().unwrap_or_default();
+            let own = events
+                .get_mut(namespace)
+                .and_then(|rows| rows.remove(name))
+                .unwrap_or_default();
+            let usage = used.get(namespace).and_then(|rows| rows.get(name));
+            pod(cluster, p, usage, own, now)
         })
         .collect();
     rows.sort_by(|a, b| (&a.namespace, &a.name).cmp(&(&b.namespace, &b.name)));

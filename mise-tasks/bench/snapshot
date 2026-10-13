@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Check Fleet's synthetic snapshot timing and allocation budgets in release mode"
+set -euo pipefail
+mise exec -- cargo test -p fleet-kube --release --test performance synthetic -- --ignored --nocapture --test-threads=1

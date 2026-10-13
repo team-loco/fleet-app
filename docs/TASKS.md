@@ -48,6 +48,8 @@ Spec column points at `design/`.
 | I5 | animation polish + parity pass, dark and light, every screen | | | todo |
 | I6 | headless screenshots (`mise run shot`) and UI interaction test helper (`fleet_shots::Ui`), no on-screen window | claude | headless-shots | done |
 
+| CPERF | scale scenarios, snapshot benchmarks and performance fixes | codex | cperf-scale | doing |
+
 ## Font repair
 
 | id | unit | owner | branch | status |

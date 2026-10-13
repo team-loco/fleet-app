@@ -28,9 +28,7 @@ use crate::discovery::{
 };
 use crate::gitops::GitOpsState;
 use crate::inspect;
-use crate::manager::{
-    COALESCE_INTERVAL, ClusterEvent, ClusterHandle, ClusterManager, ConnectionStatus, Subscription,
-};
+use crate::manager::{ClusterEvent, ClusterHandle, ClusterManager, ConnectionStatus, Subscription};
 use crate::metrics::{NodeUsage, PodUsage};
 use crate::paste;
 use crate::probe::find_prometheus;
@@ -46,6 +44,7 @@ use crate::usage::prometheus_utilization;
 use crate::watch::KubeconfigWatcher;
 
 const THREAD_NAME: &str = "fleet-kube";
+const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(100);
 const BASELINE_KINDS: [WatchKind; 2] = [WatchKind::Nodes, WatchKind::Pods];
 const DEFAULT_WINDOW: u64 = 0;
 const MISSING_STATE: &str = "Not in kubeconfig";
@@ -898,6 +897,7 @@ impl Live {
                 .filter(|(target, _)| target.cluster == cluster.id)
                 .collect();
             let selection = selected.then_some(Selection {
+                page: self.page,
                 event_limit: self.settings.event_limit,
                 yaml: &yaml,
             });
@@ -1091,7 +1091,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
     let gitops_changed = live.gitops.changed();
     live.start();
     let mut dirty = true;
-    let mut publish = ticker(COALESCE_INTERVAL);
+    let mut publish = ticker(SNAPSHOT_INTERVAL);
     loop {
         tokio::select! {
             event = discovery_events.recv(), if !discovery_events.is_closed() => {
@@ -1657,5 +1657,18 @@ mod tests {
             Some("payments")
         );
         assert!(!settings.auth_expired);
+    }
+}
+
+#[cfg(test)]
+mod performance_tests {
+    use super::*;
+    use crate::manager::COALESCE_INTERVAL;
+
+    const UPDATE_BUDGET: Duration = Duration::from_millis(500);
+
+    #[test]
+    fn coalescing_leaves_time_for_network_and_snapshot_building() {
+        assert!(COALESCE_INTERVAL + SNAPSHOT_INTERVAL < UPDATE_BUDGET);
     }
 }

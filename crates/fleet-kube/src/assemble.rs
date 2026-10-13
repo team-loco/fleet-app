@@ -51,6 +51,7 @@ impl Extras {
 }
 
 pub struct Selection<'a> {
+    pub page: Page,
     pub event_limit: usize,
     pub yaml: &'a [&'a (ResourceRef, String)],
 }
@@ -88,8 +89,9 @@ pub fn cluster(
     problems.extend(connection_problem(id, &connection));
     let flux_counts = flux.map(flux::counts).unwrap_or_default();
     let percents = extras.ring.latest().map(|s| s.percents());
+    let pod_tally = pod_counts(&pods);
     let metrics = reachable(&connection).then(|| ClusterMetrics {
-        pods: pod_counts(&pods),
+        pods: pod_tally,
         cpu_percent: percents.map(|(cpu, _)| cpu),
         memory_percent: percents.map(|(_, memory)| memory),
         flux: flux_counts,
@@ -97,7 +99,7 @@ pub fn cluster(
     });
     let counts = problem_counts(&problems);
     let mut summary = summarize(id.clone(), id.to_string(), handle, counts, metrics);
-    let pod_rows = if selection.is_some() {
+    let pod_rows = if selection.is_some_and(|selection| selection.page == Page::Pods) {
         crate::pods::pods(
             id,
             &pods,
@@ -109,9 +111,11 @@ pub fn cluster(
         Vec::new()
     };
     if selection.is_some() {
-        summary
-            .nav
-            .insert(Page::Pods, fleet_core::pods::nav_counts(&pod_rows, id));
+        let nav = Counts {
+            warn: 0,
+            ..pod_tally
+        };
+        summary.nav.insert(Page::Pods, nav);
     }
     let detail = selection.map(|selection| {
         let detail = cluster_detail(handle, extras, &pods, &nodes, selection, now);

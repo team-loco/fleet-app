@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Measure Fleet's scale watcher heap, rebuilds and API-to-UI-state latency"
+set -euo pipefail
+export FLEET_E2E=1
+mise exec -- cargo test -p fleet-kube --release --test performance kind_scale -- --ignored --nocapture --test-threads=1

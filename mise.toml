@@ -64,3 +64,6 @@ run = "cargo deny check licenses bans sources"
 [tasks.check]
 description = "Everything a PR needs"
 depends = ["fmt", "lint", "test", "typos", "deny"]
+
+[env]
+FLEET_SCALE_IMAGE = "registry.k8s.io/pause:3.10"

@@ -108,16 +108,27 @@ impl PodIndex {
             if !is_active(pod) {
                 continue;
             }
-            let namespace = pod.metadata.namespace.clone().unwrap_or_default();
-            let facts = index.namespaces.entry(namespace).or_default();
+            let namespace = pod.metadata.namespace.as_deref().unwrap_or_default();
+            if !index.namespaces.contains_key(namespace) {
+                index
+                    .namespaces
+                    .insert(namespace.to_owned(), NamespaceFacts::default());
+            }
+            let Some(facts) = index.namespaces.get_mut(namespace) else {
+                unreachable!()
+            };
             facts.pods += 1;
             match health {
                 PodHealth::Failing => facts.problems.err += 1,
                 PodHealth::Warning => facts.problems.warn += 1,
                 PodHealth::Healthy => {}
             }
-            if let Some(node) = pod.spec.as_ref().and_then(|s| s.node_name.clone()) {
-                *index.per_node.entry(node).or_default() += 1;
+            if let Some(node) = pod.spec.as_ref().and_then(|s| s.node_name.as_deref()) {
+                if let Some(count) = index.per_node.get_mut(node) {
+                    *count += 1;
+                } else {
+                    index.per_node.insert(node.to_owned(), 1);
+                }
             }
             let (requests, limits) = pod_resources(pod);
             index.requests.add(requests);
