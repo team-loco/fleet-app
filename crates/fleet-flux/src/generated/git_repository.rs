@@ -1,4 +1,4 @@
-#![allow(clippy::all, unused_imports)]
+#![allow(clippy::all, clippy::pedantic, unused_imports)]
 
 #[allow(unused_imports)]
 mod prelude {

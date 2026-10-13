@@ -19,7 +19,7 @@ const SECRET_TWO: &str = include_str!("fixtures/helm-secret-v2.json");
 
 fn object(fixture: &str) -> Result<GitOpsObject, Box<dyn Error>> {
     let value = serde_json::from_str(fixture)?;
-    Ok(GitOpsObject::from_json(value)?)
+    Ok(GitOpsObject::from_json(&value)?)
 }
 
 #[derive(Deserialize)]
@@ -35,7 +35,7 @@ struct SummaryCase {
 fn summaries_use_flux_reasons_and_precedence() -> TestResult {
     let cases: Vec<SummaryCase> = serde_json::from_str(include_str!("fixtures/summaries.json"))?;
     for case in cases {
-        let object = GitOpsObject::from_json(case.object)?;
+        let object = GitOpsObject::from_json(&case.object)?;
         let summary = summarize(&object, None);
         assert_eq!(summary.status, case.expected_status, "{}", case.name);
         assert_eq!(summary.sentence, case.expected_sentence, "{}", case.name);
@@ -114,7 +114,7 @@ fn helm_chart_references_resolve_namespaces() -> TestResult {
     let mut value: Value = serde_json::from_str(HELMRELEASE)?;
     value["spec"]["chartRef"] =
         json!({"kind":"OCIRepository","name":"monitoring","namespace":"sources"});
-    let object = GitOpsObject::from_json(value.clone())?;
+    let object = GitOpsObject::from_json(&value)?;
     let source = object.source_ref.ok_or("missing OCI reference")?;
     assert_eq!(source.kind, "OCIRepository");
     assert_eq!(source.namespace, "sources");
@@ -126,7 +126,7 @@ fn helm_chart_references_resolve_namespaces() -> TestResult {
         .as_object_mut()
         .ok_or("invalid status")?
         .remove("helmChart");
-    let object = GitOpsObject::from_json(value)?;
+    let object = GitOpsObject::from_json(&value)?;
     let source = object.source_ref.ok_or("missing repository")?;
     assert_eq!(source.kind, "HelmRepository");
     assert_eq!(source.namespace, "flux-system");
@@ -154,7 +154,7 @@ fn all_generated_sources_normalize_artifact_revisions() -> TestResult {
         ),
     ] {
         let value = json!({"apiVersion":kind.api_version(),"kind":kind,"metadata":{"name":"source","namespace":"flux-system"},"spec":spec,"status":{"artifact":{"revision":"revision-one","path":"artifact.tar.gz","url":"http://source/artifact","digest":"sha256:abc","lastUpdateTime":"2026-10-12T18:11:00Z"}}});
-        let object = GitOpsObject::from_json(value)?;
+        let object = GitOpsObject::from_json(&value)?;
         assert_eq!(object.revision(), Some("revision-one"));
     }
     Ok(())
@@ -176,17 +176,17 @@ fn invalid_external_fields_are_rejected_and_unknown_fields_are_tolerated() -> Te
         } else if pointer == "/spec/suspend" {
             value["spec"]["suspend"] = invalid;
         }
-        assert!(GitOpsObject::from_json(value).is_err(), "{pointer}");
+        assert!(GitOpsObject::from_json(&value).is_err(), "{pointer}");
     }
     let mut value = original.clone();
     value["apiVersion"] = json!("kustomize.toolkit.fluxcd.io/v9");
     assert!(matches!(
-        GitOpsObject::from_json(value),
+        GitOpsObject::from_json(&value),
         Err(ObjectError::UnsupportedVersion(_))
     ));
     let mut value = original;
     value["spec"]["futureField"] = json!("ignored");
-    assert!(GitOpsObject::from_json(value).is_ok());
+    assert!(GitOpsObject::from_json(&value).is_ok());
     assert!(InventoryEntry::parse("ns_name_group_kind_extra", "v1").is_err());
     assert!(InventoryEntry::parse("ns__group_kind", "v1").is_err());
     assert!(InventoryEntry::parse("ns_name_group_kind", "").is_err());
@@ -264,14 +264,14 @@ fn helm_history_is_ordered_and_diff_contains_every_change() -> TestResult {
 }
 
 fn encoded_secret(bytes: &[u8]) -> Result<Secret, Box<dyn Error>> {
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(bytes)?;
-    let compressed = encoder.finish()?;
-    let encoded = STANDARD.encode(compressed);
+    let mut gzip = GzEncoder::new(Vec::new(), Compression::default());
+    gzip.write_all(bytes)?;
+    let compressed = gzip.finish()?;
+    let base64_text = STANDARD.encode(compressed);
     let mut secret: Secret = serde_json::from_str(SECRET_ONE)?;
     let data = secret.data.as_mut().ok_or("missing data")?;
     let release = data.get_mut("release").ok_or("missing release")?;
-    release.0 = encoded.into_bytes();
+    release.0 = base64_text.into_bytes();
     Ok(secret)
 }
 

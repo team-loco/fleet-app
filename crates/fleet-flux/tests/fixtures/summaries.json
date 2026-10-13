@@ -1461,5 +1461,485 @@
     },
     "expectedStatus": "Err",
     "expectedSentence": "Helm install failed and retries are exhausted."
+  },
+  {
+    "name": "actual-missing-path",
+    "object": {
+      "apiVersion": "kustomize.toolkit.fluxcd.io/v1",
+      "kind": "Kustomization",
+      "metadata": {
+        "name": "apps-payments",
+        "namespace": "flux-system",
+        "generation": 2
+      },
+      "spec": {
+        "interval": "5m",
+        "path": "./apps/payments",
+        "prune": true,
+        "sourceRef": {
+          "kind": "GitRepository",
+          "name": "fleet-infra"
+        },
+        "dependsOn": [
+          {
+            "name": "infra-controllers",
+            "readyExpr": "dep.status.observedGeneration == dep.metadata.generation"
+          }
+        ]
+      },
+      "status": {
+        "observedGeneration": 2,
+        "lastAppliedRevision": "main@sha1:a41e07c",
+        "lastAttemptedRevision": "main@sha1:a41e07c",
+        "lastHandledReconcileAt": "2026-10-12T18:11:00Z",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "False",
+            "reason": "ArtifactFailed",
+            "message": "kustomization path not found: stat /tmp/artifact/apps/payments: no such file or directory",
+            "observedGeneration": 2,
+            "lastTransitionTime": "2026-10-12T18:11:00Z"
+          }
+        ],
+        "inventory": {
+          "entries": [
+            {
+              "id": "payments_checkout-api_apps_Deployment",
+              "v": "v1"
+            },
+            {
+              "id": "_payments__Namespace",
+              "v": "v1"
+            }
+          ]
+        }
+      }
+    },
+    "expectedStatus": "Err",
+    "expectedSentence": "The build path does not exist in the source artifact."
+  },
+  {
+    "name": "live-helm-upgrade-failed",
+    "object": {
+      "apiVersion": "helm.toolkit.fluxcd.io/v2",
+      "kind": "HelmRelease",
+      "metadata": {
+        "name": "checkout-api",
+        "namespace": "payments",
+        "generation": 1
+      },
+      "spec": {
+        "chart": {
+          "spec": {
+            "chart": "podinfo",
+            "reconcileStrategy": "ChartVersion",
+            "sourceRef": {
+              "kind": "HelmRepository",
+              "name": "podinfo",
+              "namespace": "flux-system"
+            },
+            "version": "*"
+          }
+        },
+        "install": {
+          "strategy": {
+            "name": "RetryOnFailure",
+            "retryInterval": "1m"
+          }
+        },
+        "interval": "1m",
+        "releaseName": "checkout-api",
+        "timeout": "1m",
+        "upgrade": {
+          "strategy": {
+            "name": "RetryOnFailure",
+            "retryInterval": "1m"
+          }
+        },
+        "values": {
+          "extraArgs": [
+            "--fleet-invalid-flag"
+          ],
+          "fullnameOverride": "checkout-api"
+        }
+      },
+      "status": {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-13T07:14:55Z",
+            "message": "Fulfilling prerequisites",
+            "observedGeneration": 1,
+            "reason": "Progressing",
+            "status": "True",
+            "type": "Reconciling"
+          },
+          {
+            "lastTransitionTime": "2026-10-13T07:13:43Z",
+            "message": "Helm upgrade failed for release payments/checkout-api with chart podinfo@6.15.0: failed early due to stalled resources: [Deployment/payments/checkout-api status: 'Failed']",
+            "observedGeneration": 1,
+            "reason": "UpgradeFailed",
+            "status": "False",
+            "type": "Ready"
+          },
+          {
+            "lastTransitionTime": "2026-10-13T07:08:49Z",
+            "message": "Helm upgrade failed for release payments/checkout-api with chart podinfo@6.15.0: failed early due to stalled resources: [Deployment/payments/checkout-api status: 'Failed']",
+            "observedGeneration": 1,
+            "reason": "UpgradeFailed",
+            "status": "False",
+            "type": "Released"
+          }
+        ],
+        "failures": 11,
+        "helmChart": "flux-system/payments-checkout-api",
+        "history": [
+          {
+            "action": "upgrade",
+            "apiVersion": "v2",
+            "appVersion": "6.15.0",
+            "chartName": "podinfo",
+            "chartVersion": "6.15.0",
+            "configDigest": "sha256:45c137be6189b4d58a83d449b7e7f127a96b28930a0c62f58fe8aea970755b92",
+            "digest": "sha256:a866cca62599a60178ed1c0c5cf1c7f3298a906c67b0b2c2de96fdb2e20dd737",
+            "firstDeployed": "2026-10-13T06:36:22Z",
+            "lastDeployed": "2026-10-13T07:13:39Z",
+            "name": "checkout-api",
+            "namespace": "payments",
+            "status": "failed",
+            "version": 11
+          },
+          {
+            "apiVersion": "v2",
+            "appVersion": "6.15.0",
+            "chartName": "podinfo",
+            "chartVersion": "6.15.0",
+            "configDigest": "sha256:45c137be6189b4d58a83d449b7e7f127a96b28930a0c62f58fe8aea970755b92",
+            "digest": "sha256:f9f931c3970216a6dc06e5a20c453138ec1fb508f55e8fa76838ed9cdb24d720",
+            "firstDeployed": "2026-10-13T06:36:22Z",
+            "lastDeployed": "2026-10-13T07:11:47Z",
+            "name": "checkout-api",
+            "namespace": "payments",
+            "status": "failed",
+            "version": 10
+          },
+          {
+            "apiVersion": "v2",
+            "appVersion": "6.15.0",
+            "chartName": "podinfo",
+            "chartVersion": "6.15.0",
+            "configDigest": "sha256:45c137be6189b4d58a83d449b7e7f127a96b28930a0c62f58fe8aea970755b92",
+            "digest": "sha256:8e131a270f24b9e9900900dbaa56ff4d153c9390cae2d64ac7b00261fd118af2",
+            "firstDeployed": "2026-10-13T06:36:22Z",
+            "lastDeployed": "2026-10-13T07:10:00Z",
+            "name": "checkout-api",
+            "namespace": "payments",
+            "status": "failed",
+            "version": 9
+          },
+          {
+            "apiVersion": "v2",
+            "appVersion": "6.15.0",
+            "chartName": "podinfo",
+            "chartVersion": "6.15.0",
+            "configDigest": "sha256:45c137be6189b4d58a83d449b7e7f127a96b28930a0c62f58fe8aea970755b92",
+            "digest": "sha256:a849b9679f0260b301adf63c2c00c12254968d8dadd83e8f51cfba5cbc63e2d6",
+            "firstDeployed": "2026-10-13T06:36:22Z",
+            "lastDeployed": "2026-10-13T07:08:40Z",
+            "name": "checkout-api",
+            "namespace": "payments",
+            "status": "failed",
+            "version": 8
+          }
+        ],
+        "installFailures": 1,
+        "inventory": {
+          "entries": [
+            {
+              "id": "payments_checkout-api__Service",
+              "v": "v1"
+            },
+            {
+              "id": "payments_checkout-api_apps_Deployment",
+              "v": "v1"
+            }
+          ]
+        },
+        "lastAttemptedConfigDigest": "sha256:45c137be6189b4d58a83d449b7e7f127a96b28930a0c62f58fe8aea970755b92",
+        "lastAttemptedGeneration": 1,
+        "lastAttemptedReleaseAction": "upgrade",
+        "lastAttemptedReleaseActionDuration": "6.662449338s",
+        "lastAttemptedRevision": "6.15.0",
+        "observedGeneration": 1,
+        "storageNamespace": "payments",
+        "upgradeFailures": 10
+      }
+    },
+    "expectedStatus": "Warn",
+    "expectedSentence": "Helm upgrade failed and will be retried."
+  },
+  {
+    "name": "live-helm-suspended",
+    "object": {
+      "apiVersion": "helm.toolkit.fluxcd.io/v2",
+      "kind": "HelmRelease",
+      "metadata": {
+        "name": "search-indexer",
+        "namespace": "search",
+        "generation": 1
+      },
+      "spec": {
+        "chart": {
+          "spec": {
+            "chart": "podinfo",
+            "reconcileStrategy": "ChartVersion",
+            "sourceRef": {
+              "kind": "HelmRepository",
+              "name": "podinfo",
+              "namespace": "flux-system"
+            },
+            "version": "*"
+          }
+        },
+        "interval": "1m",
+        "suspend": true
+      },
+      "status": {
+        "observedGeneration": 1
+      }
+    },
+    "expectedStatus": "Suspended",
+    "expectedSentence": "Reconciliation is suspended."
+  },
+  {
+    "name": "live-kustomization-first-reconcile",
+    "object": {
+      "apiVersion": "kustomize.toolkit.fluxcd.io/v1",
+      "kind": "Kustomization",
+      "metadata": {
+        "name": "broken-kustomization",
+        "namespace": "flux-system",
+        "generation": 1
+      },
+      "spec": {
+        "force": false,
+        "interval": "1m",
+        "path": "./fleet-nonexistent-path",
+        "prune": true,
+        "retryInterval": "30s",
+        "sourceRef": {
+          "kind": "GitRepository",
+          "name": "podinfo"
+        },
+        "targetNamespace": "web"
+      },
+      "status": {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-13T07:14:17Z",
+            "message": "Fetching manifests for revision master@sha1:3e0ff8ae123b710bc91de1315cba0f996a8896c2 with a timeout of 30s",
+            "observedGeneration": 1,
+            "reason": "Progressing",
+            "status": "True",
+            "type": "Reconciling"
+          },
+          {
+            "lastTransitionTime": "2026-10-13T07:14:17Z",
+            "message": "Reconciliation in progress",
+            "observedGeneration": 1,
+            "reason": "Progressing",
+            "status": "Unknown",
+            "type": "Ready"
+          }
+        ],
+        "observedGeneration": -1
+      }
+    },
+    "expectedStatus": "Progress",
+    "expectedSentence": "Reconciliation is in progress."
+  },
+  {
+    "name": "live-helm-ready-while-reconciling",
+    "object": {
+      "apiVersion": "helm.toolkit.fluxcd.io/v2",
+      "kind": "HelmRelease",
+      "metadata": {
+        "name": "podinfo",
+        "namespace": "apps",
+        "generation": 1
+      },
+      "spec": {
+        "chart": {
+          "spec": {
+            "chart": "podinfo",
+            "reconcileStrategy": "ChartVersion",
+            "sourceRef": {
+              "kind": "HelmRepository",
+              "name": "podinfo",
+              "namespace": "flux-system"
+            },
+            "version": "*"
+          }
+        },
+        "interval": "1m",
+        "releaseName": "podinfo",
+        "timeout": "1m"
+      },
+      "status": {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-13T07:16:05Z",
+            "message": "Fulfilling prerequisites",
+            "observedGeneration": 1,
+            "reason": "Progressing",
+            "status": "True",
+            "type": "Reconciling"
+          },
+          {
+            "lastTransitionTime": "2026-10-13T06:36:32Z",
+            "message": "Helm install succeeded for release apps/podinfo.v1 with chart podinfo@6.15.0",
+            "observedGeneration": 1,
+            "reason": "InstallSucceeded",
+            "status": "True",
+            "type": "Ready"
+          },
+          {
+            "lastTransitionTime": "2026-10-13T06:36:32Z",
+            "message": "Helm install succeeded for release apps/podinfo.v1 with chart podinfo@6.15.0",
+            "observedGeneration": 1,
+            "reason": "InstallSucceeded",
+            "status": "True",
+            "type": "Released"
+          }
+        ],
+        "helmChart": "flux-system/apps-podinfo",
+        "history": [
+          {
+            "action": "install",
+            "apiVersion": "v2",
+            "appVersion": "6.15.0",
+            "chartName": "podinfo",
+            "chartVersion": "6.15.0",
+            "configDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "digest": "sha256:68f875540ea8894a1ef904cfc475c4faa05822a8e6d6e3d772f8de93349c0f0b",
+            "firstDeployed": "2026-10-13T06:36:22Z",
+            "lastDeployed": "2026-10-13T06:36:22Z",
+            "name": "podinfo",
+            "namespace": "apps",
+            "status": "deployed",
+            "version": 1
+          }
+        ],
+        "inventory": {
+          "entries": [
+            {
+              "id": "apps_podinfo__Service",
+              "v": "v1"
+            },
+            {
+              "id": "apps_podinfo_apps_Deployment",
+              "v": "v1"
+            }
+          ]
+        },
+        "lastAttemptedConfigDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "lastAttemptedGeneration": 1,
+        "lastAttemptedReleaseAction": "install",
+        "lastAttemptedReleaseActionDuration": "10.305155545s",
+        "lastAttemptedRevision": "6.15.0",
+        "observedGeneration": 1,
+        "storageNamespace": "apps"
+      }
+    },
+    "expectedStatus": "Progress",
+    "expectedSentence": "Reconciliation is in progress."
+  },
+  {
+    "name": "live-kustomization-health-unknown",
+    "object": {
+      "apiVersion": "kustomize.toolkit.fluxcd.io/v1",
+      "kind": "Kustomization",
+      "metadata": {
+        "name": "apps",
+        "namespace": "flux-system",
+        "generation": 1
+      },
+      "spec": {
+        "force": false,
+        "interval": "1m",
+        "path": "./kustomize",
+        "prune": true,
+        "retryInterval": "30s",
+        "sourceRef": {
+          "kind": "GitRepository",
+          "name": "podinfo"
+        },
+        "targetNamespace": "web",
+        "timeout": "2m",
+        "wait": true
+      },
+      "status": {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-13T07:19:09Z",
+            "message": "Fetching manifests for revision master@sha1:3e0ff8ae123b710bc91de1315cba0f996a8896c2 with a timeout of 2m0s",
+            "observedGeneration": 1,
+            "reason": "Progressing",
+            "status": "True",
+            "type": "Reconciling"
+          },
+          {
+            "lastTransitionTime": "2026-10-13T07:13:51Z",
+            "message": "Reconciliation in progress",
+            "observedGeneration": 1,
+            "reason": "Progressing",
+            "status": "Unknown",
+            "type": "Ready"
+          },
+          {
+            "lastTransitionTime": "2026-10-13T07:14:51Z",
+            "message": "Running health checks for revision master@sha1:3e0ff8ae123b710bc91de1315cba0f996a8896c2 with a timeout of 2m0s",
+            "observedGeneration": 1,
+            "reason": "Progressing",
+            "status": "Unknown",
+            "type": "Healthy"
+          }
+        ],
+        "history": [
+          {
+            "digest": "sha256:9aa9a66e7c40dedd84ab05379e426d1325bd1f44e93038093281defe408b76f1",
+            "firstReconciled": "2026-10-13T06:38:55Z",
+            "lastReconciled": "2026-10-13T07:10:29Z",
+            "lastReconciledDuration": "2m15.473853984s",
+            "lastReconciledStatus": "ReconciliationSucceeded",
+            "metadata": {
+              "revision": "master@sha1:3e0ff8ae123b710bc91de1315cba0f996a8896c2"
+            },
+            "totalReconciliations": 10
+          }
+        ],
+        "inventory": {
+          "entries": [
+            {
+              "id": "web_podinfo__Service",
+              "v": "v1"
+            },
+            {
+              "id": "web_podinfo_apps_Deployment",
+              "v": "v1"
+            },
+            {
+              "id": "web_podinfo_autoscaling_HorizontalPodAutoscaler",
+              "v": "v2"
+            }
+          ]
+        },
+        "lastAppliedRevision": "master@sha1:3e0ff8ae123b710bc91de1315cba0f996a8896c2",
+        "lastAttemptedRevision": "master@sha1:3e0ff8ae123b710bc91de1315cba0f996a8896c2",
+        "observedGeneration": 1
+      }
+    },
+    "expectedStatus": "Progress",
+    "expectedSentence": "Reconciliation is in progress."
   }
 ]

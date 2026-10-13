@@ -158,8 +158,117 @@ fn reference(value: &Value, namespace: &str, kind: &str) -> Result<ResourceRef, 
     })
 }
 
+fn validate(kind: ObjectKind, value: &Value) -> Result<(), ObjectError> {
+    match kind {
+        ObjectKind::Kustomization => {
+            serde_json::from_value::<generated::Kustomization>(value.clone())?;
+        }
+        ObjectKind::HelmRelease => {
+            serde_json::from_value::<generated::HelmRelease>(value.clone())?;
+        }
+        ObjectKind::GitRepository => {
+            serde_json::from_value::<generated::GitRepository>(value.clone())?;
+        }
+        ObjectKind::HelmRepository => {
+            serde_json::from_value::<generated::HelmRepository>(value.clone())?;
+        }
+        ObjectKind::HelmChart => {
+            serde_json::from_value::<generated::HelmChart>(value.clone())?;
+        }
+        ObjectKind::OCIRepository => {
+            serde_json::from_value::<generated::OciRepository>(value.clone())?;
+        }
+    }
+    Ok(())
+}
+
+fn source_reference(
+    kind: ObjectKind,
+    spec: &Value,
+    status: &Value,
+    namespace: &str,
+) -> Result<Option<ResourceRef>, ObjectError> {
+    let source = match kind {
+        ObjectKind::HelmRelease => {
+            let chart = status
+                .get("helmChart")
+                .and_then(Value::as_str)
+                .and_then(|chart| chart.split_once('/'));
+            if let Some(source) = spec.get("chartRef") {
+                Some(reference(source, namespace, "HelmChart")?)
+            } else if let Some((chart_namespace, chart_name)) = chart {
+                Some(ResourceRef {
+                    kind: "HelmChart".into(),
+                    namespace: chart_namespace.into(),
+                    name: chart_name.into(),
+                    ready_expr: None,
+                })
+            } else {
+                spec.pointer("/chart/spec/sourceRef")
+                    .map(|source| reference(source, namespace, "HelmRepository"))
+                    .transpose()?
+            }
+        }
+        _ => spec
+            .get("sourceRef")
+            .map(|source| reference(source, namespace, "GitRepository"))
+            .transpose()?,
+    };
+    Ok(source)
+}
+
+fn inventory(status: &Value) -> Result<Vec<InventoryEntry>, ObjectError> {
+    let entries = status
+        .pointer("/inventory/entries")
+        .cloned()
+        .map(serde_json::from_value::<Vec<Value>>)
+        .transpose()?
+        .unwrap_or_default();
+    let inventory = entries
+        .iter()
+        .map(|entry| {
+            let id = entry
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or(ObjectError::InvalidField("inventory.id"))?;
+            let version = entry
+                .get("v")
+                .and_then(Value::as_str)
+                .ok_or(ObjectError::InvalidField("inventory.v"))?;
+            InventoryEntry::parse(id, version)
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(inventory)
+}
+
+fn release_history(
+    kind: ObjectKind,
+    status: &Value,
+) -> Result<(Vec<ReleaseSnapshot>, Option<String>), ObjectError> {
+    let history: Vec<ReleaseSnapshot> = if kind == ObjectKind::HelmRelease {
+        status
+            .get("history")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()?
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let last_applied_revision = if kind == ObjectKind::HelmRelease {
+        history
+            .iter()
+            .filter(|snapshot| snapshot.status == "deployed")
+            .max_by_key(|snapshot| snapshot.version)
+            .map(|snapshot| snapshot.chart_version.clone())
+    } else {
+        string(status, "lastAppliedRevision")
+    };
+    Ok((history, last_applied_revision))
+}
+
 impl GitOpsObject {
-    pub fn from_json(value: Value) -> Result<Self, ObjectError> {
+    pub fn from_json(value: &Value) -> Result<Self, ObjectError> {
         let kind: ObjectKind = serde_json::from_value(
             value
                 .get("kind")
@@ -167,30 +276,11 @@ impl GitOpsObject {
                 .ok_or(ObjectError::InvalidField("kind"))?,
         )?;
         let api_version =
-            string(&value, "apiVersion").ok_or(ObjectError::InvalidField("apiVersion"))?;
+            string(value, "apiVersion").ok_or(ObjectError::InvalidField("apiVersion"))?;
         if api_version != kind.api_version() {
             return Err(ObjectError::UnsupportedVersion(api_version));
         }
-        match kind {
-            ObjectKind::Kustomization => {
-                serde_json::from_value::<generated::Kustomization>(value.clone())?;
-            }
-            ObjectKind::HelmRelease => {
-                serde_json::from_value::<generated::HelmRelease>(value.clone())?;
-            }
-            ObjectKind::GitRepository => {
-                serde_json::from_value::<generated::GitRepository>(value.clone())?;
-            }
-            ObjectKind::HelmRepository => {
-                serde_json::from_value::<generated::HelmRepository>(value.clone())?;
-            }
-            ObjectKind::HelmChart => {
-                serde_json::from_value::<generated::HelmChart>(value.clone())?;
-            }
-            ObjectKind::OCIRepository => {
-                serde_json::from_value::<generated::OciRepository>(value.clone())?;
-            }
-        }
+        validate(kind, value)?;
         let metadata = value.get("metadata").unwrap_or(&Value::Null);
         let name = string(metadata, "name")
             .filter(|name| !name.is_empty())
@@ -210,82 +300,20 @@ impl GitOpsObject {
             .map(serde_json::from_value)
             .transpose()?
             .unwrap_or_default();
-        let source_ref = match kind {
-            ObjectKind::HelmRelease => {
-                let chart = status
-                    .get("helmChart")
-                    .and_then(Value::as_str)
-                    .and_then(|chart| chart.split_once('/'));
-                if let Some(source) = spec.get("chartRef") {
-                    Some(reference(source, &namespace, "HelmChart")?)
-                } else if let Some((chart_namespace, chart_name)) = chart {
-                    Some(ResourceRef {
-                        kind: "HelmChart".into(),
-                        namespace: chart_namespace.into(),
-                        name: chart_name.into(),
-                        ready_expr: None,
-                    })
-                } else {
-                    spec.pointer("/chart/spec/sourceRef")
-                        .map(|source| reference(source, &namespace, "HelmRepository"))
-                        .transpose()?
-                }
-            }
-            _ => spec
-                .get("sourceRef")
-                .map(|source| reference(source, &namespace, "GitRepository"))
-                .transpose()?,
-        };
+        let source_ref = source_reference(kind, &spec, status, &namespace)?;
         let dependencies = spec
             .get("dependsOn")
             .cloned()
             .map(serde_json::from_value::<Vec<Value>>)
             .transpose()?
             .unwrap_or_default();
-        let kind_name = string(&value, "kind").ok_or(ObjectError::InvalidField("kind"))?;
+        let kind_name = string(value, "kind").ok_or(ObjectError::InvalidField("kind"))?;
         let depends_on = dependencies
             .iter()
             .map(|dependency| reference(dependency, &namespace, &kind_name))
             .collect::<Result<_, _>>()?;
-        let entries = status
-            .pointer("/inventory/entries")
-            .cloned()
-            .map(serde_json::from_value::<Vec<Value>>)
-            .transpose()?
-            .unwrap_or_default();
-        let inventory = entries
-            .iter()
-            .map(|entry| {
-                let id = entry
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .ok_or(ObjectError::InvalidField("inventory.id"))?;
-                let version = entry
-                    .get("v")
-                    .and_then(Value::as_str)
-                    .ok_or(ObjectError::InvalidField("inventory.v"))?;
-                InventoryEntry::parse(id, version)
-            })
-            .collect::<Result<_, _>>()?;
-        let history: Vec<ReleaseSnapshot> = if kind == ObjectKind::HelmRelease {
-            status
-                .get("history")
-                .cloned()
-                .map(serde_json::from_value)
-                .transpose()?
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-        let last_applied_revision = if kind == ObjectKind::HelmRelease {
-            history
-                .iter()
-                .filter(|snapshot| snapshot.status == "deployed")
-                .max_by_key(|snapshot| snapshot.version)
-                .map(|snapshot| snapshot.chart_version.clone())
-        } else {
-            string(status, "lastAppliedRevision")
-        };
+        let inventory = inventory(status)?;
+        let (history, last_applied_revision) = release_history(kind, status)?;
         let identity = ObjectIdentity {
             kind,
             namespace,
@@ -355,7 +383,7 @@ macro_rules! convert {
             type Error = ObjectError;
             fn try_from(object: &$type) -> Result<Self, Self::Error> {
                 let value = serde_json::to_value(object)?;
-                Self::from_json(value)
+                Self::from_json(&value)
             }
         }
     };

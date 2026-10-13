@@ -7,6 +7,7 @@ import tempfile
 
 root = pathlib.Path(__file__).resolve().parents[2]
 output = root / "crates/fleet-flux/src/generated"
+output.mkdir(parents=True, exist_ok=True)
 resources = {
     "helmreleases.helm.toolkit.fluxcd.io": ("helm_release", "v2"),
     "gitrepositories.source.toolkit.fluxcd.io": ("git_repository", "v1"),
@@ -30,7 +31,7 @@ with tempfile.TemporaryDirectory(prefix="fleet-flux-") as temporary:
         code = subprocess.check_output(["kopium", "-f", str(crd), "--api-version", version], text=True)
         code = "\n".join(line for line in code.splitlines() if not line.lstrip().startswith("//"))
         target = output / f"{module}.rs"
-        target.write_text("#![allow(clippy::all, unused_imports)]\n" + code + "\n")
+        target.write_text("#![allow(clippy::all, clippy::pedantic, unused_imports)]\n" + code + "\n")
         subprocess.run(["rustfmt", "--edition", "2024", str(target)], check=True)
         found.add(name[1])
 if found != set(resources):

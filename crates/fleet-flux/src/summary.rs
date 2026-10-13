@@ -72,6 +72,48 @@ fn release_failure(object: &GitOpsObject, condition: &Condition, action: &str) -
     summary
 }
 
+const MISSING_PATH_SENTENCE: &str = "The build path does not exist in the source artifact.";
+const MISSING_PATH_MARKERS: [&str; 2] = ["no such file or directory", "path not found"];
+
+fn missing_path(condition: &Condition) -> bool {
+    MISSING_PATH_MARKERS
+        .iter()
+        .any(|marker| condition.message.contains(marker))
+}
+
+fn failure(object: &GitOpsObject, condition: &Condition) -> Summary {
+    match condition.reason.as_str() {
+        "InstallFailed" => release_failure(object, condition, "install"),
+        "UpgradeFailed" => release_failure(object, condition, "upgrade"),
+        "DependencyNotReady" => result(Status::Warn, "A dependency is not ready.", Some(condition)),
+        "ArtifactFailed" | "BuildFailed" if missing_path(condition) => {
+            result(Status::Err, MISSING_PATH_SENTENCE, Some(condition))
+        }
+        "ArtifactFailed" => result(
+            Status::Err,
+            "The source artifact could not be loaded.",
+            Some(condition),
+        ),
+        "BuildFailed" => result(
+            Status::Err,
+            "The source could not be built.",
+            Some(condition),
+        ),
+        "HealthCheckFailed" => result(
+            Status::Err,
+            "Managed resources failed their health checks.",
+            Some(condition),
+        ),
+        "SourceNotReady" => result(Status::Warn, "The source is not ready.", Some(condition)),
+        "Progressing" => result(
+            Status::Progress,
+            "Reconciliation is in progress.",
+            Some(condition),
+        ),
+        _ => result(Status::Err, "Reconciliation failed.", Some(condition)),
+    }
+}
+
 pub fn summarize(object: &GitOpsObject, source: Option<&GitOpsObject>) -> Summary {
     if object.suspended {
         return result(Status::Suspended, "Reconciliation is suspended.", None);
@@ -110,48 +152,7 @@ pub fn summarize(object: &GitOpsObject, source: Option<&GitOpsObject>) -> Summar
         }
     }
     if let Some(condition) = ready.filter(|condition| condition.status == "False") {
-        match condition.reason.as_str() {
-            "InstallFailed" => return release_failure(object, condition, "install"),
-            "UpgradeFailed" => return release_failure(object, condition, "upgrade"),
-            "DependencyNotReady" => {
-                return result(Status::Warn, "A dependency is not ready.", Some(condition));
-            }
-            "ArtifactFailed" => {
-                return result(
-                    Status::Err,
-                    "The source artifact could not be loaded.",
-                    Some(condition),
-                );
-            }
-            "HealthCheckFailed" => {
-                return result(
-                    Status::Err,
-                    "Managed resources failed their health checks.",
-                    Some(condition),
-                );
-            }
-            "BuildFailed" => {
-                let sentence = if condition.message.contains("no such file or directory")
-                    || condition.message.contains("path not found")
-                {
-                    "The build path does not exist in the source artifact."
-                } else {
-                    "The source could not be built."
-                };
-                return result(Status::Err, sentence, Some(condition));
-            }
-            "SourceNotReady" => {
-                return result(Status::Warn, "The source is not ready.", Some(condition));
-            }
-            "Progressing" => {
-                return result(
-                    Status::Progress,
-                    "Reconciliation is in progress.",
-                    Some(condition),
-                );
-            }
-            _ => return result(Status::Err, "Reconciliation failed.", Some(condition)),
-        }
+        return failure(object, condition);
     }
     if let Some(drift) = active(object, "Drifted") {
         return result(
