@@ -15,7 +15,7 @@ SHA-256 checksums were verified against the official IBM release assets:
 
 Fleet Status is an original geometric symbol font owned by Fleet contributors,
 licensed under the repository's [Apache-2.0 license](../../../../LICENSE).
-`FleetStatus.ttf` and `FleetStatus-Medium.ttf` contain only ● ▲ ✕ ◐ ‖ ○,
+`FleetStatus.ttf` and `FleetStatus-Medium.ttf` contain only ● ▲ ✕ ◐ ‖ ○ ◎,
 plus the required empty `.notdef` glyph. They preserve the status outlines from
 #93 and match Plex Mono's advance width and vertical metrics without copying
 its outlines or name tables.

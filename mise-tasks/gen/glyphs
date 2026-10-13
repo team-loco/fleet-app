@@ -65,6 +65,10 @@ def build(stroke):
         disc(p, R)
         disc(p, R - stroke, clockwise=False)
     glyphs[ord("○")] = make(ring)
+    def bullseye(p):
+        ring(p)
+        disc(p, h)
+    glyphs[ord("◎")] = make(bullseye)
     def half(p):
         ring(p)
         ri = R - stroke

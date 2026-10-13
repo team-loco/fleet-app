@@ -15,10 +15,10 @@ use super::strip::{ClusterStripRow, ResourceStripRow, cluster_strip_rows, resour
 use crate::assets::{CHEVRON_LEFT, CHEVRON_RIGHT};
 use crate::kit::{Tooltip, status_symbols};
 use crate::theme::{
-    ActiveTheme, CLUSTERS_PANEL, COLLAPSE, FONT_MONO, GLYPH_SLOT, ICON, ICON_BUTTON, PANEL_HEADER,
-    Palette, RADIUS, RESOURCES_PANEL, ROW_CLUSTER, ROW_NAV, RULE, SPACE_1, SPACE_2, SPACE_3,
-    SPACE_4, SPACE_6, SPACE_7, SPACE_8, STRIP, STRIP_ITEM, TEXT_GLYPH, TEXT_LABEL, TEXT_SMALL,
-    TEXT_UI,
+    ActiveTheme, CLUSTERS_PANEL, COLLAPSE, FONT_MONO, FONT_STATUS, GLYPH_SLOT, ICON, ICON_BUTTON,
+    PANEL_HEADER, Palette, RADIUS, RESOURCES_PANEL, ROW_CLUSTER, ROW_NAV, RULE, SPACE_1, SPACE_2,
+    SPACE_3, SPACE_4, SPACE_6, SPACE_7, SPACE_8, STRIP, STRIP_ITEM, TEXT_GLYPH, TEXT_LABEL,
+    TEXT_SMALL, TEXT_UI,
 };
 
 const ALL_CLUSTERS: &str = "All clusters";
@@ -466,9 +466,10 @@ fn cluster_strip_item(
     let target = row.target;
     let key = ElementId::NamedInteger("cluster-strip".into(), ix as u64);
     strip_item(key, row.selected, row.tooltip.into(), palette)
+        .font_family(FONT_STATUS)
         .text_size(TEXT_GLYPH)
         .text_color(color)
-        .child(status_symbols(row.glyph))
+        .child(row.glyph)
         .on_click(cx.listener(move |this, _, _, cx| {
             this.dispatch(Command::SelectCluster(target.clone()), cx);
         }))

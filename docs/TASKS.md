@@ -53,6 +53,7 @@ Spec column points at `design/`.
 | id | unit | owner | branch | status |
 |---|---|---|---|---|
 | GLYPH | restore upstream Plex and ship Fleet Status glyph font (#95) | Codex | status-glyph-font | done |
+| GLYPH2 | bundle the all-clusters bullseye in Fleet Status | Codex | all-clusters-glyph | done (#100) |
 
 ## Follow-ups
 

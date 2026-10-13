@@ -82,7 +82,7 @@ mod tests {
     use crate::kit::STATUSES;
 
     #[test]
-    fn fleet_status_contains_only_six_monospaced_status_symbols()
+    fn fleet_status_contains_monospaced_status_symbols_and_bullseye()
     -> Result<(), ttf_parser::FaceParsingError> {
         let plex =
             ttf_parser::Face::parse(include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf"), 0)?;
@@ -106,17 +106,20 @@ mod tests {
                     .into_iter()
                     .any(|name| name == crate::theme::FONT_STATUS)
             );
-            assert_eq!(usize::from(face.number_of_glyphs()), STATUSES.len() + 1);
-            for status in STATUSES {
-                for character in status.glyph().chars() {
-                    let glyph = face.glyph_index(character);
-                    assert!(glyph.is_some(), "missing {character}");
-                    let advance = glyph.and_then(|glyph| face.glyph_hor_advance(glyph));
-                    assert_eq!(advance, reference);
-                    let bounds = glyph.and_then(|glyph| face.glyph_bounding_box(glyph));
-                    assert!(bounds.is_some_and(|bounds| bounds.y_min > 0
-                        && bounds.y_max < face.capital_height().unwrap_or_default()));
-                }
+            let characters: Vec<_> = STATUSES
+                .iter()
+                .flat_map(|status| status.glyph().chars())
+                .chain(['◎'])
+                .collect();
+            assert_eq!(usize::from(face.number_of_glyphs()), characters.len() + 1);
+            for character in characters {
+                let glyph = face.glyph_index(character);
+                assert!(glyph.is_some(), "missing {character}");
+                let advance = glyph.and_then(|glyph| face.glyph_hor_advance(glyph));
+                assert_eq!(advance, reference);
+                let bounds = glyph.and_then(|glyph| face.glyph_bounding_box(glyph));
+                assert!(bounds.is_some_and(|bounds| bounds.y_min > 0
+                    && bounds.y_max < face.capital_height().unwrap_or_default()));
             }
             assert!(face.glyph_index('M').is_none());
         }
