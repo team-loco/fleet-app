@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use fleet_core::settings::MetricsSource;
 use fleet_core::{ClusterId, NewCluster, Preferences};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::discovery::ContextRef;
@@ -13,6 +14,8 @@ const APP_SUPPORT: &str = "Library/Application Support";
 const APP_ID: &str = "dev.fleet.app";
 const CLUSTERS_FILE: &str = "clusters.json";
 const TEMP_SUFFIX: &str = "json.tmp";
+const CORRUPT_SUFFIX: &str = "corrupt";
+const CORRUPT_STAMP: &str = "%Y%m%dT%H%M%SZ";
 const KUBECONFIGS_DIR: &str = "kubeconfigs";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,6 +108,7 @@ pub struct ClusterStore {
     path: PathBuf,
     clusters: Vec<SavedCluster>,
     folders: Vec<PathBuf>,
+    set_aside: Option<PathBuf>,
 }
 
 impl ClusterStore {
@@ -113,17 +117,33 @@ impl ClusterStore {
     }
 
     pub fn open(dir: &Path) -> Result<Self> {
+        Self::open_at(dir, Timestamp::now())
+    }
+
+    pub fn open_at(dir: &Path, now: Timestamp) -> Result<Self> {
         let path = dir.join(CLUSTERS_FILE);
-        let file = match fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice::<StoreFile>(&bytes)?,
-            Err(error) if error.kind() == ErrorKind::NotFound => StoreFile::default(),
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Self::empty(dir)),
             Err(error) => return Err(error.into()),
         };
-        Ok(Self {
-            path,
-            clusters: file.clusters,
-            folders: file.folders,
-        })
+        match serde_json::from_slice::<StoreFile>(&bytes) {
+            Ok(file) => Ok(Self {
+                path,
+                clusters: file.clusters,
+                folders: file.folders,
+                set_aside: None,
+            }),
+            Err(error) => {
+                let aside = corrupt_path(&path, now);
+                fs::rename(&path, &aside)?;
+                tracing::warn!(%error, kept = %aside.display(), "saved clusters unreadable; set aside");
+                Ok(Self {
+                    set_aside: Some(aside),
+                    ..Self::empty(dir)
+                })
+            }
+        }
     }
 
     pub fn empty(dir: &Path) -> Self {
@@ -131,7 +151,12 @@ impl ClusterStore {
             path: dir.join(CLUSTERS_FILE),
             clusters: Vec::new(),
             folders: Vec::new(),
+            set_aside: None,
         }
+    }
+
+    pub fn set_aside(&self) -> Option<&Path> {
+        self.set_aside.as_deref()
     }
 
     pub fn kubeconfigs_dir(&self) -> PathBuf {
@@ -222,9 +247,25 @@ impl ClusterStore {
     }
 }
 
+fn corrupt_path(path: &Path, now: Timestamp) -> PathBuf {
+    let stamp = now.strftime(CORRUPT_STAMP);
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    path.with_file_name(format!("{name}.{CORRUPT_SUFFIX}-{stamp}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn now() -> Timestamp {
+        match "2026-10-13T06:36:00Z".parse() {
+            Ok(now) => now,
+            Err(error) => panic!("timestamp: {error}"),
+        }
+    }
 
     fn new_cluster(context: &str, name: &str) -> NewCluster {
         NewCluster {
@@ -241,7 +282,7 @@ mod tests {
         let Ok(dir) = tempfile::tempdir() else {
             panic!("tempdir");
         };
-        let Ok(store) = ClusterStore::open(dir.path()) else {
+        let Ok(store) = ClusterStore::open_at(dir.path(), now()) else {
             panic!("open");
         };
         assert_eq!(store.clusters(), &[]);
@@ -261,7 +302,7 @@ mod tests {
             new_cluster("other", "fleet-b"),
         ];
         assert!(store.add(&added).is_ok());
-        let Ok(reopened) = ClusterStore::open(&nested) else {
+        let Ok(reopened) = ClusterStore::open_at(&nested, now()) else {
             panic!("reopen");
         };
         let names: Vec<&str> = reopened
@@ -278,7 +319,7 @@ mod tests {
             removed.ok().flatten().map(|c| c.context),
             Some("kind-fleet-a".to_owned())
         );
-        let Ok(reopened) = ClusterStore::open(&nested) else {
+        let Ok(reopened) = ClusterStore::open_at(&nested, now()) else {
             panic!("reopen");
         };
         assert_eq!(reopened.clusters().len(), 1);
@@ -304,7 +345,7 @@ mod tests {
             store.set_preferences(&ClusterId::new("nope"), &preferences),
             Ok(false)
         ));
-        let Ok(reopened) = ClusterStore::open(dir.path()) else {
+        let Ok(reopened) = ClusterStore::open_at(dir.path(), now()) else {
             panic!("reopen");
         };
         let saved = reopened.get(&id).map(|c| Preferences::from(&c.preferences));
@@ -318,7 +359,7 @@ mod tests {
         };
         let old = r#"{"clusters":[{"file":"/h/.kube/config","context":"a","name":"a"}]}"#;
         assert!(fs::write(dir.path().join(CLUSTERS_FILE), old).is_ok());
-        let Ok(store) = ClusterStore::open(dir.path()) else {
+        let Ok(store) = ClusterStore::open_at(dir.path(), now()) else {
             panic!("open");
         };
         let saved = store
@@ -328,12 +369,24 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_file_is_an_error() {
+    fn corrupt_file_is_set_aside_before_anything_is_written() {
         let Ok(dir) = tempfile::tempdir() else {
             panic!("tempdir");
         };
         assert!(fs::write(dir.path().join(CLUSTERS_FILE), "{not json").is_ok());
-        assert!(ClusterStore::open(dir.path()).is_err());
+        let Ok(mut store) = ClusterStore::open_at(dir.path(), now()) else {
+            panic!("open");
+        };
+        let kept = dir.path().join("clusters.json.corrupt-20261013T063600Z");
+        assert_eq!(store.set_aside(), Some(kept.as_path()));
+        assert_eq!(store.clusters(), &[]);
+        assert!(store.add(&[new_cluster("kind-fleet-a", "fleet-a")]).is_ok());
+        assert_eq!(fs::read_to_string(&kept).ok().as_deref(), Some("{not json"));
+        let Ok(reopened) = ClusterStore::open_at(dir.path(), now()) else {
+            panic!("reopen");
+        };
+        assert_eq!(reopened.clusters().len(), 1);
+        assert_eq!(reopened.set_aside(), None);
     }
 
     #[test]
@@ -351,7 +404,7 @@ mod tests {
         let missing = store.add_folder(&dir.path().join("nope"));
         assert!(matches!(missing, Err(Error::NotAFolder(_))), "{missing:?}");
 
-        let Ok(reopened) = ClusterStore::open(&support) else {
+        let Ok(reopened) = ClusterStore::open_at(&support, now()) else {
             panic!("reopen");
         };
         assert_eq!(reopened.folders(), [folder]);

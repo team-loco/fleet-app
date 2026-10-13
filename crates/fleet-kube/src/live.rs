@@ -11,8 +11,8 @@ use fleet_core::settings::{Auth, ClusterSettings, Connection};
 use fleet_core::stream::Sink;
 use fleet_core::{
     Backend, ChangesLog, CheckLine, ClusterCatalog, ClusterId, ClusterSummary, Command,
-    ContextChoice, Counts, FleetHome, GitOps, KubeconfigFile, NewCluster, Page, Preferences,
-    Receiver, ResourceRef, Sender, Snapshot, Status, Update, Verdict, Workload,
+    ContextChoice, Counts, FleetHome, GitOps, KubeconfigFile, NewCluster, Notice, Page,
+    Preferences, Receiver, ResourceRef, Sender, Snapshot, Status, Update, Verdict, Workload,
 };
 use fleet_flux::ObjectKind;
 use jiff::Timestamp;
@@ -48,6 +48,8 @@ use crate::watch::KubeconfigWatcher;
 const THREAD_NAME: &str = "fleet-kube";
 const BASELINE_KINDS: [WatchKind; 2] = [WatchKind::Nodes, WatchKind::Pods];
 const MISSING_STATE: &str = "Not in kubeconfig";
+const DISCONNECTED_STATE: &str = "Disconnected";
+const SET_ASIDE_TITLE: &str = "Saved clusters could not be read";
 const MISSING_CONTEXT: &str = "This context is no longer in its kubeconfig file.";
 
 pub struct LiveBackend {
@@ -131,6 +133,7 @@ struct Live {
     updates: Sender<Update>,
     home: Option<PathBuf>,
     clusters: BTreeMap<ContextRef, Connected>,
+    disconnected: BTreeSet<ClusterId>,
     selected: Option<ClusterId>,
     page: Page,
     actions: Actions,
@@ -153,14 +156,15 @@ fn reachable(status: &ConnectionStatus) -> bool {
 }
 
 impl Live {
+    fn start(&mut self) {
+        if let Some(notice) = set_aside_notice(&self.store) {
+            self.publish(Update::Notice(notice));
+        }
+        self.reconcile();
+    }
+
     fn reconcile(&mut self) {
-        let ids: BTreeMap<ContextRef, ClusterId> = self
-            .store
-            .clusters()
-            .iter()
-            .filter(|saved| self.discovery.get(&saved.context_ref()).is_some())
-            .map(|saved| (saved.context_ref(), saved.id()))
-            .collect();
+        let ids = wanted(&self.store, &self.discovery, &self.disconnected);
         let wanted: BTreeSet<&ContextRef> = ids.keys().collect();
         let gone: Vec<ContextRef> = self
             .clusters
@@ -517,9 +521,12 @@ impl Live {
             Command::SetPreferences(id, preferences) => {
                 return self.set_preferences(id, preferences);
             }
-            Command::Connect(_) => {}
-            Command::Reauthenticate(_) => {}
-            Command::Disconnect(_) => {}
+            Command::Connect(id) => self.reconnect(id),
+            Command::Reauthenticate(id) => self.reconnect(id),
+            Command::Disconnect(id) => {
+                self.disconnected.insert(id.clone());
+                self.reconcile();
+            }
         }
         false
     }
@@ -572,6 +579,21 @@ impl Live {
     fn add(&mut self, added: &[NewCluster]) {
         if let Err(error) = self.store.add(added) {
             tracing::error!(%error, path = %self.store.path().display(), "saving clusters failed");
+        }
+        self.reconcile();
+    }
+
+    fn reconnect(&mut self, id: &ClusterId) {
+        self.disconnected.remove(id);
+        let existing: Vec<ContextRef> = self
+            .clusters
+            .iter()
+            .filter(|(_, cluster)| &cluster.id == id)
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in existing {
+            self.clusters.remove(&key);
+            self.manager.disconnect(&key);
         }
         self.reconcile();
     }
@@ -696,27 +718,40 @@ impl Live {
             .clusters()
             .iter()
             .filter(|saved| !self.clusters.contains_key(&saved.context_ref()))
-            .map(missing_summary);
+            .map(|saved| offline_summary(saved, self.disconnected.contains(&saved.id())));
         let mut clusters: Vec<_> = connected.into_iter().chain(missing).collect();
         clusters.sort_by(|a, b| a.name.cmp(&b.name));
         #[cfg(feature = "loco")]
         let loco = self.loco.snapshot(&mut clusters);
-        let settings: Vec<ClusterSettings> = self
-            .clusters
-            .values()
-            .map(|cluster| {
-                let status = cluster.handle.status();
-                let saved = self.store.get(&cluster.id).map(|c| &c.preferences);
-                let mut settings =
-                    cluster_settings(cluster.id.clone(), cluster.handle.context(), &status, saved);
-                settings.prometheus = cluster
-                    .extras
-                    .prometheus
-                    .as_ref()
-                    .map(|found| format!("{}:{}", found.target.label(), found.target.port));
-                settings
-            })
-            .collect();
+        let connected_settings = self.clusters.values().map(|cluster| {
+            let expired = matches!(cluster.handle.status(), ConnectionStatus::AuthExpired(_));
+            let saved = self.store.get(&cluster.id).map(|c| &c.preferences);
+            let mut settings =
+                cluster_settings(cluster.id.clone(), cluster.handle.context(), expired, saved);
+            settings.prometheus = cluster
+                .extras
+                .prometheus
+                .as_ref()
+                .map(|found| format!("{}:{}", found.target.label(), found.target.port));
+            settings
+        });
+        let disconnected_settings = self
+            .store
+            .clusters()
+            .iter()
+            .filter(|saved| self.disconnected.contains(&saved.id()))
+            .filter_map(|saved| {
+                let context = self.discovery.get(&saved.context_ref())?;
+                Some(cluster_settings(
+                    saved.id(),
+                    context,
+                    false,
+                    Some(&saved.preferences),
+                ))
+            });
+        let mut settings: Vec<ClusterSettings> =
+            connected_settings.chain(disconnected_settings).collect();
+        settings.sort_by(|a, b| a.cluster.cmp(&b.cluster));
         let sources: BTreeSet<&Path> = self.clusters.keys().map(|id| id.file.as_path()).collect();
         let mut snapshot = Snapshot {
             clusters,
@@ -746,7 +781,7 @@ impl Live {
 pub fn cluster_settings(
     cluster: ClusterId,
     context: &KubeContext,
-    status: &ConnectionStatus,
+    auth_expired: bool,
     saved: Option<&SavedPreferences>,
 ) -> ClusterSettings {
     let auth = match &context.auth {
@@ -765,7 +800,7 @@ pub fn cluster_settings(
             auth,
             kubeconfig: context.id.file.display().to_string(),
         },
-        auth_expired: matches!(status, ConnectionStatus::AuthExpired(_)),
+        auth_expired,
         prometheus: None,
         preferences,
     }
@@ -838,6 +873,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
         updates: updates.clone(),
         home,
         clusters: BTreeMap::new(),
+        disconnected: BTreeSet::new(),
         selected: None,
         page: Page::Overview,
         actions,
@@ -852,7 +888,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
         loco: crate::loco::LocoBackend::new(crate::loco::LocoSettings::default(), updates.clone()),
     };
     let gitops_changed = live.gitops.changed();
-    live.reconcile();
+    live.start();
     let mut dirty = true;
     let mut publish = ticker(COALESCE_INTERVAL);
     loop {
@@ -908,12 +944,40 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
     }
 }
 
-fn missing_summary(saved: &SavedCluster) -> ClusterSummary {
+fn wanted(
+    store: &ClusterStore,
+    discovery: &Discovery,
+    disconnected: &BTreeSet<ClusterId>,
+) -> BTreeMap<ContextRef, ClusterId> {
+    store
+        .clusters()
+        .iter()
+        .filter(|saved| !disconnected.contains(&saved.id()))
+        .filter(|saved| discovery.get(&saved.context_ref()).is_some())
+        .map(|saved| (saved.context_ref(), saved.id()))
+        .collect()
+}
+
+fn set_aside_notice(store: &ClusterStore) -> Option<Notice> {
+    let kept = store.set_aside()?;
+    Some(Notice {
+        status: Status::Warn,
+        title: SET_ASIDE_TITLE.to_owned(),
+        detail: Some(format!("Kept as {}", kept.display())),
+    })
+}
+
+fn offline_summary(saved: &SavedCluster, disconnected: bool) -> ClusterSummary {
+    let state = if disconnected {
+        DISCONNECTED_STATE
+    } else {
+        MISSING_STATE
+    };
     ClusterSummary {
         id: saved.id(),
         name: saved.name.clone(),
         status: Status::Offline,
-        state: MISSING_STATE.to_owned(),
+        state: state.to_owned(),
         distro: String::new(),
         region: String::new(),
         version: None,
@@ -1083,9 +1147,56 @@ mod tests {
             name: "old".to_owned(),
             preferences: SavedPreferences::default(),
         };
-        let summary = missing_summary(&saved);
+        let summary = offline_summary(&saved, false);
         assert_eq!(summary.status, Status::Offline);
         assert_eq!(summary.state, MISSING_STATE);
+        assert_eq!(offline_summary(&saved, true).state, DISCONNECTED_STATE);
+    }
+
+    #[test]
+    fn disconnected_clusters_stay_saved_but_are_not_watched() {
+        let Ok(dir) = tempfile::tempdir() else {
+            panic!("tempdir");
+        };
+        let mut store = ClusterStore::empty(dir.path());
+        let added = ["kind-fleet-a", "kind-fleet-b", "gone"].map(|name| NewCluster {
+            context: context("/h/.kube/config", name).id,
+            name: name.to_owned(),
+        });
+        assert!(store.add(&added).is_ok());
+        let discovery = Discovery {
+            files: Vec::new(),
+            contexts: vec![
+                context("/h/.kube/config", "kind-fleet-a"),
+                context("/h/.kube/config", "kind-fleet-b"),
+            ],
+            errors: Vec::new(),
+        };
+        let names = |disconnected: &BTreeSet<ClusterId>| -> Vec<String> {
+            wanted(&store, &discovery, disconnected)
+                .into_values()
+                .map(|id| id.to_string())
+                .collect()
+        };
+        assert_eq!(names(&BTreeSet::new()), ["kind-fleet-a", "kind-fleet-b"]);
+        let off = BTreeSet::from([ClusterId::new("kind-fleet-b")]);
+        assert_eq!(names(&off), ["kind-fleet-a"]);
+        assert_eq!(store.clusters().len(), 3);
+    }
+
+    #[test]
+    fn a_set_aside_store_raises_a_notice() {
+        let Ok(dir) = tempfile::tempdir() else {
+            panic!("tempdir");
+        };
+        assert_eq!(set_aside_notice(&ClusterStore::empty(dir.path())), None);
+        assert!(std::fs::write(dir.path().join("clusters.json"), "{").is_ok());
+        let Ok(store) = ClusterStore::open(dir.path()) else {
+            panic!("open");
+        };
+        let notice = set_aside_notice(&store);
+        assert_eq!(notice.as_ref().map(|n| n.status), Some(Status::Warn));
+        assert_eq!(notice.map(|n| n.title), Some(SET_ASIDE_TITLE.to_owned()));
     }
 
     #[test]
@@ -1130,12 +1241,7 @@ mod tests {
             command: "/usr/local/bin/gke-gcloud-auth-plugin".to_owned(),
             args: Vec::new(),
         });
-        let settings = cluster_settings(
-            ClusterId::new("gke_qa"),
-            &gke,
-            &ConnectionStatus::Connected,
-            None,
-        );
+        let settings = cluster_settings(ClusterId::new("gke_qa"), &gke, false, None);
         assert_eq!(
             settings.connection.auth.label(),
             "exec · gke-gcloud-auth-plugin"
