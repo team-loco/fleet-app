@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use fleet_core::pods::{Container, ContainerState, Pod, PodPhase, Qos, Usage};
-use fleet_core::{ClusterId, Status};
+use fleet_core::{ClusterId, Status, Uid};
 
 use super::{CLUSTER, CRASH_LOOP, DAY, HOUR, RUNNING, conditions, owner, running, suffix, volumes};
 
@@ -479,6 +479,7 @@ fn filler(group: &Group, replica: u32, index: u32, node: Option<String>) -> Pod 
         group.owner
     };
     let mut pod = Pod {
+        uid: Uid::default(),
         cluster: ClusterId::new(CLUSTER),
         namespace: group.namespace.into(),
         name: name(group, replica, index),

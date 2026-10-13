@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::{ResourceRef, Status, time};
+use crate::{ResourceRef, Status, Uid, time};
 
 const CRASH_LOOP: &str = "CrashLoopBackOff";
 const MILLIS_PER_CORE: u32 = 1000;
@@ -55,6 +55,7 @@ pub enum Pending {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Workload {
     pub target: ResourceRef,
+    pub uid: Uid,
     pub kind: WorkloadKind,
     pub desired: u32,
     pub stalled: bool,
@@ -554,6 +555,7 @@ pub(crate) mod tests {
 
     pub(crate) fn workload(pods: Vec<Pod>, stalled: bool) -> Workload {
         Workload {
+            uid: Uid::default(),
             target: ResourceRef {
                 cluster: ClusterId::new("prod-us-east"),
                 kind: "Deployment".into(),

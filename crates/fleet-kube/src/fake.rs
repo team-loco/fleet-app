@@ -8,6 +8,7 @@ use std::time::Duration;
 use http::{Method, Request, Response, StatusCode};
 use kube::Client;
 use kube::client::Body;
+use serde_json::Value;
 use tower_service::Service;
 
 use crate::discovery::{ContextRef, KubeContext};
@@ -22,13 +23,14 @@ const NOT_FOUND: &str =
     r#"{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"NotFound","code":404}"#;
 
 pub type Reply = (StatusCode, String);
-type Respond = dyn Fn(&Method, &str) -> Option<Reply> + Send + Sync;
+type Respond = dyn Fn(&Method, &str, &Value) -> Option<Reply> + Send + Sync;
 
 #[derive(Default)]
 pub struct Traffic {
     active: AtomicUsize,
     peak: AtomicUsize,
     requests: Mutex<Vec<(Method, String)>>,
+    bodies: Mutex<Vec<(Method, String, Value)>>,
 }
 
 impl Traffic {
@@ -38,6 +40,14 @@ impl Traffic {
 
     pub fn requests(&self) -> Vec<(Method, String)> {
         lock(&self.requests).clone()
+    }
+
+    pub fn bodies(&self, method: &Method, path: &str) -> Vec<Value> {
+        lock(&self.bodies)
+            .iter()
+            .filter(|(sent, at, _)| sent == method && at.starts_with(path))
+            .map(|(_, _, body)| body.clone())
+            .collect()
     }
 }
 
@@ -61,11 +71,19 @@ impl Service<Request<Body>> for Fake {
         let method = request.method().clone();
         let path = request.uri().to_string();
         lock(&self.traffic.requests).push((method.clone(), path.clone()));
-        let (status, body) = (self.respond)(&method, &path)
-            .unwrap_or_else(|| (StatusCode::NOT_FOUND, NOT_FOUND.to_owned()));
         let delay = self.delay;
         let traffic = self.traffic.clone();
+        let respond = self.respond.clone();
         Box::pin(async move {
+            let bytes = request
+                .into_body()
+                .collect_bytes()
+                .await
+                .unwrap_or_default();
+            let sent = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+            let (status, body) = respond(&method, &path, &sent)
+                .unwrap_or_else(|| (StatusCode::NOT_FOUND, NOT_FOUND.to_owned()));
+            lock(&traffic.bodies).push((method, path, sent));
             let now = traffic.active.fetch_add(1, Ordering::SeqCst) + 1;
             traffic.peak.fetch_max(now, Ordering::SeqCst);
             tokio::time::sleep(delay).await;
@@ -84,6 +102,13 @@ impl Service<Request<Body>> for Fake {
 pub fn client(
     delay: Duration,
     respond: impl Fn(&Method, &str) -> Option<Reply> + Send + Sync + 'static,
+) -> (Client, Arc<Traffic>) {
+    client_reading_bodies(delay, move |method, path, _| respond(method, path))
+}
+
+pub fn client_reading_bodies(
+    delay: Duration,
+    respond: impl Fn(&Method, &str, &Value) -> Option<Reply> + Send + Sync + 'static,
 ) -> (Client, Arc<Traffic>) {
     let traffic = Arc::new(Traffic::default());
     let fake = Fake {

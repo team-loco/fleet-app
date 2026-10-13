@@ -4,7 +4,7 @@ use fleet_core::workload::{
     ContainerSpec, ContainerStatus, EnvResolution, EnvSource, EnvVar, Event, Pod, Port, Probe,
     ProbeAction, Resources, Revision,
 };
-use fleet_core::{ClusterId, ResourceRef, Status, Workload, WorkloadKind};
+use fleet_core::{ClusterId, ResourceRef, Status, Uid, Workload, WorkloadKind};
 
 pub const CLUSTER: &str = "prod-us-east";
 pub const NAMESPACE: &str = "ws-0192c3e7";
@@ -37,6 +37,7 @@ pub fn target() -> ResourceRef {
 pub fn checkout() -> Workload {
     let age = Duration::from_secs(AGE_SECS);
     Workload {
+        uid: Uid::default(),
         target: target(),
         kind: WorkloadKind::Deployment,
         desired: DESIRED,

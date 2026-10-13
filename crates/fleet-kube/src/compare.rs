@@ -259,7 +259,7 @@ pub async fn compare(
 
 #[cfg(test)]
 mod tests {
-    use fleet_core::Workload;
+    use fleet_core::{Uid, Workload};
     use serde_json::json;
 
     use super::*;
@@ -275,6 +275,7 @@ mod tests {
             observed: Observed {
                 cluster: ClusterId::new(cluster),
                 workload: Workload {
+                    uid: Uid::default(),
                     target,
                     kind: WorkloadKind::Deployment,
                     desired: 1,

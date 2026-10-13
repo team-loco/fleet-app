@@ -92,7 +92,7 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
                     continue;
                 }
                 workloads.handle(&command);
-                if let Command::Flux(key, action) = &command {
+                if let Command::Flux(key, _, action) = &command {
                     let outcome = flux.apply(&mut state, key, *action);
                     if let Some(pending) = outcome.settle {
                         schedule(&input_tx, Input::SettleFlux(pending));

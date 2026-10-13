@@ -6,9 +6,11 @@ use kube::Api;
 use kube::api::{ListParams, Patch, PatchParams};
 use serde_json::json;
 
+use fleet_core::Uid;
+
 use crate::error::{Error, Result};
 use crate::manager::ClusterHandle;
-use crate::ops::FIELD_MANAGER;
+use crate::ops::{FIELD_MANAGER, with_uid, with_uid_test};
 
 pub const DEPLOYMENT: &str = "Deployment";
 pub const STATEFUL_SET: &str = "StatefulSet";
@@ -107,23 +109,34 @@ pub fn rollback_template(
     Ok(Rollback::Apply(Box::new(target)))
 }
 
+fn same(kind: &str, name: &str, found: Option<&str>, expected: &Uid) -> Result<()> {
+    if found == Some(expected.as_str()) {
+        return Ok(());
+    }
+    Err(Error::Replaced {
+        kind: kind.to_owned(),
+        name: name.to_owned(),
+    })
+}
+
 pub async fn rollback(
     handle: &ClusterHandle,
     namespace: &str,
     name: &str,
+    uid: &Uid,
     revision: u64,
 ) -> Result<()> {
     let client = handle.client()?;
     let deployments: Api<Deployment> = Api::namespaced(client.clone(), namespace);
     let sets: Api<ReplicaSet> = Api::namespaced(client, namespace);
     let deployment = deployments.get(name).await?;
+    same(DEPLOYMENT, name, deployment.metadata.uid.as_deref(), uid)?;
     let listed = sets.list(&ListParams::default()).await?;
     let Rollback::Apply(template) = rollback_template(&deployment, &listed.items, revision)? else {
         return Ok(());
     };
-    let operations: json_patch::Patch = serde_json::from_value(json!([
-        { "op": "replace", "path": "/spec/template", "value": template }
-    ]))?;
+    let replace = json!([{ "op": "replace", "path": "/spec/template", "value": template }]);
+    let operations: json_patch::Patch = serde_json::from_value(with_uid_test(&replace, uid))?;
     let params = PatchParams {
         field_manager: Some(FIELD_MANAGER.to_owned()),
         ..PatchParams::default()
@@ -181,7 +194,7 @@ pub fn controller_rollback(
     Ok(Some(data.0.clone()))
 }
 
-async fn controller_undo<K>(api: Api<K>, name: &str, revision: u64) -> Result<()>
+async fn controller_undo<K>(api: Api<K>, name: &str, expected: &Uid, revision: u64) -> Result<()>
 where
     K: kube::Resource<DynamicType = ()>
         + Clone
@@ -195,6 +208,7 @@ where
         .uid
         .clone()
         .ok_or(Error::MissingField("metadata.uid"))?;
+    same(&K::kind(&()), name, Some(&uid), expected)?;
     let namespace = object.meta().namespace.clone().unwrap_or_default();
     let client = api.clone().into_client();
     let history: Api<ControllerRevision> = Api::namespaced(client, &namespace);
@@ -206,6 +220,7 @@ where
         field_manager: Some(FIELD_MANAGER.to_owned()),
         ..PatchParams::default()
     };
+    let patch = with_uid(patch, expected);
     api.patch(name, &params, &Patch::Strategic(patch)).await?;
     Ok(())
 }
@@ -215,17 +230,18 @@ pub async fn rollback_controller(
     kind: &str,
     namespace: &str,
     name: &str,
+    uid: &Uid,
     revision: u64,
 ) -> Result<()> {
     let client = handle.client()?;
     match kind {
         STATEFUL_SET => {
             let api: Api<StatefulSet> = Api::namespaced(client, namespace);
-            controller_undo(api, name, revision).await
+            controller_undo(api, name, uid, revision).await
         }
         DAEMON_SET => {
             let api: Api<DaemonSet> = Api::namespaced(client, namespace);
-            controller_undo(api, name, revision).await
+            controller_undo(api, name, uid, revision).await
         }
         other => Err(Error::Unsupported {
             action: "Roll back",

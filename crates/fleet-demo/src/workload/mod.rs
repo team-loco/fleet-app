@@ -84,9 +84,13 @@ impl Workloads {
             Command::WatchWorkload { target, sink } => self.watch(target, sink),
             Command::StreamLogs(request) => self.follow_logs(request),
             Command::Exec(request) => spawn_exec(request.clone()),
-            Command::RestartRollout(target) => self.act(target, Action::Restart),
-            Command::Scale { target, replicas } => self.act(target, Action::Scale(*replicas)),
-            Command::Rollback { target, revision } => self.act(target, Action::Rollback(*revision)),
+            Command::RestartRollout(seen) => self.act(&seen.target, Action::Restart),
+            Command::Scale { target, replicas } => {
+                self.act(&target.target, Action::Scale(*replicas));
+            }
+            Command::Rollback { target, revision } => {
+                self.act(&target.target, Action::Rollback(*revision));
+            }
             _ => {}
         }
     }
@@ -186,7 +190,7 @@ fn spawn(name: &str, work: impl FnOnce() + Send + 'static) {
 
 #[cfg(test)]
 mod tests {
-    use fleet_core::{ExecEvent, ExecTarget, LogLine, Source};
+    use fleet_core::{ExecEvent, ExecTarget, LogLine, Seen, Source, Uid};
 
     use super::data::target as sample_target;
     use super::*;
@@ -209,7 +213,7 @@ mod tests {
         });
         assert_eq!(rx.recv_blocking().ok(), Some(checkout_api()));
         workloads.handle(&Command::Rollback {
-            target: sample_target(),
+            target: Seen::new(sample_target(), Uid::default()),
             revision: 36,
         });
         let started = rx.recv_blocking().ok();

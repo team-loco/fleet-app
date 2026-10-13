@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::{ClusterId, Page, ResourceRef, Snapshot, Status, time};
+use crate::{ClusterId, Page, ResourceRef, Snapshot, Status, Uid, time};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FluxKind {
@@ -322,6 +322,7 @@ pub enum FluxDetail {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FluxObject {
     pub key: FluxKey,
+    pub uid: Uid,
     pub phase: Phase,
     pub sentence: Sentence,
     pub applied: Option<Revision>,
@@ -480,6 +481,7 @@ pub(crate) mod tests {
 
     pub(crate) fn object(cluster: &str, phase: Phase, revision: &str) -> FluxObject {
         FluxObject {
+            uid: Uid::default(),
             key: FluxKey::new(cluster, FluxKind::Kustomization, "flux-system", "apps"),
             phase,
             sentence: Sentence::default(),

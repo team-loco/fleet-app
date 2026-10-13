@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use fleet_core::ResourceRef;
 use fleet_core::flux::{FluxAction, FluxKey};
+use fleet_core::{ResourceRef, Seen, Uid};
 use fleet_flux::{GitOpsObject, ObjectKind, actions};
 use kube::api::PropagationPolicy;
 use serde_json::{Value, json};
@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use super::failure::{ActionFailureKind, action_failure};
 use crate::error::{Error, Result};
 use crate::manager::ClusterHandle;
-use crate::ops::{ObjectRef, PatchBody};
+use crate::ops::{ObjectRef, PatchBody, restart_patch};
 
 const NODE: &str = "Node";
 const DEPLOYMENT: &str = "Deployment";
@@ -105,25 +105,76 @@ pub fn cordon_patch(cordoned: bool) -> Value {
     json!({ "spec": { "unschedulable": unschedulable } })
 }
 
-pub async fn cordon(handle: &ClusterHandle, target: &ResourceRef, cordoned: bool) -> Result<()> {
-    require("Cordon", target, &[NODE])?;
-    let node = object_ref(target)?;
-    handle
-        .patch(&node, PatchBody::Merge(cordon_patch(cordoned)))
-        .await?;
-    Ok(())
+fn known(uid: &Uid) -> Result<&Uid> {
+    if uid.as_str().is_empty() {
+        return Err(Error::MissingField("metadata.uid"));
+    }
+    Ok(uid)
 }
 
-pub async fn restart(handle: &ClusterHandle, target: &ResourceRef) -> Result<()> {
-    require("Restart", target, &[DEPLOYMENT, STATEFUL_SET, DAEMON_SET])?;
-    handle.rollout_restart(&object_ref(target)?).await?;
-    Ok(())
+fn uid_of(object: &kube::api::DynamicObject) -> Option<&str> {
+    object.metadata.uid.as_deref()
 }
 
-pub async fn scale(handle: &ClusterHandle, target: &ResourceRef, replicas: u32) -> Result<()> {
-    require("Scale", target, &[DEPLOYMENT, STATEFUL_SET, REPLICA_SET])?;
+pub(crate) async fn replaced(handle: &ClusterHandle, object: &ObjectRef, uid: &Uid) -> bool {
+    match handle.get(object).await {
+        Ok(found) => uid_of(&found) != Some(uid.as_str()),
+        Err(_) => false,
+    }
+}
+
+pub(crate) async fn explain(
+    handle: &ClusterHandle,
+    object: &ObjectRef,
+    uid: &Uid,
+    error: Error,
+) -> Error {
+    if replaced(handle, object, uid).await {
+        return Error::Replaced {
+            kind: object.kind.clone(),
+            name: object.name.clone(),
+        };
+    }
+    error
+}
+
+async fn patch(handle: &ClusterHandle, seen: &Seen, body: PatchBody) -> Result<()> {
+    let uid = known(&seen.uid)?;
+    let object = object_ref(&seen.target)?;
+    match handle.patch(&object, body.guarded(uid)).await {
+        Ok(_) => Ok(()),
+        Err(error) => Err(explain(handle, &object, uid, error).await),
+    }
+}
+
+pub async fn cordon(handle: &ClusterHandle, seen: &Seen, cordoned: bool) -> Result<()> {
+    require("Cordon", &seen.target, &[NODE])?;
+    patch(handle, seen, PatchBody::Merge(cordon_patch(cordoned))).await
+}
+
+pub async fn restart(handle: &ClusterHandle, seen: &Seen) -> Result<()> {
+    require(
+        "Restart",
+        &seen.target,
+        &[DEPLOYMENT, STATEFUL_SET, DAEMON_SET],
+    )?;
+    let body = restart_patch(jiff::Timestamp::now());
+    patch(handle, seen, PatchBody::Merge(body)).await
+}
+
+pub async fn scale(handle: &ClusterHandle, seen: &Seen, replicas: u32) -> Result<()> {
+    require(
+        "Scale",
+        &seen.target,
+        &[DEPLOYMENT, STATEFUL_SET, REPLICA_SET],
+    )?;
+    let uid = known(&seen.uid)?;
     let replicas = i32::try_from(replicas).unwrap_or(i32::MAX);
-    handle.scale(&object_ref(target)?, replicas).await
+    let object = object_ref(&seen.target)?;
+    match handle.scale(&object, replicas, uid).await {
+        Ok(()) => Ok(()),
+        Err(error) => Err(explain(handle, &object, uid, error).await),
+    }
 }
 
 pub fn template_patch(template: &Value) -> Value {
@@ -145,12 +196,17 @@ pub async fn replace_template(
     Ok(())
 }
 
-pub async fn delete(handle: &ClusterHandle, target: &ResourceRef) -> Result<()> {
-    let object = object_ref(target)?;
-    handle.delete(&object, propagation(&target.kind)).await?;
+pub async fn delete(handle: &ClusterHandle, seen: &Seen) -> Result<()> {
+    let uid = known(&seen.uid)?;
+    let object = object_ref(&seen.target)?;
+    let propagation = propagation(&seen.target.kind);
+    if let Err(error) = handle.delete(&object, propagation, Some(uid)).await {
+        return Err(explain(handle, &object, uid, error).await);
+    }
     let deadline = tokio::time::Instant::now() + DELETE_WAIT;
     while tokio::time::Instant::now() < deadline {
         match handle.get(&object).await {
+            Ok(found) if uid_of(&found) != Some(uid.as_str()) => return Ok(()),
             Ok(_) => tokio::time::sleep(DELETE_POLL).await,
             Err(error) if action_failure(&error).kind == ActionFailureKind::NotFound => {
                 return Ok(());
@@ -186,7 +242,13 @@ fn now() -> DateTime<Utc> {
     DateTime::from_timestamp(now.as_second(), nanos).unwrap_or_default()
 }
 
-pub async fn flux(handle: &ClusterHandle, key: &FluxKey, action: FluxAction) -> Result<()> {
+pub async fn flux(
+    handle: &ClusterHandle,
+    key: &FluxKey,
+    uid: &Uid,
+    action: FluxAction,
+) -> Result<()> {
+    let uid = known(uid)?;
     let kind = flux_kind(key.kind.label()).ok_or_else(|| Error::Unsupported {
         action: "Reconcile",
         kind: key.kind.label().to_owned(),
@@ -195,6 +257,12 @@ pub async fn flux(handle: &ClusterHandle, key: &FluxKey, action: FluxAction) -> 
     let at = now();
     if action == FluxAction::ReconcileWithSource {
         let object = handle.get(&target).await?;
+        if uid_of(&object) != Some(uid.as_str()) {
+            return Err(Error::Replaced {
+                kind: target.kind,
+                name: target.name,
+            });
+        }
         let parsed = GitOpsObject::from_json(&serde_json::to_value(&object)?)?;
         let source = parsed
             .source_ref
@@ -206,17 +274,130 @@ pub async fn flux(handle: &ClusterHandle, key: &FluxKey, action: FluxAction) -> 
                 .await?;
         }
     }
-    handle
-        .patch(&target, PatchBody::Merge(flux_patch(action, at)))
-        .await?;
-    Ok(())
+    let body = PatchBody::Merge(flux_patch(action, at)).guarded(uid);
+    match handle.patch(&target, body).await {
+        Ok(_) => Ok(()),
+        Err(error) => Err(explain(handle, &target, uid, error).await),
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use fleet_core::ClusterId;
+    use k8s_openapi::api::apps::v1::Deployment;
+    use k8s_openapi::api::core::v1::ConfigMap;
+    use kube::core::ApiResource;
 
     use super::*;
+    use crate::manager::lock;
+
+    const SEEN: &str = "seen-uid";
+    const RECREATED: &str = "recreated-uid";
+    const CONFIGMAP_PATH: &str = "/api/v1/namespaces/apps/configmaps/podinfo";
+    const SCALE_PATH: &str = "/apis/apps/v1/namespaces/apps/deployments/podinfo/scale";
+    const CONFLICT: &str = r#"{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Conflict","code":409,"message":"Precondition failed: UID mismatch"}"#;
+
+    fn object(kind: &str, uid: &str) -> String {
+        json!({
+            "apiVersion": api_version(kind),
+            "kind": kind,
+            "metadata": { "name": "podinfo", "namespace": "apps", "uid": uid }
+        })
+        .to_string()
+    }
+
+    fn sent_uid(body: &Value, pointer: &str) -> Option<String> {
+        body.pointer(pointer)
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    }
+
+    fn recreated(
+        kind: &'static str,
+    ) -> (
+        crate::manager::ClusterManager,
+        ClusterHandle,
+        Arc<crate::fake::Traffic>,
+        Arc<Mutex<bool>>,
+    ) {
+        let changed = Arc::new(Mutex::new(false));
+        let state = changed.clone();
+        let (client, traffic) =
+            crate::fake::client_reading_bodies(Duration::ZERO, move |method, _, body| {
+                let current = object(kind, RECREATED);
+                if method == http::Method::GET {
+                    return Some((http::StatusCode::OK, current));
+                }
+                let wanted = sent_uid(body, "/preconditions/uid")
+                    .or_else(|| sent_uid(body, "/metadata/uid"));
+                if wanted.as_deref() != Some(RECREATED) {
+                    return Some((http::StatusCode::CONFLICT, CONFLICT.to_owned()));
+                }
+                *lock(&state) = true;
+                Some((http::StatusCode::OK, current))
+            });
+        let (manager, handle) = crate::fake::handle(&client);
+        let mut resources = lock(&handle.shared.resources);
+        resources.insert(
+            ("v1".to_owned(), "ConfigMap".to_owned()),
+            ApiResource::erase::<ConfigMap>(&()),
+        );
+        resources.insert(
+            ("apps/v1".to_owned(), "Deployment".to_owned()),
+            ApiResource::erase::<Deployment>(&()),
+        );
+        drop(resources);
+        (manager, handle, traffic, changed)
+    }
+
+    #[tokio::test]
+    async fn a_confirmed_delete_never_removes_a_recreated_object() {
+        let (_manager, handle, traffic, changed) = recreated("ConfigMap");
+        let seen = Seen::new(target("ConfigMap"), Uid::new(SEEN));
+        let outcome = delete(&handle, &seen).await;
+        assert!(
+            matches!(outcome, Err(Error::Replaced { .. })),
+            "{outcome:?}"
+        );
+        assert!(!*lock(&changed));
+        let sent: Vec<Option<String>> = traffic
+            .bodies(&http::Method::DELETE, CONFIGMAP_PATH)
+            .iter()
+            .map(|body| sent_uid(body, "/preconditions/uid"))
+            .collect();
+        assert_eq!(sent, [Some(SEEN.to_owned())]);
+    }
+
+    #[tokio::test]
+    async fn a_confirmed_scale_never_resizes_a_recreated_workload() {
+        let (_manager, handle, traffic, changed) = recreated("Deployment");
+        let seen = Seen::new(target("Deployment"), Uid::new(SEEN));
+        let outcome = scale(&handle, &seen, 5).await;
+        assert!(
+            matches!(outcome, Err(Error::Replaced { .. })),
+            "{outcome:?}"
+        );
+        assert!(!*lock(&changed));
+        let sent: Vec<Option<String>> = traffic
+            .bodies(&http::Method::PATCH, SCALE_PATH)
+            .iter()
+            .map(|body| sent_uid(body, "/metadata/uid"))
+            .collect();
+        assert_eq!(sent, [Some(SEEN.to_owned())]);
+    }
+
+    #[tokio::test]
+    async fn an_unknown_uid_is_refused_before_any_request() {
+        let (_manager, handle, traffic, _) = recreated("ConfigMap");
+        let seen = Seen::new(target("ConfigMap"), Uid::default());
+        assert!(matches!(
+            delete(&handle, &seen).await,
+            Err(Error::MissingField("metadata.uid"))
+        ));
+        assert_eq!(traffic.requests(), Vec::new());
+    }
 
     fn target(kind: &str) -> ResourceRef {
         ResourceRef {

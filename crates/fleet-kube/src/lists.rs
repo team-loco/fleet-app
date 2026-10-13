@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use fleet_core::Status;
 use fleet_core::resources::{Resource, ResourceKind};
 use fleet_core::time::age as age_label;
+use fleet_core::{Status, Uid};
 use jiff::Timestamp;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
@@ -37,6 +37,7 @@ fn row(meta: &ObjectMeta, status: Status, cells: Vec<String>, now: Timestamp) ->
     Resource {
         namespace: meta.namespace.clone().unwrap_or_default(),
         name: meta.name.clone().unwrap_or_default(),
+        uid: Uid::new(meta.uid.clone().unwrap_or_default()),
         status,
         cells,
         age: age(meta, now),

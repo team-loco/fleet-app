@@ -5,7 +5,7 @@ use fleet_core::cluster::Namespace;
 use fleet_core::events::{Event, warnings_first};
 use fleet_core::nodes::{self, NodeCondition};
 use fleet_core::overview::{Commitment, PodPhases};
-use fleet_core::{Counts, Status};
+use fleet_core::{Counts, Status, Uid};
 use jiff::Timestamp;
 use k8s_openapi::api::core::v1::{self as core, Node, Pod};
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
@@ -245,6 +245,7 @@ pub fn node(node: &Node, pods: u32, usage: Option<&Usage>, now: Timestamp) -> no
         .unwrap_or_default();
     nodes::Node {
         name: node.metadata.name.clone().unwrap_or_default(),
+        uid: Uid::new(node.metadata.uid.clone().unwrap_or_default()),
         status: health,
         state: state.to_owned(),
         schedulable: can_schedule,

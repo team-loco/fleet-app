@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::filter::{StatusFilter, TextFilter};
 use crate::overview::{named, plural, verb};
-use crate::{Page, Status};
+use crate::{Page, Status, Uid};
 
 const READY_COLUMN: &str = "Ready";
 const STATUS_COLUMN: &str = "Status";
@@ -111,6 +111,7 @@ impl ResourceKind {
 pub struct Resource {
     pub namespace: String,
     pub name: String,
+    pub uid: Uid,
     pub status: Status,
     pub cells: Vec<String>,
     pub age: Duration,
@@ -181,6 +182,7 @@ pub(crate) mod tests {
 
     pub(crate) fn resource(namespace: &str, name: &str, status: Status) -> Resource {
         Resource {
+            uid: Uid::default(),
             namespace: namespace.into(),
             name: name.into(),
             status,

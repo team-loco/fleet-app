@@ -406,7 +406,9 @@ impl LocoBackend {
         let changed = self.changed.clone();
         let build = build.clone();
         tokio::spawn(async move {
-            let outcome = handle.delete(&target, PropagationPolicy::Background).await;
+            let outcome = handle
+                .delete(&target, PropagationPolicy::Background, None)
+                .await;
             let Err(error) = outcome else {
                 return;
             };

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::filter::TextFilter;
 use std::time::Duration;
 
-use crate::{ClusterId, Counts, ResourceRef, Status};
+use crate::{ClusterId, Counts, ResourceRef, Status, Uid};
 
 pub const POD_KIND: &str = "Pod";
 const RESTARTS_ERR: u32 = 5;
@@ -147,6 +147,7 @@ pub struct Pod {
     pub cluster: ClusterId,
     pub namespace: String,
     pub name: String,
+    pub uid: Uid,
     pub phase: PodPhase,
     pub status: Status,
     pub reason: String,

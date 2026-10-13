@@ -4,8 +4,8 @@ use crate::app_settings::Refresh;
 use crate::resource::page_for_kind;
 use crate::{
     AddClusterStep, CheckLine, ClusterId, ContextRef, ExecRequest, FluxAction, FluxKey, FluxKind,
-    KubeconfigFile, LogRequest, NewCluster, Notice, Page, Preferences, ResourceRef, Sink, Snapshot,
-    Verdict, Workload, WorkloadKind,
+    KubeconfigFile, LogRequest, NewCluster, Notice, Page, Preferences, ResourceRef, Seen, Sink,
+    Snapshot, Uid, Verdict, Workload, WorkloadKind,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,10 +32,10 @@ pub enum Command {
     StopPortForward {
         local: u16,
     },
-    Cordon(ResourceRef),
-    Uncordon(ResourceRef),
-    Drain(ResourceRef),
-    Delete(ResourceRef),
+    Cordon(Seen),
+    Uncordon(Seen),
+    Drain(Seen),
+    Delete(Seen),
     OpenAddCluster(AddClusterStep),
     CheckContexts(Vec<ContextRef>),
     AddClusters(Vec<NewCluster>),
@@ -51,17 +51,17 @@ pub enum Command {
     },
     StreamLogs(LogRequest),
     Exec(ExecRequest),
-    RestartRollout(ResourceRef),
+    RestartRollout(Seen),
     Scale {
-        target: ResourceRef,
+        target: Seen,
         replicas: u32,
     },
     Rollback {
-        target: ResourceRef,
+        target: Seen,
         revision: u64,
     },
     OpenFluxObject(FluxKey),
-    Flux(FluxKey, FluxAction),
+    Flux(FluxKey, Uid, FluxAction),
     #[cfg(feature = "loco")]
     Loco(crate::loco::LocoCommand),
     CopySpec {
@@ -353,7 +353,10 @@ mod tests {
             Some(vec![Command::SelectPage(Page::GitOps)])
         );
         assert_eq!(
-            source.window_commands(&Command::RestartRollout(deployment("a"))),
+            source.window_commands(&Command::RestartRollout(Seen::new(
+                deployment("a"),
+                Uid::new("u1")
+            ))),
             None
         );
         assert_eq!(source.window_commands(&Command::ToggleSidebar), None);

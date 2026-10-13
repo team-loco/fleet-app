@@ -4,8 +4,8 @@ use fleet_core::compare::{Field, SpecDiff};
 use fleet_core::flux::{FluxAction, FluxKey, FluxKind};
 use fleet_core::{
     Backend, ClusterId, Command, ContextRef, ExecEvent, ExecRequest, ExecTarget, LogLine,
-    LogRequest, NewCluster, Receiver, ResourceRef, Sender, Sink, Snapshot, Source, TermSize,
-    Update,
+    LogRequest, NewCluster, Notice, Receiver, ResourceRef, Seen, Sender, Sink, Snapshot, Source,
+    TermSize, Uid, Update,
 };
 use fleet_kube::LiveBackend;
 use fleet_kube::discovery::{DiscoverySources, KubeContext, discover};
@@ -474,8 +474,14 @@ const FLUX_NAMESPACE: &str = "flux-system";
 const KUSTOMIZATION: &str = "apps";
 const NODE: &str = "fleet-a-control-plane";
 const SCRATCH_CONFIGMAP: &str = "fleet-actions-e2e";
+const SCRATCH_REPLACED: &str = "fleet-replaced-e2e";
 const RESTARTED_AT: &str = "kubectl.kubernetes.io/restartedAt";
 const REQUESTED_AT: &str = "reconcile.fluxcd.io/requestedAt";
+const APPS_V1: &str = "apps/v1";
+const CORE_V1: &str = "v1";
+const KUSTOMIZE_V1: &str = "kustomize.toolkit.fluxcd.io/v1";
+const STALE_UID: &str = "00000000-0000-0000-0000-000000000000";
+const REPLACED: &str = "was replaced after you confirmed";
 
 async fn replicas(deployments: &Api<Deployment>) -> Option<i32> {
     let deployment = deployments.get(PODINFO).await.ok()?;
@@ -485,6 +491,49 @@ async fn replicas(deployments: &Api<Deployment>) -> Option<i32> {
 async fn template(deployments: &Api<Deployment>) -> Option<PodTemplateSpec> {
     let deployment = deployments.get(PODINFO).await.ok()?;
     Some(deployment.spec?.template)
+}
+
+async fn seen_by(client: &Client, api_version: &str, target: ResourceRef) -> Seen {
+    let (group, version) = api_version.split_once('/').unwrap_or(("", api_version));
+    let gvk = GroupVersionKind::gvk(group, version, &target.kind);
+    let resource = ApiResource::from_gvk(&gvk);
+    let api: Api<DynamicObject> = match &target.namespace {
+        Some(namespace) => Api::namespaced_with(client.clone(), namespace, &resource),
+        None => Api::all_with(client.clone(), &resource),
+    };
+    let Ok(object) = api.get(&target.name).await else {
+        panic!("{} {} exists", target.kind, target.name);
+    };
+    let uid = object.metadata.uid.unwrap_or_default();
+    Seen::new(target, Uid::new(uid))
+}
+
+async fn web_podinfo(client: &Client) -> Seen {
+    let target = resource("Deployment", Some(WEB_NAMESPACE), PODINFO);
+    seen_by(client, APPS_V1, target).await
+}
+
+fn stale(target: ResourceRef) -> Seen {
+    Seen::new(target, Uid::new(STALE_UID))
+}
+
+async fn next_notice(harness: &Harness) -> Notice {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let Ok(Ok(update)) = tokio::time::timeout(left, harness.updates.recv()).await else {
+            panic!("no notice");
+        };
+        if let Update::Notice(notice) = update {
+            return notice;
+        }
+    }
+}
+
+fn replaced(notice: &Notice, title: &str) {
+    assert_eq!(notice.title, title);
+    let detail = notice.detail.clone().unwrap_or_default();
+    assert!(detail.contains(REPLACED), "{detail}");
 }
 
 fn no_notices(harness: &Harness) {
@@ -504,7 +553,7 @@ async fn scale_up_then_back_down() {
     let Some(before) = replicas(&deployments).await else {
         panic!("web/podinfo replicas");
     };
-    let target = resource("Deployment", Some(WEB_NAMESPACE), PODINFO);
+    let target = web_podinfo(&harness.client).await;
     let up = u32::try_from(before + 1).unwrap_or_default();
     harness.send(Command::Scale {
         target: target.clone(),
@@ -538,7 +587,7 @@ async fn restart_then_roll_back_to_the_original_template() {
     let Some(original) = template(&deployments).await else {
         panic!("web/podinfo template");
     };
-    let target = resource("Deployment", Some(WEB_NAMESPACE), PODINFO);
+    let target = web_podinfo(&harness.client).await;
     harness.send(Command::RestartRollout(target.clone()));
     eventually(
         "restart annotation",
@@ -645,8 +694,10 @@ async fn stateful_set_rolls_back_through_controller_revisions() {
         |count| *count == 2,
     )
     .await;
+    let target = resource("StatefulSet", Some(DEBUG_NAMESPACE), SCRATCH_STATEFUL_SET);
+    let target = seen_by(&harness.client, APPS_V1, target).await;
     harness.send(Command::Rollback {
-        target: resource("StatefulSet", Some(DEBUG_NAMESPACE), SCRATCH_STATEFUL_SET),
+        target,
         revision: 0,
     });
     eventually(
@@ -799,7 +850,7 @@ async fn cordon_then_uncordon_the_node() {
             .and_then(|node| node.spec?.unschedulable)
             .unwrap_or(false)
     };
-    let target = resource("Node", None, NODE);
+    let target = seen_by(&harness.client, CORE_V1, resource("Node", None, NODE)).await;
     harness.send(Command::Cordon(target.clone()));
     eventually("cordon", unschedulable, |observed| *observed).await;
     harness.send(Command::Uncordon(target));
@@ -820,11 +871,9 @@ async fn delete_waits_until_the_object_is_gone() {
         panic!("configmap fixture");
     };
     let _ = configmaps.create(&PostParams::default(), &scratch).await;
-    harness.send(Command::Delete(resource(
-        "ConfigMap",
-        Some(DEBUG_NAMESPACE),
-        SCRATCH_CONFIGMAP,
-    )));
+    let target = resource("ConfigMap", Some(DEBUG_NAMESPACE), SCRATCH_CONFIGMAP);
+    let target = seen_by(&harness.client, CORE_V1, target).await;
+    harness.send(Command::Delete(target));
     eventually(
         "delete",
         || async { configmaps.get_opt(SCRATCH_CONFIGMAP).await.ok().flatten() },
@@ -845,13 +894,13 @@ async fn flux_reconcile_requests_a_sync() {
         FLUX_NAMESPACE,
         KUSTOMIZATION,
     );
-    let resource = ApiResource::from_gvk(&GroupVersionKind::gvk(
+    let kustomization = ApiResource::from_gvk(&GroupVersionKind::gvk(
         "kustomize.toolkit.fluxcd.io",
         "v1",
         "Kustomization",
     ));
     let kustomizations: Api<DynamicObject> =
-        Api::namespaced_with(harness.client.clone(), FLUX_NAMESPACE, &resource);
+        Api::namespaced_with(harness.client.clone(), FLUX_NAMESPACE, &kustomization);
     let requested = || async {
         kustomizations
             .get(KUSTOMIZATION)
@@ -860,7 +909,13 @@ async fn flux_reconcile_requests_a_sync() {
             .and_then(|object| object.annotations().get(REQUESTED_AT).cloned())
     };
     let before = requested().await;
-    harness.send(Command::Flux(key, FluxAction::ReconcileWithSource));
+    let target = resource("Kustomization", Some(FLUX_NAMESPACE), KUSTOMIZATION);
+    let seen = seen_by(&harness.client, KUSTOMIZE_V1, target).await;
+    harness.send(Command::Flux(
+        key,
+        seen.uid,
+        FluxAction::ReconcileWithSource,
+    ));
     eventually("reconcile request", requested, |now| {
         now.is_some() && *now != before
     })
@@ -874,7 +929,7 @@ async fn unsupported_actions_explain_themselves() {
         return;
     };
     harness.send(Command::Scale {
-        target: resource("DaemonSet", Some("kube-system"), "kube-proxy"),
+        target: stale(resource("DaemonSet", Some("kube-system"), "kube-proxy")),
         replicas: 2,
     });
     let deadline = Instant::now() + WAIT;
@@ -892,4 +947,90 @@ async fn unsupported_actions_explain_themselves() {
             return;
         }
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_delete_confirmed_for_a_replaced_object_leaves_the_new_one() {
+    let Some(harness) = Harness::start().await else {
+        return;
+    };
+    let configmaps: Api<ConfigMap> = Api::namespaced(harness.client.clone(), DEBUG_NAMESPACE);
+    let Ok(scratch) = serde_json::from_value::<ConfigMap>(json!({
+        "metadata": { "name": SCRATCH_REPLACED },
+        "data": { "key": "value" }
+    })) else {
+        panic!("configmap fixture");
+    };
+    let _ = configmaps
+        .delete(SCRATCH_REPLACED, &DeleteParams::default())
+        .await;
+    let created = configmaps.create(&PostParams::default(), &scratch).await;
+    assert!(created.is_ok(), "{created:?}");
+    let target = resource("ConfigMap", Some(DEBUG_NAMESPACE), SCRATCH_REPLACED);
+    let seen = seen_by(&harness.client, CORE_V1, target).await;
+    let deleted = configmaps
+        .delete(SCRATCH_REPLACED, &DeleteParams::default())
+        .await;
+    assert!(deleted.is_ok(), "{deleted:?}");
+    let recreated = configmaps.create(&PostParams::default(), &scratch).await;
+    let Ok(recreated) = recreated else {
+        panic!("recreate: {recreated:?}");
+    };
+    harness.send(Command::Delete(seen));
+    replaced(
+        &next_notice(&harness).await,
+        "Delete cm/fleet-replaced-e2e failed",
+    );
+    let survivor = configmaps.get_opt(SCRATCH_REPLACED).await.ok().flatten();
+    assert_eq!(
+        survivor.and_then(|survivor| survivor.metadata.uid),
+        recreated.metadata.uid
+    );
+    let _ = configmaps
+        .delete(SCRATCH_REPLACED, &DeleteParams::default())
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn writes_confirmed_for_another_uid_change_nothing() {
+    let Some(harness) = Harness::start().await else {
+        return;
+    };
+    let deployments: Api<Deployment> = Api::namespaced(harness.client.clone(), WEB_NAMESPACE);
+    let before = (replicas(&deployments).await, template(&deployments).await);
+    let target = resource("Deployment", Some(WEB_NAMESPACE), PODINFO);
+    harness.send(Command::Scale {
+        target: stale(target.clone()),
+        replicas: 7,
+    });
+    replaced(&next_notice(&harness).await, "Scale deploy/podinfo failed");
+    harness.send(Command::RestartRollout(stale(target.clone())));
+    replaced(
+        &next_notice(&harness).await,
+        "Restart deploy/podinfo failed",
+    );
+    harness.send(Command::Rollback {
+        target: stale(target),
+        revision: 0,
+    });
+    replaced(
+        &next_notice(&harness).await,
+        "Roll back deploy/podinfo failed",
+    );
+    let key = FluxKey::new(
+        CONTEXT,
+        FluxKind::Kustomization,
+        FLUX_NAMESPACE,
+        KUSTOMIZATION,
+    );
+    harness.send(Command::Flux(key, Uid::new(STALE_UID), FluxAction::Suspend));
+    replaced(&next_notice(&harness).await, "Suspend ks/apps failed");
+    let node = stale(resource("Node", None, NODE));
+    harness.send(Command::Cordon(node));
+    replaced(
+        &next_notice(&harness).await,
+        "Cordon node/fleet-a-control-plane failed",
+    );
+    let after = (replicas(&deployments).await, template(&deployments).await);
+    assert_eq!(after, before);
 }

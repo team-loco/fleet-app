@@ -5,7 +5,7 @@ use fleet_core::pods::{
     Condition, Container, ContainerPort, ContainerState, Pod, PodEvent, PodPhase, Qos, Usage,
     Volume,
 };
-use fleet_core::{ClusterId, ResourceRef, Status};
+use fleet_core::{ClusterId, ResourceRef, Status, Uid};
 use jiff::Timestamp;
 use k8s_openapi::api::core::v1::{self as core, ContainerStatus};
 
@@ -248,6 +248,7 @@ pub fn pod(
     Pod {
         cluster: cluster.clone(),
         name: pod.metadata.name.clone().unwrap_or_default(),
+        uid: Uid::new(pod.metadata.uid.clone().unwrap_or_default()),
         phase: phase(status.and_then(|s| s.phase.as_deref())),
         status: health_status(health),
         reason: reason(pod, &containers, health),

@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use crate::Status;
 use crate::filter::TextFilter;
 use crate::overview::{join_clauses, named, plural, verb};
+use crate::{Status, Uid};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Usage {
@@ -31,6 +31,7 @@ pub struct NodeCondition {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Node {
     pub name: String,
+    pub uid: Uid,
     pub status: Status,
     pub state: String,
     pub schedulable: bool,
@@ -206,6 +207,7 @@ pub(crate) mod tests {
     pub(crate) fn node(name: &str, instance: &str, schedulable: bool, ready: bool) -> Node {
         let value = if ready { CONDITION_TRUE } else { "False" };
         Node {
+            uid: Uid::default(),
             name: name.into(),
             status: Status::Ok,
             state: String::new(),

@@ -194,10 +194,11 @@ impl FluxObjectPage {
     }
 
     fn act(&mut self, action: FluxAction, cx: &mut Context<Self>) {
-        let Some(key) = self.object().map(|object| object.key.clone()) else {
+        let Some(object) = self.object() else {
             return;
         };
-        cx.emit(Command::Flux(key, action));
+        let command = Command::Flux(object.key.clone(), object.uid.clone(), action);
+        cx.emit(command);
     }
 
     fn toggle_yaml(&mut self, cx: &mut Context<Self>) {

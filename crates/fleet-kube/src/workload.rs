@@ -7,7 +7,7 @@ use fleet_core::workload::{
     Commit, ContainerSpec, ContainerStatus, EnvResolution, EnvSource, EnvVar, Event, Exit, Pod,
     Port, Probe, ProbeAction, Resources, Revision,
 };
-use fleet_core::{ResourceRef, Workload, WorkloadKind};
+use fleet_core::{ResourceRef, Uid, Workload, WorkloadKind};
 use futures::{StreamExt, stream};
 use jiff::Timestamp;
 use k8s_openapi::api::apps::v1::{
@@ -624,6 +624,7 @@ pub async fn build(
     );
     Some(Workload {
         target: target.clone(),
+        uid: Uid::new(spec.meta.uid.clone().unwrap_or_default()),
         kind,
         desired: spec.desired,
         stalled: spec.stalled,

@@ -5,7 +5,7 @@ use fleet_core::pods::{
     Condition, Container, ContainerPort, ContainerState, Pod, PodEvent, PodPhase, Qos, Usage,
     Volume,
 };
-use fleet_core::{ClusterId, ResourceRef, Status};
+use fleet_core::{ClusterId, ResourceRef, Status, Uid};
 
 mod fill;
 
@@ -152,6 +152,7 @@ fn pod(seed: Seed) -> Pod {
         .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
         .collect();
     let mut pod = Pod {
+        uid: Uid::default(),
         cluster: ClusterId::new(CLUSTER),
         namespace: seed.namespace.into(),
         name: seed.name.into(),
