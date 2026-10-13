@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::home::{ClusterMetrics, problems_badge};
 use crate::{
     ChangesLog, ClusterCatalog, ClusterDetail, ClusterId, Comparison, Counts, FleetHome,
-    FluxObject, Forward, GitOps, Page, ResourceRef, ResourceSummary, Status,
+    FluxObject, Forward, GitOps, Page, ResourceKind, ResourceRef, ResourceSummary, Status,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,6 +56,21 @@ impl Snapshot {
 
     pub fn comparison(&self, resource: &ResourceRef) -> Option<&Comparison> {
         self.comparisons.iter().find(|c| c.matches(resource))
+    }
+
+    pub fn yaml(&self, resource: &ResourceRef) -> Option<&str> {
+        let kind = ResourceKind::ALL
+            .into_iter()
+            .find(|kind| kind.name() == resource.kind)?;
+        self.detail(&resource.cluster)?
+            .resources(kind)
+            .iter()
+            .find(|row| {
+                Some(row.namespace.as_str()) == resource.namespace.as_deref()
+                    && row.name == resource.name
+            })
+            .map(|row| row.yaml.as_str())
+            .filter(|yaml| !yaml.is_empty())
     }
 
     pub fn connected(&self) -> usize {
@@ -176,6 +191,33 @@ pub(crate) mod tests {
             snapshot.fleet_nav.get(&Page::Problems),
             Some(&Counts::default().with_warn(1))
         );
+    }
+
+    #[test]
+    fn yaml_comes_from_the_inspected_row() {
+        let mut snapshot = sample();
+        let mut row = crate::resources::tests::resource("payments", "checkout-api", Status::Ok);
+        row.yaml = "kind: Deployment".into();
+        let mut detail = ClusterDetail::default();
+        detail.resources.insert(ResourceKind::Deployment, vec![row]);
+        snapshot.details.insert(ClusterId::new("a"), detail);
+        let target = ResourceRef {
+            cluster: ClusterId::new("a"),
+            kind: "Deployment".into(),
+            namespace: Some("payments".into()),
+            name: "checkout-api".into(),
+        };
+        assert_eq!(snapshot.yaml(&target), Some("kind: Deployment"));
+        let other = ResourceRef {
+            name: "cart".into(),
+            ..target.clone()
+        };
+        assert_eq!(snapshot.yaml(&other), None);
+        let pod = ResourceRef {
+            kind: "Pod".into(),
+            ..target
+        };
+        assert_eq!(snapshot.yaml(&pod), None);
     }
 
     #[test]

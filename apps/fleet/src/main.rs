@@ -30,6 +30,7 @@ const SAMPLE_QUERY: &str = "checkout";
 const SAMPLE_RELEASE_CLUSTER: &str = "staging";
 const SAMPLE_NAMESPACE: &str = "payments";
 const SAMPLE_DEPLOYMENT: &str = "checkout-api";
+const DEPLOYMENT: &str = "Deployment";
 
 gpui::actions!(fleet, [Quit]);
 
@@ -48,8 +49,67 @@ struct Args {
     appearance: Option<AppearanceArg>,
     #[arg(long, value_name = "DIR")]
     data_dir: Option<PathBuf>,
-    #[arg(long, value_name = "NAME", default_value = SAMPLE_CLUSTER)]
-    cluster: String,
+    #[arg(long, value_name = "NAME")]
+    cluster: Option<String>,
+    #[arg(long, value_name = "NAMESPACE/NAME", value_parser = parse_object)]
+    object: Option<Object>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Object {
+    namespace: String,
+    name: String,
+}
+
+fn parse_object(text: &str) -> Result<Object, String> {
+    match text.split_once('/') {
+        Some((namespace, name)) if !namespace.is_empty() && !name.is_empty() => Ok(Object {
+            namespace: namespace.to_owned(),
+            name: name.to_owned(),
+        }),
+        _ => Err(format!("expected NAMESPACE/NAME, got {text}")),
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct Preset {
+    cluster: Option<ClusterId>,
+    object: Option<Object>,
+}
+
+impl Preset {
+    fn cluster_or(&self, sample: &str) -> ClusterId {
+        self.cluster
+            .clone()
+            .unwrap_or_else(|| ClusterId::new(sample))
+    }
+
+    fn object_or(&self, namespace: &str, name: &str) -> Object {
+        self.object.clone().unwrap_or_else(|| Object {
+            namespace: namespace.to_owned(),
+            name: name.to_owned(),
+        })
+    }
+
+    fn flux(&self, sample_cluster: &str, kind: FluxKind, namespace: &str, name: &str) -> FluxKey {
+        let object = self.object_or(namespace, name);
+        FluxKey::new(
+            self.cluster_or(sample_cluster).as_str(),
+            kind,
+            object.namespace,
+            object.name,
+        )
+    }
+
+    fn deployment(&self) -> ResourceRef {
+        let object = self.object_or(SAMPLE_NAMESPACE, SAMPLE_DEPLOYMENT);
+        ResourceRef {
+            cluster: self.cluster_or(SAMPLE_CLUSTER),
+            kind: DEPLOYMENT.into(),
+            namespace: Some(object.namespace),
+            name: object.name,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -89,7 +149,8 @@ enum Screen {
 }
 
 impl Screen {
-    fn commands(self, cluster: &ClusterId) -> Vec<Command> {
+    fn commands(self, preset: &Preset) -> Vec<Command> {
+        let cluster = preset.cluster_or(SAMPLE_CLUSTER);
         let sample = Command::SelectCluster(Some(cluster.clone()));
         match self {
             Self::Fleet => vec![Command::SelectPage(Page::Overview)],
@@ -107,42 +168,29 @@ impl Screen {
             Self::Events => vec![sample, Command::SelectPage(Page::Events)],
             Self::Resources => vec![sample, Command::SelectPage(Page::Deployments)],
             Self::Gitops => vec![Command::SelectPage(Page::GitOps)],
-            Self::Compare => vec![Command::Compare(ResourceRef {
-                cluster: cluster.clone(),
-                kind: "Deployment".into(),
-                namespace: Some(SAMPLE_NAMESPACE.into()),
-                name: SAMPLE_DEPLOYMENT.into(),
-            })],
-            Self::ClusterSettings => {
-                vec![Command::ShowClusterSettings(cluster.clone())]
-            }
+            Self::Compare => vec![Command::Compare(preset.deployment())],
+            Self::ClusterSettings => vec![Command::ShowClusterSettings(cluster)],
             Self::Kit => Vec::new(),
             Self::KitOverlays => Vec::new(),
             Self::KitPanes => Vec::new(),
             Self::AddCluster => vec![Command::OpenAddCluster(AddClusterStep::Pick)],
             Self::AddClusterCheck => vec![Command::OpenAddCluster(AddClusterStep::Check)],
-            Self::Workload => {
-                let workload = ResourceRef {
-                    cluster: cluster.clone(),
-                    ..fleet_demo::sample_workload()
-                };
-                vec![sample, Command::OpenResource(workload)]
-            }
+            Self::Workload => vec![sample, Command::OpenResource(preset.deployment())],
             Self::Pods => vec![sample, Command::SelectPage(Page::Pods)],
             Self::PodsShell => vec![sample, Command::SelectPage(Page::Pods)],
-            Self::Kustomization => flux_screen(FluxKey::new(
+            Self::Kustomization => flux_screen(preset.flux(
                 SAMPLE_CLUSTER,
                 FluxKind::Kustomization,
                 "flux-system",
                 "apps-payments",
             )),
-            Self::Helmrelease => flux_screen(FluxKey::new(
+            Self::Helmrelease => flux_screen(preset.flux(
                 SAMPLE_RELEASE_CLUSTER,
                 FluxKind::HelmRelease,
                 "monitoring",
                 "kube-prometheus-stack",
             )),
-            Self::Source => flux_screen(FluxKey::new(
+            Self::Source => flux_screen(preset.flux(
                 SAMPLE_CLUSTER,
                 FluxKind::GitRepository,
                 "flux-system",
@@ -197,13 +245,16 @@ fn main() -> anyhow::Result<()> {
 
     let forced = args.appearance.map(Appearance::from);
     let screen = args.screen;
-    let cluster = ClusterId::new(args.cluster);
+    let preset = Preset {
+        cluster: args.cluster.map(ClusterId::new),
+        object: args.object,
+    };
     let failure = Rc::new(RefCell::new(None));
     let failed = failure.clone();
     gpui_platform::application()
         .with_assets(assets::Assets)
         .run(move |cx: &mut App| {
-            if let Err(error) = launch(cx, forced, update_rx, command_tx, screen, &cluster) {
+            if let Err(error) = launch(cx, forced, update_rx, command_tx, screen, &preset) {
                 failed.replace(Some(error));
                 cx.quit();
             }
@@ -235,7 +286,7 @@ fn launch(
     updates: async_channel::Receiver<fleet_core::Update>,
     commands: async_channel::Sender<Command>,
     screen: Screen,
-    cluster: &ClusterId,
+    preset: &Preset,
 ) -> anyhow::Result<()> {
     fleet_ui::init(forced, cx)?;
     cx.bind_keys([
@@ -274,35 +325,35 @@ fn launch(
             Screen::KitPanes => cx
                 .new(|cx| Gallery::new(GalleryPage::Panes, window, cx))
                 .into(),
-            Screen::Fleet => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::Cluster => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::Collapsed => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::Command => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::Changes => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::Overview => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::Nodes => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::Namespaces => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::Events => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::Resources => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::AddCluster => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::AddClusterCheck => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::Gitops => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::Workload => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::Pods => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::PodsShell => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::Kustomization => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::Helmrelease => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::Source => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::Fleet => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::Cluster => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::Collapsed => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::Command => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::Changes => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::Overview => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::Nodes => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::Namespaces => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::Events => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::Resources => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::AddCluster => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::AddClusterCheck => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::Gitops => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::Workload => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::Pods => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::PodsShell => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::Kustomization => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::Helmrelease => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::Source => shell_view(updates, commands, screen, preset, window, cx),
             #[cfg(feature = "loco")]
-            Screen::LocoPlatform => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::LocoPlatform => shell_view(updates, commands, screen, preset, window, cx),
             #[cfg(feature = "loco")]
-            Screen::LocoApps => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::LocoApps => shell_view(updates, commands, screen, preset, window, cx),
             #[cfg(feature = "loco")]
-            Screen::LocoBuilds => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::Compare => shell_view(updates, commands, screen, cluster, window, cx),
-            Screen::ClusterSettings => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::LocoBuilds => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::Compare => shell_view(updates, commands, screen, preset, window, cx),
+            Screen::ClusterSettings => shell_view(updates, commands, screen, preset, window, cx),
             #[cfg(feature = "loco")]
-            Screen::LocoRoutes => shell_view(updates, commands, screen, cluster, window, cx),
+            Screen::LocoRoutes => shell_view(updates, commands, screen, preset, window, cx),
         };
         cx.new(|cx| Root::new(view, window, cx))
     })
@@ -315,11 +366,11 @@ fn shell_view(
     updates: async_channel::Receiver<fleet_core::Update>,
     commands: async_channel::Sender<Command>,
     screen: Screen,
-    cluster: &ClusterId,
+    preset: &Preset,
     window: &mut gpui::Window,
     cx: &mut App,
 ) -> gpui::AnyView {
-    let initial = screen.commands(cluster);
+    let initial = screen.commands(preset);
     let shell = cx.new(|cx| Shell::new(updates, commands, initial, window, cx));
     if let Screen::Command = screen {
         shell.update(cx, |shell, cx| shell.open_palette(SAMPLE_QUERY, window, cx));
@@ -328,4 +379,61 @@ fn shell_view(
         shell.update(cx, |shell, cx| shell.show_pod_terminal(window, cx));
     }
     shell.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn objects_parse_as_namespace_and_name() {
+        assert_eq!(
+            parse_object("payments/checkout-api"),
+            Ok(Object {
+                namespace: "payments".into(),
+                name: "checkout-api".into(),
+            })
+        );
+        assert!(parse_object("checkout-api").is_err());
+        assert!(parse_object("/x").is_err());
+    }
+
+    #[test]
+    fn presets_name_the_live_cluster_and_object() {
+        let preset = Preset {
+            cluster: Some(ClusterId::new("kind-fleet-a")),
+            object: parse_object("apps/podinfo").ok(),
+        };
+        let key = FluxKey::new("kind-fleet-a", FluxKind::HelmRelease, "apps", "podinfo");
+        assert_eq!(
+            Screen::Helmrelease.commands(&preset),
+            [Command::OpenFluxObject(key), Command::ToggleClustersPanel]
+        );
+        let workload = Screen::Workload.commands(&preset);
+        assert_eq!(
+            workload.last(),
+            Some(&Command::OpenResource(ResourceRef {
+                cluster: ClusterId::new("kind-fleet-a"),
+                kind: DEPLOYMENT.into(),
+                namespace: Some("apps".into()),
+                name: "podinfo".into(),
+            }))
+        );
+    }
+
+    #[test]
+    fn presets_default_to_the_sample_data() {
+        let preset = Preset::default();
+        let release = Screen::Helmrelease.commands(&preset);
+        let Some(Command::OpenFluxObject(key)) = release.first() else {
+            panic!("expected a Flux object");
+        };
+        assert_eq!(key.cluster, ClusterId::new(SAMPLE_RELEASE_CLUSTER));
+        assert_eq!(
+            Screen::Nodes.commands(&preset).first(),
+            Some(&Command::SelectCluster(Some(ClusterId::new(
+                SAMPLE_CLUSTER
+            ))))
+        );
+    }
 }

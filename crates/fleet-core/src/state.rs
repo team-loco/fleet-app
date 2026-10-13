@@ -161,6 +161,19 @@ impl AppState {
         }
     }
 
+    pub fn ready_for(&self, command: &Command) -> bool {
+        let has_cluster = |id: &ClusterId| self.snapshot.cluster(id).is_some();
+        match command {
+            Command::SelectCluster(Some(id)) => has_cluster(id),
+            Command::OpenResource(resource) => has_cluster(&resource.cluster),
+            Command::FollowLogs(resource) => has_cluster(&resource.cluster),
+            Command::Compare(resource) => has_cluster(&resource.cluster),
+            Command::ShowClusterSettings(id) => has_cluster(id),
+            Command::OpenFluxObject(key) => self.snapshot.flux_object(key).is_some(),
+            _ => true,
+        }
+    }
+
     pub fn update(&mut self, update: Update) {
         match update {
             Update::Snapshot(snapshot) => {
@@ -448,6 +461,19 @@ mod tests {
         state.update(Update::Snapshot(Box::new(sample())));
         assert_eq!(state.flux_object, None);
         assert_eq!(state.page, Page::Kustomizations);
+    }
+
+    #[test]
+    fn startup_commands_wait_for_what_they_name() {
+        let (state, key) = with_flux();
+        assert!(state.ready_for(&Command::SelectCluster(Some(ClusterId::new("a")))));
+        assert!(!state.ready_for(&Command::SelectCluster(Some(ClusterId::new("nope")))));
+        assert!(state.ready_for(&Command::OpenFluxObject(key.clone())));
+        assert!(!state.ready_for(&Command::OpenFluxObject(key.on(&ClusterId::new("a")))));
+        assert!(!state.ready_for(&Command::OpenResource(deployment("nope"))));
+        assert!(state.ready_for(&Command::Compare(deployment("b"))));
+        assert!(state.ready_for(&Command::SelectPage(Page::GitOps)));
+        assert!(!AppState::default().ready_for(&Command::ShowClusterSettings(ClusterId::new("a"))));
     }
 
     #[test]

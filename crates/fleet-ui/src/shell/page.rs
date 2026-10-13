@@ -105,6 +105,7 @@ impl Shell {
             shell.dispatch(command.clone(), cx);
         });
         screen.update(cx, WorkloadScreen::watch);
+        self.sync_workload_yaml(&screen, cx);
         self.workload = Some((screen.clone(), subscription));
         Some(screen)
     }

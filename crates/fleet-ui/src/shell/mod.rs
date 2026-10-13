@@ -181,19 +181,7 @@ impl Shell {
         }
         self.state.update(update);
         self.sync_cluster_menus(cx);
-        let pending = std::mem::take(&mut self.pending);
-        for command in pending {
-            if let Command::ShowClusterSettings(cluster) = &command {
-                self.settings
-                    .update(cx, |settings, cx| settings.open(cluster, cx));
-            }
-            self.state.apply(&command);
-            if let Command::OpenAddCluster(step) = command {
-                self.open_add_cluster(step, window, cx);
-            } else {
-                self.send(command);
-            }
-        }
+        self.run_pending(window, cx);
         let snapshot = &self.state.snapshot;
         self.fleet
             .update(cx, |fleet, cx| fleet.set_snapshot(snapshot, cx));
@@ -208,6 +196,22 @@ impl Shell {
         self.sync_page(cx);
         self.sync_palette(cx);
         cx.notify();
+    }
+
+    fn run_pending(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ready = self
+            .pending
+            .iter()
+            .take_while(|command| self.state.ready_for(command))
+            .count();
+        let pending: Vec<Command> = self.pending.drain(..ready).collect();
+        for command in pending {
+            if let Command::OpenAddCluster(step) = command {
+                self.open_add_cluster(step, window, cx);
+            } else {
+                self.dispatch(command, cx);
+            }
+        }
     }
 
     pub fn open_palette(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -369,6 +373,15 @@ impl Shell {
         let resource = self.state.resource.as_ref();
         self.pods
             .update(cx, |pods, cx| pods.set_context(cluster, resource, cx));
+        if let Some((screen, _)) = &self.workload {
+            self.sync_workload_yaml(screen, cx);
+        }
+    }
+
+    pub(super) fn sync_workload_yaml(&self, screen: &Entity<WorkloadScreen>, cx: &mut App) {
+        let target = screen.read(cx).target().clone();
+        let yaml = self.state.snapshot.yaml(&target);
+        screen.update(cx, |screen, cx| screen.set_yaml(yaml, cx));
     }
 
     pub fn show_pod_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
