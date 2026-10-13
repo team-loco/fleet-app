@@ -46,7 +46,9 @@ pub use resources::ResourceKind;
 pub use settings::{ClusterCatalog, Preferences};
 pub use state::{AppState, Command, Update};
 pub use status::{Counts, Status};
-pub use stream::{ExecEvent, ExecRequest, ExecTarget, LogLevel, LogLine, LogRequest, Sink, Source};
+pub use stream::{
+    ExecEvent, ExecRequest, ExecTarget, LogLevel, LogLine, LogRequest, Sink, Source, TermSize,
+};
 pub use workload::{Workload, WorkloadKind};
 
 pub trait Backend: Send + 'static {

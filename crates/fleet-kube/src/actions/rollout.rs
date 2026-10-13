@@ -1,4 +1,6 @@
-use k8s_openapi::api::apps::v1::{Deployment, ReplicaSet};
+use k8s_openapi::api::apps::v1::{
+    ControllerRevision, DaemonSet, Deployment, ReplicaSet, StatefulSet,
+};
 use k8s_openapi::api::core::v1::PodTemplateSpec;
 use kube::Api;
 use kube::api::{ListParams, Patch, PatchParams};
@@ -9,6 +11,8 @@ use crate::manager::ClusterHandle;
 use crate::ops::FIELD_MANAGER;
 
 pub const DEPLOYMENT: &str = "Deployment";
+pub const STATEFUL_SET: &str = "StatefulSet";
+pub const DAEMON_SET: &str = "DaemonSet";
 pub const REVISION_ANNOTATION: &str = "deployment.kubernetes.io/revision";
 const POD_TEMPLATE_HASH: &str = "pod-template-hash";
 
@@ -128,6 +132,106 @@ pub async fn rollback(
         .patch(name, &params, &Patch::Json::<()>(operations))
         .await?;
     Ok(())
+}
+
+fn owned_revisions<'a>(
+    uid: &str,
+    revisions: &'a [ControllerRevision],
+) -> Vec<(u64, &'a ControllerRevision)> {
+    revisions
+        .iter()
+        .filter(|revision| {
+            revision
+                .metadata
+                .owner_references
+                .iter()
+                .flatten()
+                .any(|owner| owner.controller == Some(true) && owner.uid == uid)
+        })
+        .filter_map(|revision| Some((u64::try_from(revision.revision).ok()?, revision)))
+        .collect()
+}
+
+pub fn controller_rollback(
+    uid: &str,
+    revisions: &[ControllerRevision],
+    revision: u64,
+) -> Result<Option<serde_json::Value>> {
+    let owned = owned_revisions(uid, revisions);
+    let current = owned.iter().map(|(number, _)| *number).max();
+    let wanted = if revision == 0 {
+        owned
+            .iter()
+            .map(|(number, _)| *number)
+            .filter(|number| Some(*number) != current)
+            .max()
+            .ok_or(Error::RevisionNotFound(revision))?
+    } else {
+        revision
+    };
+    let chosen = owned
+        .iter()
+        .find(|(number, _)| *number == wanted)
+        .map(|(_, revision)| *revision)
+        .ok_or(Error::RevisionNotFound(wanted))?;
+    if Some(wanted) == current {
+        return Ok(None);
+    }
+    let data = chosen.data.as_ref().ok_or(Error::MissingField("data"))?;
+    Ok(Some(data.0.clone()))
+}
+
+async fn controller_undo<K>(api: Api<K>, name: &str, revision: u64) -> Result<()>
+where
+    K: kube::Resource<DynamicType = ()>
+        + Clone
+        + serde::de::DeserializeOwned
+        + serde::Serialize
+        + std::fmt::Debug,
+{
+    let object = api.get(name).await?;
+    let uid = object
+        .meta()
+        .uid
+        .clone()
+        .ok_or(Error::MissingField("metadata.uid"))?;
+    let namespace = object.meta().namespace.clone().unwrap_or_default();
+    let client = api.clone().into_client();
+    let history: Api<ControllerRevision> = Api::namespaced(client, &namespace);
+    let listed = history.list(&ListParams::default()).await?;
+    let Some(patch) = controller_rollback(&uid, &listed.items, revision)? else {
+        return Ok(());
+    };
+    let params = PatchParams {
+        field_manager: Some(FIELD_MANAGER.to_owned()),
+        ..PatchParams::default()
+    };
+    api.patch(name, &params, &Patch::Strategic(patch)).await?;
+    Ok(())
+}
+
+pub async fn rollback_controller(
+    handle: &ClusterHandle,
+    kind: &str,
+    namespace: &str,
+    name: &str,
+    revision: u64,
+) -> Result<()> {
+    let client = handle.client()?;
+    match kind {
+        STATEFUL_SET => {
+            let api: Api<StatefulSet> = Api::namespaced(client, namespace);
+            controller_undo(api, name, revision).await
+        }
+        DAEMON_SET => {
+            let api: Api<DaemonSet> = Api::namespaced(client, namespace);
+            controller_undo(api, name, revision).await
+        }
+        other => Err(Error::Unsupported {
+            action: "Roll back",
+            kind: other.to_owned(),
+        }),
+    }
 }
 
 #[cfg(test)]
@@ -252,6 +356,66 @@ mod tests {
         assert!(matches!(
             rollback_template(&deployment("api:2.14", true), &sets(), 36),
             Err(Error::Paused(name)) if name == "checkout"
+        ));
+    }
+
+    fn controller_revision(revision: i64, image: &str, owner: &str) -> ControllerRevision {
+        ControllerRevision {
+            metadata: ObjectMeta {
+                name: Some(format!("db-{revision}")),
+                owner_references: Some(vec![OwnerReference {
+                    controller: Some(true),
+                    uid: owner.into(),
+                    ..OwnerReference::default()
+                }]),
+                ..ObjectMeta::default()
+            },
+            revision,
+            data: Some(k8s_openapi::apimachinery::pkg::runtime::RawExtension(
+                json!({
+                    "spec": { "template": {
+                        "$patch": "replace",
+                        "spec": { "containers": [{ "name": "db", "image": image }] }
+                    } }
+                }),
+            )),
+        }
+    }
+
+    fn history() -> Vec<ControllerRevision> {
+        vec![
+            controller_revision(1, "db:15", UID),
+            controller_revision(2, "db:16", UID),
+            controller_revision(3, "db:17", UID),
+            controller_revision(2, "other:1", "someone-else"),
+        ]
+    }
+
+    fn image(patch: &serde_json::Value) -> Option<&str> {
+        patch
+            .pointer("/spec/template/spec/containers/0/image")
+            .and_then(serde_json::Value::as_str)
+    }
+
+    #[test]
+    fn controller_rollback_patches_the_chosen_revision() {
+        let chosen = controller_rollback(UID, &history(), 1).ok().flatten();
+        assert_eq!(chosen.as_ref().and_then(image), Some("db:15"));
+        let previous = controller_rollback(UID, &history(), 0).ok().flatten();
+        assert_eq!(previous.as_ref().and_then(image), Some("db:16"));
+    }
+
+    #[test]
+    fn controller_rollback_skips_the_current_and_unknown_revisions() {
+        assert!(matches!(controller_rollback(UID, &history(), 3), Ok(None)));
+        assert!(matches!(
+            controller_rollback(UID, &history(), 9),
+            Err(Error::RevisionNotFound(9))
+        ));
+        let foreign = vec![controller_revision(2, "other:1", "someone-else")];
+        assert!(matches!(
+            controller_rollback(UID, &foreign, 2),
+            Err(Error::RevisionNotFound(2))
         ));
     }
 }

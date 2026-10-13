@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 
+use fleet_core::TermSize;
 use futures::{AsyncBufReadExt, SinkExt, StreamExt};
 use k8s_openapi::api::core::v1::Pod;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Status;
@@ -97,12 +98,6 @@ pub struct ExecRequest {
     pub container: Option<String>,
     pub command: Vec<String>,
     pub tty: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TermSize {
-    pub cols: u16,
-    pub rows: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

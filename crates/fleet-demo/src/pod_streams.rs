@@ -439,6 +439,7 @@ mod tests {
                     debug_image: None,
                 },
                 input: source.clone(),
+                resize: Source::channel().1,
                 output: output.clone(),
             })
         };

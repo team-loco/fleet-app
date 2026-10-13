@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use fleet_core::{ExecEvent, ExecRequest, Sink};
+use fleet_core::{ExecEvent, ExecRequest, Sink, TermSize};
 use k8s_openapi::api::core::v1::Pod;
 use kube::Api;
 use kube::api::{Patch, PatchParams};
@@ -9,15 +9,11 @@ use serde_json::{Value, json};
 use super::failure::action_failure;
 use crate::error::{Error, Result};
 use crate::manager::ClusterHandle;
-use crate::ops::{self, ExecExit, ExecSession, FIELD_MANAGER, TermSize};
+use crate::ops::{self, ExecExit, ExecSession, FIELD_MANAGER};
 
 pub const SHELL_FALLBACK: &str = "[ -x /bin/bash ] && exec /bin/bash || exec /bin/sh";
 const SHELL: &str = "/bin/sh";
 const SHELL_FLAG: &str = "-c";
-const INITIAL_SIZE: TermSize = TermSize {
-    cols: 120,
-    rows: 32,
-};
 const CLOSE_POLL: Duration = Duration::from_millis(500);
 const DEBUG_POLL: Duration = Duration::from_millis(500);
 const DEBUG_START_TIMEOUT: Duration = Duration::from_secs(90);
@@ -181,6 +177,17 @@ fn forward_input(request: &ExecRequest, stdin: async_channel::Sender<Vec<u8>>) {
     });
 }
 
+fn forward_resize(request: &ExecRequest, resize: async_channel::Sender<TermSize>) {
+    let sizes = request.resize.clone();
+    tokio::task::spawn_blocking(move || {
+        while let Some(size) = sizes.recv_blocking() {
+            if resize.send_blocking(size).is_err() {
+                return;
+            }
+        }
+    });
+}
+
 async fn pump(session: &ExecSession, output: &Sink<ExecEvent>) -> Option<ExecExit> {
     let mut poll = tokio::time::interval(CLOSE_POLL);
     loop {
@@ -219,8 +226,8 @@ pub async fn run(handle: ClusterHandle, request: ExecRequest) {
     if !output.send_blocking(ExecEvent::Started { note }) {
         return;
     }
-    session.resize.send(INITIAL_SIZE).await.ok();
     forward_input(&request, session.stdin.clone());
+    forward_resize(&request, session.resize.clone());
     let Some(exit) = pump(&session, &output).await else {
         return;
     };

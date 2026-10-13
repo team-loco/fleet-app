@@ -313,6 +313,7 @@ mod tests {
                 debug_image: Some("busybox:1.36".into()),
             },
             input: source,
+            resize: Source::channel().1,
             output,
         }));
         assert!(matches!(
