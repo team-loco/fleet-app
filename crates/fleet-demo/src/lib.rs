@@ -6,6 +6,7 @@ mod home;
 mod lists;
 mod resources;
 mod simulate;
+mod workload;
 
 use std::collections::BTreeMap;
 use std::sync::mpsc;
@@ -19,6 +20,8 @@ use fleet_core::{
 };
 
 const PROD_US_EAST: &str = "prod-us-east";
+pub use workload::sample_target as sample_workload;
+
 #[cfg(feature = "loco")]
 const AGENT_SYNCED_SECS: u64 = 4;
 
@@ -65,6 +68,7 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
         tracing::error!(%error, "demo command forwarder failed to start");
         return;
     }
+    let workloads = workload::Workloads::new();
     while let Ok(input) = input_rx.recv() {
         let changed = match input {
             Input::Command(command) => {
@@ -72,6 +76,7 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
                     continue;
                 }
                 tracing::debug!(?command, "demo backend received command");
+                workloads.handle(&command);
                 let pending = simulate::apply(&mut state, &command);
                 let changed = pending.is_some();
                 if let Some(pending) = pending {

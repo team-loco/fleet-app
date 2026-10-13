@@ -101,6 +101,8 @@ pub const CODE_LINE: Pixels = px(20.);
 pub const GUTTER_NUMBER: Pixels = px(40.);
 pub const GUTTER_SIGN: Pixels = px(16.);
 pub const DIFF_HEADER: Pixels = px(28.);
+pub const TERMINAL_CURSOR_WIDTH: Pixels = px(7.);
+pub const TERMINAL_CURSOR_HEIGHT: Pixels = px(15.);
 
 pub const METER: Pixels = px(6.);
 pub const METER_MINI: Pixels = px(4.);

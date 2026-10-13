@@ -1,7 +1,7 @@
 use crate::resource::page_for_kind;
 use crate::{
-    AddClusterStep, CheckLine, ClusterId, ContextRef, KubeconfigFile, NewCluster, Page,
-    ResourceRef, Snapshot, Verdict,
+    AddClusterStep, CheckLine, ClusterId, ContextRef, ExecRequest, KubeconfigFile, LogRequest,
+    NewCluster, Page, ResourceRef, Sink, Snapshot, Verdict, Workload,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,6 +27,21 @@ pub enum Command {
     CheckContexts(Vec<ContextRef>),
     AddClusters(Vec<NewCluster>),
     RemoveCluster(ClusterId),
+    WatchWorkload {
+        target: ResourceRef,
+        sink: Sink<Workload>,
+    },
+    StreamLogs(LogRequest),
+    Exec(ExecRequest),
+    RestartRollout(ResourceRef),
+    Scale {
+        target: ResourceRef,
+        replicas: u32,
+    },
+    Rollback {
+        target: ResourceRef,
+        revision: u64,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -91,6 +106,12 @@ impl AppState {
             Command::CheckContexts(_) => {}
             Command::AddClusters(_) => {}
             Command::RemoveCluster(_) => {}
+            Command::WatchWorkload { .. } => {}
+            Command::StreamLogs(_) => {}
+            Command::Exec(_) => {}
+            Command::RestartRollout(_) => {}
+            Command::Scale { .. } => {}
+            Command::Rollback { .. } => {}
         }
     }
 
@@ -176,6 +197,26 @@ mod tests {
         state.apply(&Command::SelectPage(Page::GitOps));
         assert_eq!(state.cluster, None);
         assert_eq!(state.page, Page::GitOps);
+    }
+
+    fn deployment(cluster: &str) -> ResourceRef {
+        ResourceRef {
+            cluster: ClusterId::new(cluster),
+            kind: "Deployment".into(),
+            namespace: Some("payments".into()),
+            name: "checkout-api".into(),
+        }
+    }
+
+    #[test]
+    fn opening_a_workload_selects_its_cluster_and_list_page() {
+        let mut state = loaded();
+        state.apply(&Command::OpenResource(deployment("b")));
+        assert_eq!(state.cluster, Some(ClusterId::new("b")));
+        assert_eq!(state.page, Page::Deployments);
+        assert_eq!(state.resource, Some(deployment("b")));
+        state.apply(&Command::SelectPage(Page::Pods));
+        assert_eq!(state.resource, None);
     }
 
     #[test]

@@ -18,6 +18,7 @@ use crate::screens::changes::ChangesScreen;
 use crate::screens::command::{CommandPalette, PaletteEvent};
 use crate::screens::fleet::FleetScreen;
 use crate::screens::gitops::GitOpsScreen;
+use crate::screens::workload::WorkloadScreen;
 use crate::screens::{ClusterPages, ScreenEvent};
 use crate::theme::{self, ActiveTheme, NAV_MIN_WIDTH, RULE, STRIP, TEXT_UI};
 
@@ -35,6 +36,7 @@ pub struct Shell {
     loaded: bool,
     add_cluster: Option<(Entity<AddClusterDialog>, Subscription)>,
     cluster_menus: BTreeMap<ClusterId, Entity<ActionMenu>>,
+    workload: Option<(Entity<WorkloadScreen>, Subscription)>,
     _updates: Task<()>,
     _appearance: Subscription,
     _fleet_commands: Subscription,
@@ -101,6 +103,7 @@ impl Shell {
             loaded: false,
             add_cluster: None,
             cluster_menus: BTreeMap::new(),
+            workload: None,
             _updates: listen,
             _appearance: appearance,
             _fleet_commands: fleet_commands,
@@ -242,6 +245,12 @@ impl Shell {
             Command::CheckContexts(_) => {}
             Command::AddClusters(_) => {}
             Command::RemoveCluster(_) => {}
+            Command::WatchWorkload { .. } => {}
+            Command::StreamLogs(_) => {}
+            Command::Exec(_) => {}
+            Command::RestartRollout(_) => {}
+            Command::Scale { .. } => {}
+            Command::Rollback { .. } => {}
         }
         self.state.apply(&command);
         if let Command::OpenResource(target) = &command {
@@ -295,8 +304,9 @@ impl Shell {
 }
 
 impl Render for Shell {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
+        let page = self.page(window, cx);
         div()
             .id("shell")
             .track_focus(&self.focus)
@@ -322,7 +332,7 @@ impl Render for Shell {
                     .flex_1()
                     .min_h_0()
                     .child(self.nav(cx))
-                    .child(self.page(cx)),
+                    .child(page),
             )
             .child(self.status_bar(cx))
             .child(self.palette.clone())

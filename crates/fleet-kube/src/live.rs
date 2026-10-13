@@ -186,6 +186,12 @@ impl Live {
             Command::CheckContexts(_) => {}
             Command::AddClusters(_) => {}
             Command::RemoveCluster(_) => {}
+            Command::WatchWorkload { .. } => {}
+            Command::StreamLogs(_) => {}
+            Command::Exec(_) => {}
+            Command::RestartRollout(_) => {}
+            Command::Scale { .. } => {}
+            Command::Rollback { .. } => {}
         }
     }
 

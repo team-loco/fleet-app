@@ -15,7 +15,9 @@ pub mod resource;
 pub mod resources;
 pub mod state;
 pub mod status;
+pub mod stream;
 pub mod time;
+pub mod workload;
 
 pub use add_cluster::{
     AddClusterFlow, AddClusterStep, Candidate, CheckLine, CheckStatus, ContextChoice, ContextRef,
@@ -33,6 +35,8 @@ pub use resource::ResourceSummary;
 pub use resources::ResourceKind;
 pub use state::{AppState, Command, Update};
 pub use status::{Counts, Status};
+pub use stream::{ExecEvent, ExecRequest, ExecTarget, LogLevel, LogLine, LogRequest, Sink, Source};
+pub use workload::{Workload, WorkloadKind};
 
 pub trait Backend: Send + 'static {
     fn start(self: Box<Self>, updates: Sender<Update>, commands: Receiver<Command>);

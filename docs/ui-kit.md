@@ -168,7 +168,9 @@ confirm(
         "Delete pod",                                  // danger button label
         |window, cx| { /* send the Command */ },
     )
-    .detail("prod-us-east · payments/checkout-api-7f9c6d-x2lqp"),   // mono lines, optional
+    .detail("prod-us-east · payments/checkout-api-7f9c6d-x2lqp")    // mono lines, optional
+    .field(state)                                  // optional TextFieldState, focused on open
+    .primary(),                                    // acc confirm button instead of danger
     window,
     cx,
 );
@@ -277,10 +279,25 @@ LogLine::new(Some("21:12:20.231"), Some(Level::Error), "open /etc/checkout/strip
 l.set_follow(bool, cx)       // follow tail; scrolling up turns it off
 l.set_query(text, cx)        // case-insensitive highlight, jumps to first match
 l.set_timestamps(bool, cx)
+l.set_wrap(bool, cx)         // wrap long lines (switches to a variable-height list)
 l.clear(cx)
 ```
 
 `strip_ansi(&str)` is public for other text that comes from a terminal.
+
+## Terminal
+
+A line terminal over a byte stream (exec / debug sessions): mono 12, `LOG_LINE` rows, block
+cursor on the last line while open. It strips escape sequences, handles `\r\n` and backspace,
+and keeps UTF-8 split across chunks whole. Notes (the equivalent `kubectl` line, session ended)
+render muted. Keystrokes are emitted as tty bytes; the view does not echo.
+
+```rust
+let terminal = cx.new(|cx| Terminal::new("shell", cx));
+cx.subscribe(&terminal, |this, _, TerminalEvent::Input(bytes), cx| ..).detach();
+terminal.update(cx, |t, cx| { t.note("$ kubectl debug …", cx); t.set_open(true, cx); });
+terminal.update(cx, |t, cx| t.feed(&bytes, cx));
+```
 
 ## CodeView and DiffView
 

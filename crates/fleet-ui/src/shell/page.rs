@@ -1,7 +1,7 @@
-use fleet_core::{Page, Status};
+use fleet_core::{Command, Page, Status, WorkloadKind};
 use gpui::{
-    AnyElement, App, Context, FontWeight, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, SharedString, StatefulInteractiveElement, Styled, div,
+    AnyElement, App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
+    MouseButton, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div,
 };
 
 use fleet_core::AddClusterStep;
@@ -9,6 +9,7 @@ use fleet_core::AddClusterStep;
 use super::Shell;
 use crate::screens::add_cluster::empty_fleet;
 use crate::screens::gitops::GitOpsScreen;
+use crate::screens::workload::WorkloadScreen;
 use crate::theme::{
     ActiveTheme, FONT_MONO, ICON_BUTTON, PAGE_HEADER, Palette, RADIUS, RULE, SPACE_2, SPACE_5,
     SPACE_7, SPACE_8, TEXT_LABEL, TEXT_SMALL, TEXT_TITLE,
@@ -18,7 +19,15 @@ const LIVE: &str = "live";
 const MORE: &str = "⋯";
 
 impl Shell {
-    pub(super) fn page(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if let Some(screen) = self.workload_screen(window, cx) {
+            return div()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .child(screen)
+                .into_any_element();
+        }
         let palette = *cx.palette();
         if self.state.page == Page::Changes {
             return div()
@@ -46,6 +55,37 @@ impl Shell {
                     .child(self.content(&palette, cx)),
             )
             .into_any_element()
+    }
+
+    fn workload_screen(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<WorkloadScreen>> {
+        let Some(target) = self
+            .state
+            .resource
+            .clone()
+            .filter(|target| WorkloadKind::from_kind(&target.kind).is_some())
+        else {
+            self.workload = None;
+            return None;
+        };
+        let current = self
+            .workload
+            .as_ref()
+            .filter(|(screen, _)| screen.read(cx).target() == &target)
+            .map(|(screen, _)| screen.clone());
+        if current.is_some() {
+            return current;
+        }
+        let screen = cx.new(|cx| WorkloadScreen::new(target, window, cx));
+        let subscription = cx.subscribe(&screen, |shell, _, command: &Command, cx| {
+            shell.dispatch(command.clone(), cx);
+        });
+        screen.update(cx, WorkloadScreen::watch);
+        self.workload = Some((screen.clone(), subscription));
+        Some(screen)
     }
 
     fn page_header(&self, palette: &Palette, cx: &App) -> impl IntoElement {
