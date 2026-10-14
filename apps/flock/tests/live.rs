@@ -1,76 +1,34 @@
-#![cfg(target_os = "macos")]
-
-use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc::{self, RecvTimeoutError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, bail};
+use flock_core::{Backend, NewCluster, Snapshot, Update};
+use flock_kube::LiveBackend;
+use flock_kube::discovery::{DiscoverySources, discover};
+use flock_kube::settings::KubeSettings;
+use flock_kube::store::ClusterStore;
+
+#[path = "../../../crates/flock-kube/tests/common/kubeconfig.rs"]
+mod kubeconfig;
 
 const E2E_VAR: &str = "FLOCK_E2E";
-const KUBECONFIG_VAR: &str = "KUBECONFIG";
-const LOG_SNAPSHOTS_VAR: &str = "FLOCK_LOG_SNAPSHOTS";
 const CLUSTERS: [(&str, &str); 2] = [("fleet-a", "kind-fleet-a"), ("fleet-b", "kind-fleet-b")];
 const SHARED_PROBLEMS: [&str; 3] = ["unschedulable", "broken-kustomization", "stripe-webhook"];
 const FLOCK_A_PROBLEMS: [&str; 1] = ["checkout-api"];
-const SNAPSHOT_MARKER: &str = "snapshot clusters=";
-const PROBLEM_MARKER: &str = "problem ";
-const CONNECTED_FIELD: &str = "connected=";
 const WAIT: Duration = Duration::from_secs(180);
+const DATA_DIR: &str = "data";
 
-struct App(Child);
-
-impl Drop for App {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-fn kubeconfig_for(context: &str) -> anyhow::Result<PathBuf> {
-    let value = std::env::var_os(KUBECONFIG_VAR).context("KUBECONFIG must be set")?;
-    for file in std::env::split_paths(&value) {
-        let body = std::fs::read_to_string(&file)?;
-        if body.contains(context) {
-            return Ok(file);
-        }
-    }
-    bail!("no kubeconfig file in KUBECONFIG defines {context}")
-}
-
-fn seed_store(dir: &Path) -> anyhow::Result<()> {
-    let mut clusters = Vec::new();
-    for (name, context) in CLUSTERS {
-        clusters.push(serde_json::json!({
-            "file": kubeconfig_for(context)?,
-            "context": context,
-            "name": name,
-        }));
-    }
-    let body = serde_json::json!({ "clusters": clusters });
-    std::fs::write(dir.join("clusters.json"), serde_json::to_vec_pretty(&body)?)?;
-    Ok(())
-}
-
-fn connected_count(line: &str) -> Option<usize> {
-    let rest = line.split(CONNECTED_FIELD).nth(1)?;
-    rest.split_whitespace().next()?.parse().ok()
-}
-
-fn missing_problems(block: &[String]) -> Vec<String> {
+fn missing_problems(snapshot: &Snapshot) -> Vec<String> {
     let mut missing = Vec::new();
     for (name, _) in CLUSTERS {
-        let cluster_field = format!("cluster={name}");
         let expected = SHARED_PROBLEMS.iter().chain(if name == "fleet-a" {
             FLOCK_A_PROBLEMS.iter()
         } else {
             [].iter()
         });
         for problem in expected {
-            let found = block
-                .iter()
-                .any(|line| line.contains(&cluster_field) && line.contains(problem));
+            let found = snapshot.home.problems.iter().any(|entry| {
+                entry.target.cluster.as_str() == name && entry.target.name.contains(problem)
+            });
             if !found {
                 missing.push(format!("{name}/{problem}"));
             }
@@ -79,58 +37,72 @@ fn missing_problems(block: &[String]) -> Vec<String> {
     missing
 }
 
-#[test]
-fn live_app_connects_both_kind_clusters_and_shows_the_scenarios() -> anyhow::Result<()> {
+#[tokio::test]
+async fn live_backend_connects_both_kind_clusters_and_shows_the_scenarios() -> anyhow::Result<()> {
     if std::env::var(E2E_VAR).as_deref() != Ok("1") {
         return Ok(());
     }
-    let data_dir = tempfile::tempdir()?;
-    let home = tempfile::tempdir()?;
-    seed_store(data_dir.path())?;
-    let child = Command::new(env!("CARGO_BIN_EXE_flock"))
-        .arg("--data-dir")
-        .arg(data_dir.path())
-        .env("HOME", home.path())
-        .env(LOG_SNAPSHOTS_VAR, "1")
-        .env("NO_COLOR", "1")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-    let mut app = App(child);
-    let stdout = app.0.stdout.take().context("stdout piped")?;
-    let (lines_tx, lines_rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if lines_tx.send(line).is_err() {
-                break;
-            }
-        }
-    });
-
-    let deadline = Instant::now() + WAIT;
-    let mut block: Vec<String> = Vec::new();
-    let mut connected = 0;
+    let sources = DiscoverySources {
+        kubeconfig_env: std::env::var_os("KUBECONFIG"),
+        home: None,
+        folders: Vec::new(),
+    };
+    let discovery = discover(&sources);
+    let contexts = CLUSTERS
+        .iter()
+        .map(|(_, name)| {
+            discovery
+                .contexts
+                .iter()
+                .find(|context| context.id.context == *name)
+                .cloned()
+                .with_context(|| format!("KUBECONFIG must define {name}"))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let home = kubeconfig::kind_only_home(&contexts);
+    let file = home.path().join(".kube").join("config");
+    let mut store = ClusterStore::empty(&home.path().join(DATA_DIR));
+    let added = CLUSTERS
+        .iter()
+        .map(|(name, context)| NewCluster {
+            context: flock_core::ContextRef {
+                file: file.clone(),
+                context: (*context).to_owned(),
+            },
+            name: (*name).to_owned(),
+        })
+        .collect::<Vec<_>>();
+    store.add(&added)?;
+    let sources = DiscoverySources {
+        kubeconfig_env: None,
+        home: Some(home.path().to_path_buf()),
+        folders: Vec::new(),
+    };
+    let backend = LiveBackend::new(KubeSettings::default(), sources, store);
+    let (updates_tx, updates) = async_channel::unbounded();
+    let (_commands, commands_rx) = async_channel::unbounded();
+    Box::new(backend).start(updates_tx, commands_rx);
+    let deadline = tokio::time::Instant::now() + WAIT;
+    let mut last = Snapshot::default();
     loop {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        match lines_rx.recv_timeout(remaining) {
-            Ok(line) if line.contains(SNAPSHOT_MARKER) => {
-                connected = connected_count(&line).unwrap_or_default();
-                block.clear();
+        let received = tokio::time::timeout_at(deadline, updates.recv()).await;
+        let update = match received {
+            Ok(update) => update.context("backend stopped before the scenarios appeared")?,
+            Err(_) => bail!(
+                "missing {:?}, last snapshot {last:#?}",
+                missing_problems(&last)
+            ),
+        };
+        if let Update::Snapshot(snapshot) = update {
+            let connected = snapshot
+                .clusters
+                .iter()
+                .filter(|c| c.is_connected())
+                .count();
+            if connected == CLUSTERS.len() && missing_problems(&snapshot).is_empty() {
+                return Ok(());
             }
-            Ok(line) if line.contains(PROBLEM_MARKER) => block.push(line),
-            Ok(_) => {}
-            Err(RecvTimeoutError::Timeout) => {
-                bail!(
-                    "connected={connected}, missing {:?}, saw {block:#?}",
-                    missing_problems(&block)
-                )
-            }
-            Err(RecvTimeoutError::Disconnected) => {
-                bail!("flock exited before the scenarios appeared")
-            }
-        }
-        if connected == CLUSTERS.len() && missing_problems(&block).is_empty() {
-            return Ok(());
+            last = *snapshot;
         }
     }
 }
