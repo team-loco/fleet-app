@@ -1,0 +1,78 @@
+name: loco-crds
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: loco-crds
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      CARGO_TERM_COLOR: always
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Find the latest Loco release
+        id: release
+        run: |
+          latest="$(gh api repos/team-loco/loco/releases/latest --jq .tag_name)"
+          current="$(mise env --json | jq -r .LOCO_REF)"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          if [[ "$latest" != "$current" ]]; then echo "changed=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Bump LOCO_REF and regenerate
+        if: steps.release.outputs.changed == 'true'
+        env:
+          LATEST: ${{ steps.release.outputs.latest }}
+        run: |
+          sed -i.bak "s/^LOCO_REF = .*/LOCO_REF = \"$LATEST\"/" mise.toml
+          rm mise.toml.bak
+          mise run gen:loco
+      - name: Check
+        if: steps.release.outputs.changed == 'true'
+        run: |
+          cargo check -p flock-loco --all-targets
+          cargo check -p flock --features loco
+          cargo nextest run -p flock-loco
+      - name: Open pull request
+        if: steps.release.outputs.changed == 'true'
+        env:
+          LATEST: ${{ steps.release.outputs.latest }}
+          CURRENT: ${{ steps.release.outputs.current }}
+        run: |
+          branch="loco-crds-$LATEST"
+          if gh pr list --head "$branch" --state open --json number --jq '.[0].number' | grep -q .; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add mise.toml crates/flock-loco/src/generated
+          git commit -m "Bump Loco CRDs to $LATEST"
+          git push --force origin "$branch"
+          if git diff --quiet "origin/${GITHUB_REF_NAME}" -- crates/flock-loco/src/generated; then
+            effect="The generated types are unchanged."
+          else
+            effect="The generated types changed; review the diff."
+          fi
+          gh pr create \
+            --base "$GITHUB_REF_NAME" \
+            --head "$branch" \
+            --title "Bump Loco CRDs to $LATEST" \
+            --body "Bumps \`LOCO_REF\` from $CURRENT to $LATEST and regenerates \`crates/flock-loco/src/generated\` with \`mise run gen:loco\`. $effect"

@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
+#MISE description="Generate Loco CRD types from the pinned LOCO_REF release"
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-loco_core="${LOCO_CORE:-../core}"
-mkdir -p crds/loco crates/flock-loco/src/generated
+base_url="https://raw.githubusercontent.com/team-loco/loco/${LOCO_REF}/controller/config/crd/bases"
+download_dir="$(mktemp -d)"
+trap 'rm -rf "$download_dir"' EXIT
+mkdir -p crates/flock-loco/src/generated
 for resource in applications builds; do
-  source_crd="$loco_core/controller/config/crd/bases/infra.loco.io_${resource}.yaml"
-  target_crd="crds/loco/infra.loco.io_${resource}.yaml"
-  cp "$source_crd" "$target_crd"
+  crd="$download_dir/infra.loco.io_${resource}.yaml"
+  curl --fail --silent --show-error --location --output "$crd" "$base_url/infra.loco.io_${resource}.yaml"
   if [[ "$resource" == applications ]]; then phase=ApplicationStatusPhase; else phase=BuildStatusPhase; fi
   printf 'use super::%s;\n' "$phase" > "crates/flock-loco/src/generated/${resource}.rs"
-  kopium --elide "$phase" --filename "$target_crd" --derive PartialEq | sed '/^[[:space:]]*\/\//d' >> "crates/flock-loco/src/generated/${resource}.rs"
+  kopium --elide "$phase" --filename "$crd" --derive PartialEq | sed '/^[[:space:]]*\/\//d' >> "crates/flock-loco/src/generated/${resource}.rs"
 done
 cargo fmt --manifest-path crates/flock-loco/Cargo.toml

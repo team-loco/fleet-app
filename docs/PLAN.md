@@ -48,7 +48,7 @@ crates/
   flock-flux   Flux CRD types (kopium from the pinned Flux release), status-to-sentence summarizer,
                inventory, Helm storage secret decode, git commits + diffs (system git, user creds),
                cross-cluster matrix.
-  flock-loco   feature-gated: Loco CRD types from crds/loco, platform/app/build/route models.
+  flock-loco   feature-gated: Loco CRD types generated from the pinned Loco release, platform/app/build/route models.
   flock-demo   Backend impl serving the design's sample data (parity screenshots, `--demo`).
   flock-ui     gpui views: theme tokens, primitives, panels, tables, palette, every screen.
 apps/flock     binary: window, menus, keybindings, backend selection, `loco` feature passthrough.
