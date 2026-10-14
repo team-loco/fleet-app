@@ -24,3 +24,13 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
       - run: mise run check
+
+  loco-crds:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - run: mise run gen:loco
+      - run: git diff --exit-code crates/flock-loco/src/generated

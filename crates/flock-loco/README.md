@@ -13,11 +13,12 @@ combines routes with complete Service/EndpointSlice snapshots, and sorts problem
 `platform` exports the installed component catalog, workload health adapters, component health
 rollups and agent discovery observations. Cluster input errors use the crate's `Error` enum.
 
-Regenerate CRDs and Rust types with `mise run gen:loco`. `LOCO_CORE` defaults to
-`../core` (a loco checkout next to this repo); the task only reads that checkout and copies
-`controller/config/crd/bases` into Flock. It runs pinned kopium and rustfmt. The two phase enums
-are maintained in `generated/mod.rs` so new server phases remain readable. Do not edit generated
-`applications.rs` or `builds.rs` manually.
+Regenerate the Rust types with `mise run gen:loco`. It downloads the Application and Build CRDs
+from the Loco release named by `LOCO_REF` in `mise.toml`, runs pinned kopium and rustfmt, and
+writes `generated/`. The CRD YAML is not stored in this repo. CI fails when `generated/` drifts
+from the pinned release, and a weekly workflow opens a PR that bumps `LOCO_REF` to the latest
+release. The two phase enums are maintained in `generated/mod.rs` so new server phases remain
+readable. Do not edit generated `applications.rs` or `builds.rs` manually.
 
 ## Observable in Kubernetes
 

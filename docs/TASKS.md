@@ -16,7 +16,7 @@ Spec column points at `design/`.
 | F1 | ui-kit: status glyph, section label, rule, buttons, ⋯ action menu with descriptions, table on uniform_list, dock, collapsible panel animation, code/diff view | HANDOFF visual rules | claude | f1-ui-kit, f1-ui-kit-2 | done (#3, #12) |
 | F2 | flock-kube: kubeconfig discovery + watch, login-shell env capture, cluster connect + checks, per-cluster watchers → core snapshots | AddCluster, AddClusterCheck | claude | f2-flock-kube, f2-flock-kube-live | done (#7, #9) |
 | F3 | flock-flux: CRD types (kopium, Flux 2.9.6), status summarizer, inventory, Helm storage decode, cross-cluster matrix | Kustomization, Flux | Codex | f3-flock-flux | done |
-| F4 | flock-loco: CRD types from crds/loco, app/build/route/platform models | Loco* | Codex | f4-flock-loco | done |
+| F4 | flock-loco: CRD types generated from the pinned Loco release, app/build/route/platform models | Loco* | Codex | f4-flock-loco | done |
 | F5 | e2e: kind clusters + Flux + scenario workloads (crashloop, missing secret key, failing HelmRelease, suspended, drift) | Flock, Workload | codex | f5-e2e-scenarios | done (#1) |
 | F6 | folded into screen units: each S-unit owns its flock-core model, flock-demo data and flock-ui screen | | | | dropped |
 
