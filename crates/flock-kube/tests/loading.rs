@@ -4,20 +4,21 @@ use flock_core::{
     Backend, ClusterId, Command, ContextRef, NewCluster, Page, Snapshot, Update, WatchState,
 };
 use flock_kube::LiveBackend;
-use flock_kube::discovery::DiscoverySources;
+use flock_kube::discovery::{DiscoverySources, discover};
+
 use flock_kube::settings::KubeSettings;
 use flock_kube::store::ClusterStore;
+
+#[path = "common/kubeconfig.rs"]
+mod kubeconfig;
+
+use kubeconfig::kind_only_home;
 
 const E2E_VAR: &str = "FLOCK_E2E";
 const CLUSTERS: [&str; 2] = ["kind-fleet-a", "kind-fleet-b"];
 const WINDOW: u64 = 7;
 const WAIT: Duration = Duration::from_secs(120);
 const DATA_DIR: &str = "data";
-
-fn kubeconfig() -> Option<std::path::PathBuf> {
-    let joined = std::env::var_os("KUBECONFIG")?;
-    std::env::split_paths(&joined).next()
-}
 
 fn settled(snapshot: &Snapshot, id: &ClusterId, page: Page) -> bool {
     let synced = snapshot.page_state(id, page) == Some(&WatchState::Synced);
@@ -29,12 +30,23 @@ fn flux_pages_of_both_kind_clusters_settle_with_their_objects() {
     if std::env::var(E2E_VAR).as_deref() != Ok("1") {
         return;
     }
-    let Some(file) = kubeconfig() else {
-        panic!("{E2E_VAR}=1 needs KUBECONFIG with the kind contexts");
+    let sources = DiscoverySources {
+        kubeconfig_env: std::env::var_os("KUBECONFIG"),
+        home: None,
+        folders: Vec::new(),
     };
-    let Ok(home) = tempfile::tempdir() else {
-        panic!("tempdir");
-    };
+    let discovery = discover(&sources);
+    let contexts: Vec<_> = CLUSTERS
+        .iter()
+        .map(|name| {
+            let Some(context) = discovery.contexts.iter().find(|c| c.id.context == *name) else {
+                panic!("{E2E_VAR}=1 needs KUBECONFIG with {name}");
+            };
+            context.clone()
+        })
+        .collect();
+    let home = kind_only_home(&contexts);
+    let file = home.path().join(".kube").join("config");
     let mut store = ClusterStore::empty(&home.path().join(DATA_DIR));
     let added: Vec<NewCluster> = CLUSTERS
         .iter()
@@ -48,7 +60,7 @@ fn flux_pages_of_both_kind_clusters_settle_with_their_objects() {
         .collect();
     assert!(store.add(&added).is_ok());
     let sources = DiscoverySources {
-        kubeconfig_env: std::env::var_os("KUBECONFIG"),
+        kubeconfig_env: None,
         home: Some(home.path().to_path_buf()),
         folders: Vec::new(),
     };

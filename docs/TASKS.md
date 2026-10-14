@@ -82,3 +82,4 @@ Spec column points at `design/`.
 | TABS1 | pane tabs (one pane), v3 sidebar and status-bar switcher, tabs persisted per window | claude | tabs-and-shell-v3, tabs-shell-v3-nav, tabs-persist | done (#158, #160, persistence PR) |
 | HL1 | primary and secondary highlight colours: presets or hex, derived for dark and light with WCAG checks | claude | themes | done |
 | NAME1 | rename the product to Flock: crates, binary, bundle id, env vars, docs; move the old data and cache dirs on launch | claude | rename-to-flock | done |
+| C167 | share multi-file kubeconfig isolation across E2E harnesses (#167) | codex | fix-167 | done |

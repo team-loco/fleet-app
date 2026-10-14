@@ -23,6 +23,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 mod common;
 
+use common::kubeconfig::kind_only_home;
 use common::{WAIT, eventually};
 
 const E2E_VAR: &str = "FLOCK_E2E";
@@ -51,48 +52,16 @@ fn enabled() -> bool {
 }
 
 fn kind_context(name: &str) -> Option<KubeContext> {
-    discover(&DiscoverySources::from_env())
+    let sources = DiscoverySources {
+        kubeconfig_env: std::env::var_os("KUBECONFIG"),
+        home: None,
+        folders: Vec::new(),
+    };
+    let discovery = discover(&sources);
+    discovery
         .contexts
         .into_iter()
         .find(|context| context.id.context == name)
-}
-
-fn kind_only_home(contexts: &[KubeContext]) -> tempfile::TempDir {
-    let mut files: Vec<&std::path::Path> = contexts.iter().map(|c| c.id.file.as_path()).collect();
-    files.dedup();
-    let mut merged: Option<Kubeconfig> = None;
-    for file in files {
-        let Ok(config) = Kubeconfig::read_from(file) else {
-            panic!("kubeconfig readable");
-        };
-        merged = match merged {
-            Some(previous) => match previous.merge(config) {
-                Ok(both) => Some(both),
-                Err(error) => panic!("kubeconfigs merge: {error}"),
-            },
-            None => Some(config),
-        };
-    }
-    let Some(mut config) = merged else {
-        panic!("at least one kind context");
-    };
-    let wanted = |name: &str| contexts.iter().any(|c| c.id.context == name);
-    let clusters = |name: &str| contexts.iter().any(|c| c.cluster == name);
-    let users = |name: &String| contexts.iter().any(|c| c.user.as_ref() == Some(name));
-    config.contexts.retain(|named| wanted(&named.name));
-    config.clusters.retain(|named| clusters(&named.name));
-    config.auth_infos.retain(|named| users(&named.name));
-    config.current_context = Some(CONTEXT.to_owned());
-    let Ok(home) = tempfile::tempdir() else {
-        panic!("tempdir");
-    };
-    let kube_dir = home.path().join(".kube");
-    assert!(std::fs::create_dir_all(&kube_dir).is_ok());
-    let Ok(yaml) = serde_norway::to_string(&config) else {
-        panic!("serialize kubeconfig");
-    };
-    assert!(std::fs::write(kube_dir.join("config"), yaml).is_ok());
-    home
 }
 
 struct Harness {

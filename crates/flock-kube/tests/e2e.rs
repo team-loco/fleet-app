@@ -18,6 +18,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 mod common;
 
+use common::kubeconfig::kind_only_home;
 use common::{WAIT, eventually};
 
 const E2E_VAR: &str = "FLOCK_E2E";
@@ -35,7 +36,12 @@ fn enabled() -> bool {
 }
 
 fn kind_context() -> Option<KubeContext> {
-    let discovery = discover(&DiscoverySources::from_env());
+    let sources = DiscoverySources {
+        kubeconfig_env: std::env::var_os("KUBECONFIG"),
+        home: None,
+        folders: Vec::new(),
+    };
+    let discovery = discover(&sources);
     discovery
         .contexts
         .into_iter()
@@ -257,30 +263,6 @@ async fn watch_logs_exec_forward_patch() {
     assert_eq!(handle.watched_kinds(), Vec::new());
 }
 
-fn kind_only_home(context: &KubeContext) -> tempfile::TempDir {
-    let Ok(mut config) = kube::config::Kubeconfig::read_from(&context.id.file) else {
-        panic!("kubeconfig readable");
-    };
-    config.contexts.retain(|named| named.name == CONTEXT);
-    config
-        .clusters
-        .retain(|named| named.name == context.cluster);
-    config
-        .auth_infos
-        .retain(|named| Some(&named.name) == context.user.as_ref());
-    config.current_context = Some(CONTEXT.to_owned());
-    let Ok(home) = tempfile::tempdir() else {
-        panic!("tempdir");
-    };
-    let kube_dir = home.path().join(".kube");
-    assert!(std::fs::create_dir_all(&kube_dir).is_ok());
-    let Ok(yaml) = serde_norway::to_string(&config) else {
-        panic!("serialize kubeconfig");
-    };
-    assert!(std::fs::write(kube_dir.join("config"), yaml).is_ok());
-    home
-}
-
 #[test]
 fn live_backend_publishes_kind_cluster() {
     if !enabled() {
@@ -289,7 +271,7 @@ fn live_backend_publishes_kind_cluster() {
     let Some(context) = kind_context() else {
         return;
     };
-    let home = kind_only_home(&context);
+    let home = kind_only_home(std::slice::from_ref(&context));
     let sources = DiscoverySources {
         kubeconfig_env: None,
         home: Some(home.path().to_path_buf()),
@@ -387,7 +369,7 @@ fn live_backend_watches_only_the_chosen_namespace() {
     let Some(context) = kind_context() else {
         return;
     };
-    let home = kind_only_home(&context);
+    let home = kind_only_home(std::slice::from_ref(&context));
     let sources = DiscoverySources {
         kubeconfig_env: None,
         home: Some(home.path().to_path_buf()),
