@@ -47,6 +47,8 @@ const NEWER_IMAGE: &str = "busybox:1.36";
 const CTRL_C: u8 = 0x03;
 const FOREGROUND_SETTLE: Duration = Duration::from_secs(1);
 const SHELL_OUTPUT_TIMEOUT: Duration = Duration::from_secs(20);
+const SIZE_PROBE_ATTEMPTS: usize = 20;
+const SIZE_PROBE_WAIT: Duration = Duration::from_millis(500);
 const SHELL_SIZE: TermSize = TermSize { cols: 97, rows: 23 };
 
 fn enabled() -> bool {
@@ -243,6 +245,28 @@ async fn shell_output_until(events: &Receiver<ExecEvent>, marker: &str) -> Strin
     output
 }
 
+async fn await_tty_size(
+    input: &Sender<Vec<u8>>,
+    events: &Receiver<ExecEvent>,
+    size: &str,
+) -> Vec<ExecEvent> {
+    let mut seen = Vec::new();
+    for _ in 0..SIZE_PROBE_ATTEMPTS {
+        assert!(input.send(b"stty size\r".to_vec()).await.is_ok());
+        let mut output = String::new();
+        while let Ok(Ok(event)) = tokio::time::timeout(SIZE_PROBE_WAIT, events.recv()).await {
+            if let ExecEvent::Output(bytes) = &event {
+                output.push_str(&String::from_utf8_lossy(bytes));
+            }
+            seen.push(event);
+            if output.contains(size) {
+                return seen;
+            }
+        }
+    }
+    panic!("the shell never reported {size:?}: {seen:?}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn terminal_resizes_colours_edits_completes_and_cancels() {
     let Some(harness) = Harness::start().await else {
@@ -321,9 +345,12 @@ async fn exec_runs_a_shell_with_a_tty() {
         events,
     } = run_shell(&harness, target);
     assert!(resize.send(SHELL_SIZE).await.is_ok());
+    let size = format!("{} {}", SHELL_SIZE.rows, SHELL_SIZE.cols);
+    let mut seen = await_tty_size(&input, &events, &size).await;
     let script = format!("echo {ECHO_MARKER}-$((40 + 2)) $(stty size)\rexit\r");
     assert!(input.send(script.into_bytes()).await.is_ok());
-    let (seen, output) = exec_events(&events).await;
+    let (rest, output) = exec_events(&events).await;
+    seen.extend(rest);
     assert!(
         matches!(seen.first(), Some(ExecEvent::Started { .. })),
         "{seen:?}"
