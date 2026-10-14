@@ -15,24 +15,33 @@ teardown() {
   fi
 }
 work_dir="$(mktemp -d)"
-trap 'rm -rf "${work_dir}"; teardown' EXIT
+trap 'teardown; rm -rf "${work_dir}"' EXIT
+
+kubeconfigs=()
+for cluster in "${CLUSTERS[@]}"; do
+  kubeconfigs+=("${work_dir}/${cluster}.kubeconfig")
+done
+KUBECONFIG="$(IFS=:; printf '%s' "${kubeconfigs[*]}")"
+export KUBECONFIG
 
 if [[ "${skip_up}" != true ]]; then
   "${ROOT}/mise-tasks/e2e/up"
 fi
 
-kubeconfigs=()
 for cluster in "${CLUSTERS[@]}"; do
   file="${work_dir}/${cluster}.kubeconfig"
   mise exec -- kind get kubeconfig --name "${cluster}" >"${file}"
-  kubeconfigs+=("${file}")
 done
-KUBECONFIG="$(IFS=:; printf '%s' "${kubeconfigs[*]}")"
-export KUBECONFIG
 export FLOCK_E2E=1
 
 "${ROOT}/e2e/verify"
 
 cd "${ROOT}"
-mise exec -- cargo nextest run --workspace --no-tests=pass
-mise exec -- cargo nextest run --workspace --no-tests=pass --features flock/loco
+test_scope=(--workspace)
+loco_feature=flock/loco
+if [[ "$(uname -s)" != Darwin ]]; then
+  test_scope+=(--exclude flock --exclude flock-shots --exclude flock-ui)
+  loco_feature=flock-kube/loco,flock-demo/loco
+fi
+mise exec -- cargo nextest run "${test_scope[@]}" --no-tests=pass
+mise exec -- cargo nextest run "${test_scope[@]}" --no-tests=pass --features "${loco_feature}"

@@ -1884,11 +1884,6 @@ dependencies = [
  "flock-update",
  "gpui-pre",
  "gpui-pre-platform",
- "kube",
- "serde_json",
- "serde_norway",
- "tempfile",
- "tokio",
  "tracing",
  "tracing-subscriber",
 ]

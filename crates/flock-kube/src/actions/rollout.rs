@@ -72,17 +72,30 @@ pub fn rollback_template(
         .uid
         .as_deref()
         .ok_or(Error::MissingField("metadata.uid"))?;
+    let live_template = deployment
+        .spec
+        .as_ref()
+        .map(|spec| &spec.template)
+        .ok_or(Error::MissingField("spec.template"))?;
+    let live = without_hash(live_template);
     let owned: Vec<(u64, &ReplicaSet)> = sets
         .iter()
         .filter(|set| owned_by(set, uid))
         .filter_map(|set| Some((revision_of(set)?, set)))
         .collect();
-    let current = owned.iter().map(|(number, _)| *number).max();
+    let current = owned
+        .iter()
+        .filter(|(_, set)| {
+            let template = set.spec.as_ref().and_then(|spec| spec.template.as_ref());
+            template.is_some_and(|template| without_hash(template) == live)
+        })
+        .map(|(number, _)| *number)
+        .max();
     let wanted = if revision == 0 {
         owned
             .iter()
             .map(|(number, _)| *number)
-            .filter(|number| Some(*number) != current)
+            .filter(|number| current.is_none_or(|current| *number < current))
             .max()
             .ok_or(Error::RevisionNotFound(revision))?
     } else {
@@ -99,11 +112,7 @@ pub fn rollback_template(
         .and_then(|spec| spec.template.as_ref())
         .ok_or(Error::MissingField("spec.template"))?;
     let target = without_hash(template);
-    let live = deployment
-        .spec
-        .as_ref()
-        .map(|spec| without_hash(&spec.template));
-    if live.as_ref() == Some(&target) {
+    if live == target {
         return Ok(Rollback::AlreadyCurrent);
     }
     Ok(Rollback::Apply(Box::new(target)))
@@ -253,7 +262,9 @@ pub async fn rollback_controller(
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::time::Duration;
 
+    use http::{Method, StatusCode};
     use k8s_openapi::api::apps::v1::{DeploymentSpec, ReplicaSetSpec};
     use k8s_openapi::api::core::v1::{Container, PodSpec};
     use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, OwnerReference};
@@ -261,6 +272,10 @@ mod tests {
     use super::*;
 
     const UID: &str = "deploy-uid";
+    const DEPLOYMENT_PATH: &str = "/apis/apps/v1/namespaces/default/deployments/checkout";
+    const SETS_PATH: &str = "/apis/apps/v1/namespaces/default/replicasets";
+    const RESTARTED_AT: &str = "kubectl.kubernetes.io/restartedAt";
+    const RESTART_TIME: &str = "2026-10-14T12:00:00Z";
 
     fn template(image: &str, hash: Option<&str>) -> PodTemplateSpec {
         let mut labels = BTreeMap::from([("app".to_owned(), "checkout".to_owned())]);
@@ -373,6 +388,100 @@ mod tests {
             rollback_template(&deployment("api:2.14", true), &sets(), 36),
             Err(Error::Paused(name)) if name == "checkout"
         ));
+    }
+
+    #[test]
+    fn previous_revision_uses_the_live_template_when_history_lags() {
+        let chosen = rollback_template(&deployment("api:2.15", false), &sets(), 0);
+        assert_eq!(
+            chosen.ok(),
+            Some(Rollback::Apply(Box::new(template("api:2.14", None))))
+        );
+        let chosen = rollback_template(&deployment("api:2.13", false), &sets(), 0);
+        assert_eq!(
+            chosen.ok(),
+            Some(Rollback::Apply(Box::new(template("api:2.12", None))))
+        );
+    }
+
+    #[test]
+    fn pending_restart_can_restore_the_only_revision() {
+        let history = vec![set(1, "api:2.14", UID)];
+        let chosen = rollback_template(&deployment("api:2.15", false), &history, 0);
+        assert_eq!(
+            chosen.ok(),
+            Some(Rollback::Apply(Box::new(template("api:2.14", None))))
+        );
+        assert!(matches!(
+            rollback_template(&deployment("api:2.14", false), &history, 0),
+            Err(Error::RevisionNotFound(0))
+        ));
+        let mut missing_spec = deployment("api:2.14", false);
+        missing_spec.spec = None;
+        assert!(matches!(
+            rollback_template(&missing_spec, &history, 1),
+            Err(Error::MissingField("spec.template"))
+        ));
+    }
+
+    #[tokio::test]
+    async fn rollback_after_restart_uses_the_original_template_with_or_without_the_new_set() {
+        for materialized in [false, true] {
+            let original = deployment("api:2.14", false);
+            let mut restarted = original.clone();
+            let Some(metadata) = restarted
+                .spec
+                .as_mut()
+                .and_then(|spec| spec.template.metadata.as_mut())
+            else {
+                panic!("template metadata");
+            };
+            metadata.annotations = Some(BTreeMap::from([(
+                RESTARTED_AT.to_owned(),
+                RESTART_TIME.to_owned(),
+            )]));
+            let mut history = sets();
+            history.push(set(99, "api:2.15", "someone-else"));
+            if materialized {
+                let mut newest = set(38, "api:2.14", UID);
+                let Some(spec) = newest.spec.as_mut() else {
+                    panic!("replica set spec");
+                };
+                let Some(deployment_spec) = restarted.spec.as_ref() else {
+                    panic!("deployment spec");
+                };
+                spec.template = Some(deployment_spec.template.clone());
+                history.push(newest);
+            }
+            let deployment_body = json!(restarted).to_string();
+            let listed = json!({
+                "apiVersion": "apps/v1",
+                "kind": "ReplicaSetList",
+                "metadata": {},
+                "items": history,
+            })
+            .to_string();
+            let (client, traffic) = crate::fake::client(Duration::ZERO, move |method, path| {
+                if path.starts_with(SETS_PATH) && method == Method::GET {
+                    return Some((StatusCode::OK, listed.clone()));
+                }
+                if path.starts_with(DEPLOYMENT_PATH) {
+                    return Some((StatusCode::OK, deployment_body.clone()));
+                }
+                None
+            });
+            let (_manager, handle) = crate::fake::handle(&client);
+            let result = rollback(&handle, "default", "checkout", &Uid::new(UID), 0).await;
+            assert!(result.is_ok(), "{result:?}");
+            let patches = traffic.bodies(&Method::PATCH, DEPLOYMENT_PATH);
+            let expected = json!(original.spec.map(|spec| spec.template));
+            assert_eq!(patches.len(), 1);
+            let Some(patch) = patches.first() else {
+                panic!("rollback patch");
+            };
+            assert_eq!(patch.pointer("/0/value"), Some(&json!(UID)));
+            assert_eq!(patch.pointer("/1/value"), Some(&expected));
+        }
     }
 
     fn controller_revision(revision: i64, image: &str, owner: &str) -> ControllerRevision {

@@ -96,3 +96,4 @@ Spec column points at `design/`.
 | CHART | Persist seven days of utilization history and render every chart window (#193) | claude | utilization-history | done |
 | SETTINGS | Open Cluster settings on the cluster each link came from (#219) | claude | settings-cluster-context | done |
 | FILTER | Clear filter placeholder, namespace/label completion and removable tokens (#189) | claude | filter-bar-ux | done |
+| C185 | Linux e2e coverage and restart rollback revision selection (#185, #186) | codex | fix-ci-e2e-rollback | done |

@@ -1,13 +1,12 @@
 use std::time::Duration;
 
-use anyhow::{Context, bail};
 use flock_core::{Backend, NewCluster, Snapshot, Update};
 use flock_kube::LiveBackend;
 use flock_kube::discovery::{DiscoverySources, discover};
 use flock_kube::settings::KubeSettings;
 use flock_kube::store::ClusterStore;
 
-#[path = "../../../crates/flock-kube/tests/common/kubeconfig.rs"]
+#[path = "common/kubeconfig.rs"]
 mod kubeconfig;
 
 const E2E_VAR: &str = "FLOCK_E2E";
@@ -38,7 +37,7 @@ fn missing_problems(snapshot: &Snapshot) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn live_backend_connects_both_kind_clusters_and_shows_the_scenarios() -> anyhow::Result<()> {
+async fn live_backend_connects_both_kind_clusters_and_shows_the_scenarios() -> Result<(), String> {
     if std::env::var(E2E_VAR).as_deref() != Ok("1") {
         return Ok(());
     }
@@ -56,9 +55,9 @@ async fn live_backend_connects_both_kind_clusters_and_shows_the_scenarios() -> a
                 .iter()
                 .find(|context| context.id.context == *name)
                 .cloned()
-                .with_context(|| format!("KUBECONFIG must define {name}"))
+                .ok_or_else(|| format!("KUBECONFIG must define {name}"))
         })
-        .collect::<anyhow::Result<Vec<_>>>()?;
+        .collect::<Result<Vec<_>, _>>()?;
     let home = kubeconfig::kind_only_home(&contexts);
     let file = home.path().join(".kube").join("config");
     let mut store = ClusterStore::empty(&home.path().join(DATA_DIR));
@@ -72,7 +71,7 @@ async fn live_backend_connects_both_kind_clusters_and_shows_the_scenarios() -> a
             name: (*name).to_owned(),
         })
         .collect::<Vec<_>>();
-    store.add(&added)?;
+    store.add(&added).map_err(|error| error.to_string())?;
     let sources = DiscoverySources {
         kubeconfig_env: None,
         home: Some(home.path().to_path_buf()),
@@ -87,11 +86,15 @@ async fn live_backend_connects_both_kind_clusters_and_shows_the_scenarios() -> a
     loop {
         let received = tokio::time::timeout_at(deadline, updates.recv()).await;
         let update = match received {
-            Ok(update) => update.context("backend stopped before the scenarios appeared")?,
-            Err(_) => bail!(
-                "missing {:?}, last snapshot {last:#?}",
-                missing_problems(&last)
-            ),
+            Ok(update) => update.map_err(|error| {
+                format!("backend stopped before the scenarios appeared: {error}")
+            })?,
+            Err(_) => {
+                return Err(format!(
+                    "missing {:?}, last snapshot {last:#?}",
+                    missing_problems(&last)
+                ));
+            }
         };
         if let Update::Snapshot(snapshot) = update {
             let connected = snapshot
