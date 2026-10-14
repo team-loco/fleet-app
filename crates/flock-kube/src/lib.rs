@@ -21,6 +21,7 @@ pub mod live;
 pub mod loco;
 pub mod manager;
 pub mod metrics;
+pub mod metrics_history;
 pub mod migrate;
 pub mod ops;
 pub mod paste;

@@ -2,9 +2,9 @@ use flock_core::Status;
 use flock_core::overview::{Capacity, percent};
 use flock_core::units::fixed;
 use gpui::{
-    AnyElement, App, Bounds, Hsla, InteractiveElement, IntoElement, ParentElement, PathBuilder,
-    Pixels, Point, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, canvas,
-    div, fill, point, prelude::FluentBuilder, relative,
+    AnyElement, App, Bounds, Div, Hsla, InteractiveElement, IntoElement, ParentElement,
+    PathBuilder, Pixels, Point, RenderOnce, SharedString, StatefulInteractiveElement, Styled,
+    Window, canvas, div, fill, point, prelude::FluentBuilder, relative,
 };
 
 use crate::theme::{
@@ -69,7 +69,7 @@ impl Meter {
     }
 }
 
-fn marker(at: f32, color: Hsla) -> gpui::Div {
+fn marker(at: f32, color: Hsla) -> Div {
     div()
         .absolute()
         .left(relative(fraction(at)))
@@ -297,6 +297,7 @@ pub struct Series {
     color: Hsla,
     area: Option<Hsla>,
     values: Vec<f32>,
+    positions: Vec<f32>,
 }
 
 impl Series {
@@ -306,7 +307,13 @@ impl Series {
             color,
             area: None,
             values,
+            positions: Vec::new(),
         }
+    }
+
+    pub fn positions(mut self, positions: Vec<f32>) -> Self {
+        self.positions = positions;
+        self
     }
 
     pub fn area(mut self, fill: Hsla) -> Self {
@@ -324,11 +331,21 @@ struct Threshold {
 
 pub fn plot_points(values: &[f32], max: f32, bounds: Bounds<Pixels>) -> Vec<Point<Pixels>> {
     let steps = values.len().saturating_sub(1).max(1);
+    let positions: Vec<f32> = (0..values.len()).map(|ix| share(ix, steps)).collect();
+    positioned_points(values, &positions, max, bounds)
+}
+
+pub fn positioned_points(
+    values: &[f32],
+    positions: &[f32],
+    max: f32,
+    bounds: Bounds<Pixels>,
+) -> Vec<Point<Pixels>> {
     values
         .iter()
-        .enumerate()
-        .map(|(ix, value)| {
-            let x = bounds.origin.x + bounds.size.width * share(ix, steps);
+        .zip(positions)
+        .map(|(value, at)| {
+            let x = bounds.origin.x + bounds.size.width * fraction(*at);
             let level = if max > 0. { fraction(value / max) } else { 0. };
             let y = bounds.origin.y + bounds.size.height * (1. - level);
             point(x, y)
@@ -345,6 +362,7 @@ pub struct LineChart {
     threshold: Option<Threshold>,
     height: Pixels,
     title: Option<AnyElement>,
+    message: Option<AnyElement>,
 }
 
 impl LineChart {
@@ -357,6 +375,7 @@ impl LineChart {
             threshold: None,
             height: CHART_HEIGHT,
             title: None,
+            message: None,
         }
     }
 
@@ -389,6 +408,11 @@ impl LineChart {
         self
     }
 
+    pub fn message(mut self, message: impl IntoElement) -> Self {
+        self.message = Some(message.into_any_element());
+        self
+    }
+
     pub fn title(mut self, title: impl IntoElement) -> Self {
         self.title = Some(title.into_any_element());
         self
@@ -414,7 +438,18 @@ fn paint_chart(
         window.paint_quad(fill(line, grid));
     }
     for line in series {
-        let points = plot_points(&line.values, max, bounds);
+        let points = if line.positions.is_empty() {
+            plot_points(&line.values, max, bounds)
+        } else {
+            positioned_points(&line.values, &line.positions, max, bounds)
+        };
+        if let [only] = points.as_slice() {
+            let half_stroke = CHART_STROKE / 2.;
+            let origin = *only - point(half_stroke, half_stroke);
+            let size = gpui::size(CHART_STROKE, CHART_STROKE);
+            let dot = Bounds::new(origin, size);
+            window.paint_quad(fill(dot, line.color));
+        }
         if let (Some(area), Some(first), Some(last)) = (line.area, points.first(), points.last()) {
             let bottom = bounds.origin.y + bounds.size.height;
             let mut shape = PathBuilder::fill();
@@ -464,6 +499,23 @@ fn legend_item(label: SharedString, swatch: impl IntoElement) -> impl IntoElemen
         .child(label)
 }
 
+fn plot_area(plot: impl IntoElement, height: Pixels, message: Option<AnyElement>) -> Div {
+    let overlay = message.map(|message| {
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .child(message)
+    });
+    div()
+        .relative()
+        .flex_1()
+        .h(height)
+        .child(plot)
+        .children(overlay)
+}
+
 impl RenderOnce for LineChart {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = *cx.palette();
@@ -506,8 +558,7 @@ impl RenderOnce for LineChart {
                 );
             },
         )
-        .flex_1()
-        .h(self.height);
+        .size_full();
         let axis_text = |labels: Vec<SharedString>| labels.into_iter().map(|l| div().child(l));
         div()
             .flex()
@@ -542,7 +593,7 @@ impl RenderOnce for LineChart {
                             .text_color(palette.mute)
                             .children(axis_text(self.y_labels)),
                     )
-                    .child(plot),
+                    .child(plot_area(plot, self.height, self.message)),
             )
             .child(
                 div()
@@ -582,6 +633,16 @@ mod tests {
                 point(px(110.), px(0.)),
             ]
         );
+    }
+
+    #[test]
+    fn timestamp_positions_preserve_partial_history_and_gaps() {
+        let bounds = Bounds::new(point(px(0.), px(0.)), gpui::size(px(100.), px(50.)));
+        assert_eq!(
+            positioned_points(&[50., 100.], &[0.9, 1.], 100., bounds),
+            [point(px(90.), px(25.)), point(px(100.), px(0.))]
+        );
+        assert_eq!(positioned_points(&[], &[], 100., bounds), []);
     }
 
     #[test]

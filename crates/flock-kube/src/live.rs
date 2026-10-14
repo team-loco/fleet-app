@@ -31,6 +31,7 @@ use crate::gitops::GitOpsState;
 use crate::inspect;
 use crate::manager::{ClusterEvent, ClusterHandle, ClusterManager, ConnectionStatus, Subscription};
 use crate::metrics::{NodeUsage, PodUsage};
+use crate::metrics_history;
 use crate::paste;
 use crate::probe::find_prometheus;
 use crate::problems::order;
@@ -43,6 +44,7 @@ use crate::task::TaskGuard;
 use crate::throttle::Throttle;
 use crate::usage::prometheus_utilization;
 use crate::watch::KubeconfigWatcher;
+use flock_core::settings::MetricsSource;
 
 const THREAD_NAME: &str = "flock-kube";
 pub const SNAPSHOT_INTERVAL: Duration = DEFAULT_SNAPSHOTS.duration();
@@ -110,7 +112,7 @@ struct Connected {
 }
 
 impl Connected {
-    fn watching(id: ClusterId, handle: ClusterHandle, settings: &KubeSettings) -> Self {
+    fn watching(id: ClusterId, handle: ClusterHandle) -> Self {
         let background = BACKGROUND_KINDS
             .iter()
             .map(|kind| handle.subscribe(kind.clone()))
@@ -119,7 +121,7 @@ impl Connected {
             id,
             handle,
             _background: background,
-            extras: Extras::new(settings.usage_samples()),
+            extras: Extras::default(),
             usage_task: None,
             pod_usage_task: None,
             prometheus_task: None,
@@ -268,7 +270,9 @@ impl Live {
             .cloned()
             .collect();
         for id in gone {
-            self.clusters.remove(&id);
+            if let Some(cluster) = self.clusters.remove(&id) {
+                self.save_history(&cluster);
+            }
             self.manager.disconnect(&id);
         }
         for (context_ref, id) in ids {
@@ -285,12 +289,38 @@ impl Live {
             }
             self.manager.disconnect(&context.id);
             let handle = self.manager.connect(context.clone());
-            let cluster = Connected::watching(id, handle, &self.settings);
+            if let Some(cluster) = self.clusters.remove(&context.id) {
+                self.save_history(&cluster);
+            }
+            let mut cluster = Connected::watching(id, handle);
+            if let Some(path) = self.history_path(&cluster.id) {
+                cluster.extras.ring = metrics_history::load(&path, Timestamp::now());
+            }
             self.clusters.insert(context.id.clone(), cluster);
         }
         self.gitops
             .sync(self.clusters.values().map(|c| (&c.id, &c.handle)));
         self.for_each_window(Self::page_changed);
+    }
+
+    fn history_path(&self, id: &ClusterId) -> Option<PathBuf> {
+        let home = self.home.as_ref()?;
+        Some(metrics_history::path(&metrics_history::cache_dir(home), id))
+    }
+
+    fn save_history(&self, cluster: &Connected) {
+        let Some(path) = self.history_path(&cluster.id) else {
+            return;
+        };
+        if let Err(error) = metrics_history::save(&path, &cluster.extras.ring) {
+            tracing::warn!(%error, path = %path.display(), "saving metrics history failed");
+        }
+    }
+
+    fn save_histories(&self) {
+        for cluster in self.clusters.values() {
+            self.save_history(cluster);
+        }
     }
 
     fn selected_key(&self) -> Option<ContextRef> {
@@ -368,11 +398,24 @@ impl Live {
         let Some(cluster) = self.clusters.get_mut(&key) else {
             return;
         };
+        let source = self
+            .store
+            .get(&cluster.id)
+            .map(|saved| Preferences::from(&saved.preferences).metrics)
+            .unwrap_or_default();
+        if source == MetricsSource::MetricsServer {
+            cluster.extras.prometheus = None;
+            return;
+        }
         let Ok(client) = cluster.handle.client() else {
             return;
         };
         let handle = cluster.handle.clone();
-        let known = cluster.extras.prometheus.as_ref().map(|p| p.target.clone());
+        let known = cluster
+            .extras
+            .prometheus
+            .as_ref()
+            .and_then(|p| p.target.clone());
         cluster.prometheus_task = Some(TaskGuard::spawn(async move {
             let target = match known {
                 Some(target) => Some(target),
@@ -382,12 +425,27 @@ impl Live {
                 Some(target) => {
                     let ranges = prometheus_utilization(&handle, &target, Timestamp::now());
                     let utilization = tokio::time::timeout(timeout, ranges).await;
-                    let utilization = utilization.ok().and_then(Result::ok).unwrap_or_default();
+                    let (utilization, error) = match utilization {
+                        Ok(Ok(ranges)) => (ranges, None),
+                        Ok(Err(error)) => (Vec::new(), Some(error.to_string())),
+                        Err(_) => (
+                            Vec::new(),
+                            Some(format!("request timed out after {timeout:?}")),
+                        ),
+                    };
                     Some(Prometheus {
-                        target,
+                        target: Some(target),
                         utilization,
+                        error,
                     })
                 }
+                None if source == MetricsSource::Prometheus => Some(Prometheus {
+                    target: None,
+                    utilization: Vec::new(),
+                    error: Some(
+                        "No Prometheus service found; check the cluster metrics source".into(),
+                    ),
+                }),
                 None => None,
             };
             let _ = fetched.send(Fetched::Prometheus(key, found)).await;
@@ -810,8 +868,30 @@ impl Live {
     }
 
     fn set_preferences(&mut self, id: &ClusterId, preferences: &Preferences) -> bool {
+        let metrics_changed = self.store.get(id).is_some_and(|saved| {
+            Preferences::from(&saved.preferences).metrics != preferences.metrics
+        });
         match self.store.set_preferences(id, preferences) {
-            Ok(changed) => changed,
+            Ok(changed) => {
+                if changed && metrics_changed {
+                    for cluster in self
+                        .clusters
+                        .values_mut()
+                        .filter(|cluster| &cluster.id == id)
+                    {
+                        cluster.prometheus_task = None;
+                        cluster.extras.prometheus = None;
+                    }
+                    self.for_each_window(|live| {
+                        if live.navigation.selected.as_ref() == Some(id)
+                            && live.navigation.page == Page::ClusterOverview
+                        {
+                            live.poll_prometheus();
+                        }
+                    });
+                }
+                changed
+            }
             Err(error) => {
                 tracing::error!(%error, path = %self.store.path().display(), "saving preferences failed");
                 false
@@ -1013,7 +1093,8 @@ impl Live {
                 .extras
                 .prometheus
                 .as_ref()
-                .map(|found| format!("{}:{}", found.target.label(), found.target.port));
+                .and_then(|found| found.target.as_ref())
+                .map(|target| format!("{}:{}", target.label(), target.port));
             settings
         });
         let disconnected_settings = self
@@ -1183,6 +1264,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
     let mut dirty = true;
     let mut publish = Throttle::new(live.settings.snapshot_interval);
     let mut poll = ticker(EXTENSION_POLL_INTERVAL);
+    let mut history_tick = ticker(metrics_history::SAVE_INTERVAL);
     loop {
         tokio::select! {
             event = discovery_events.recv(), if !discovery_events.is_closed() => {
@@ -1207,13 +1289,14 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
                 }
             }
             _ = usage_tick.tick() => live.poll_usage(),
+            _ = history_tick.tick() => live.save_histories(),
             _ = prometheus_tick.tick() => {
                 live.for_each_window(|live| {
                     if live.navigation.page == Page::ClusterOverview { live.poll_prometheus(); }
                 });
             }
             command = commands.recv() => {
-                let Ok(command) = command else { return };
+                let Ok(command) = command else { live.save_histories(); return };
                 live.apply(&command);
                 retick(&mut usage_tick, live.settings.metrics_interval);
                 retick(&mut prometheus_tick, live.settings.prometheus_interval);
@@ -1228,6 +1311,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
                 publish.fired();
                 dirty = false;
                 if updates.send(Update::Snapshot(Box::new(live.snapshot()))).await.is_err() {
+                    live.save_histories();
                     return;
                 }
             }
@@ -1416,6 +1500,87 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn metrics_preferences_invalidate_history_source_without_namespace_flicker()
+    -> crate::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let mut live = test_live(directory.path());
+        let (client, _) = crate::fake::client(Duration::ZERO, |_, _| None);
+        let (_manager, handle) = crate::fake::handle(&client);
+        let key = handle.context().id.clone();
+        let id = ClusterId::new("metrics-cluster");
+        let added = NewCluster {
+            context: key.clone(),
+            name: id.to_string(),
+        };
+        assert!(live.store.add(&[added]).is_ok());
+        let mut cluster = Connected::watching(id.clone(), handle);
+        cluster.extras.prometheus = Some(Prometheus {
+            target: None,
+            utilization: Vec::new(),
+            error: Some("forbidden".into()),
+        });
+        live.clusters.insert(key.clone(), cluster);
+        let mut preferences = Preferences {
+            default_namespace: Some("apps".into()),
+            ..Preferences::default()
+        };
+        assert!(live.set_preferences(&id, &preferences));
+        assert!(
+            live.clusters
+                .get(&key)
+                .is_some_and(|cluster| cluster.extras.prometheus.is_some())
+        );
+        preferences.metrics = MetricsSource::MetricsServer;
+        assert!(live.set_preferences(&id, &preferences));
+        assert!(
+            live.clusters
+                .get(&key)
+                .is_some_and(|cluster| cluster.extras.prometheus.is_none())
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn histories_save_on_the_timer_path_and_before_disconnect() -> crate::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let mut live = test_live(&directory.path().join("support"));
+        live.home = Some(directory.path().to_path_buf());
+        let (client, _) = crate::fake::client(Duration::ZERO, |_, _| None);
+        let (_manager, handle) = crate::fake::handle(&client);
+        let key = handle.context().id.clone();
+        let id = ClusterId::new("metrics-cluster");
+        let mut cluster = Connected::watching(id.clone(), handle);
+        let now = Timestamp::now();
+        cluster.extras.ring.push(
+            now,
+            crate::usage::Sample {
+                cpu: 12.,
+                memory: 34.,
+            },
+        );
+        live.clusters.insert(key, cluster);
+        live.save_histories();
+        let cache = metrics_history::cache_dir(directory.path());
+        let path = metrics_history::path(&cache, &id);
+        assert_eq!(
+            metrics_history::load(&path, now)
+                .latest()
+                .map(|sample| sample.cpu),
+            Some(12.)
+        );
+        assert!(std::fs::remove_file(&path).is_ok());
+        live.reconcile();
+        assert!(live.clusters.is_empty());
+        assert_eq!(
+            metrics_history::load(&path, now)
+                .latest()
+                .map(|sample| sample.cpu),
+            Some(12.)
+        );
+        Ok(())
+    }
+
     const FIRST_WINDOW: u64 = 1;
     const SECOND_WINDOW: u64 = 2;
 
@@ -1503,7 +1668,7 @@ mod tests {
         for name in ["a", "b"] {
             let context = context("/missing-shell-test-kubeconfig", name);
             let handle = live.manager.connect(context.clone());
-            let extras = Extras::new(live.settings.usage_samples());
+            let extras = Extras::default();
             live.clusters.insert(
                 context.id,
                 Connected {
@@ -1592,7 +1757,7 @@ mod tests {
         let (_manager, handle, _events) = failing_cluster();
         let id = ClusterId::new("a");
         let key = handle.id().clone();
-        let cluster = Connected::watching(id.clone(), handle, &live.settings);
+        let cluster = Connected::watching(id.clone(), handle);
         live.clusters.insert(key, cluster);
         let deadline = tokio::time::Instant::now() + LIST_PATIENCE;
         let nav = loop {
@@ -1659,7 +1824,7 @@ mod tests {
         let handle = live.manager.connect(context.clone());
         let id = ClusterId::new("a");
         live.gitops.sync([(&id, &handle)]);
-        let extras = Extras::new(live.settings.usage_samples());
+        let extras = Extras::default();
         live.clusters.insert(
             context.id,
             Connected {
@@ -1709,7 +1874,7 @@ mod tests {
             let context = context("/missing-c77-test-kubeconfig", name);
             let handle = live.manager.connect(context.clone());
             let id = ClusterId::new(name);
-            let extras = Extras::new(live.settings.usage_samples());
+            let extras = Extras::default();
             live.clusters.insert(
                 context.id,
                 Connected {

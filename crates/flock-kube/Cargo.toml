@@ -18,7 +18,7 @@ flock-flux.workspace = true
 flock-loco = { workspace = true, optional = true }
 futures.workspace = true
 http.workspace = true
-jiff.workspace = true
+jiff = { workspace = true, features = ["serde"] }
 json-patch.workspace = true
 k8s-openapi.workspace = true
 kube.workspace = true

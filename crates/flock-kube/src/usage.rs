@@ -11,6 +11,7 @@ use crate::error::Result;
 use crate::manager::ClusterHandle;
 use crate::metrics::{NodeUsage, RangeQuery, Series, Usage, cpu_millicores, parse_quantity};
 use crate::probe::PrometheusTarget;
+use serde::{Deserialize, Serialize};
 
 const PERCENT: f64 = 100.;
 const MILLI_PER_CORE: f64 = 1e3;
@@ -19,6 +20,10 @@ const CPU: &str = "cpu";
 const MEMORY: &str = "memory";
 const CHART_POINTS: u32 = 13;
 const HOUR_SECS: u64 = 3600;
+pub const HISTORY: SignedDuration = SignedDuration::from_hours(24 * 7);
+const FULL_RESOLUTION: SignedDuration = SignedDuration::from_hours(1);
+const OLDER_BUCKET: SignedDuration = SignedDuration::from_mins(2);
+pub const MAX_SAMPLES: usize = 10_000;
 const CPU_QUERY: &str = "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))";
 const MEMORY_QUERY: &str =
     "100 * (1 - sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes))";
@@ -61,7 +66,7 @@ pub fn narrow(value: f64) -> f32 {
     value as f32
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sample {
     pub cpu: f32,
     pub memory: f32,
@@ -102,42 +107,104 @@ pub fn sample(nodes: &[Arc<Node>], usage: &[NodeUsage]) -> Option<Sample> {
     })
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TimedSample {
+    pub at: Timestamp,
+    pub sample: Sample,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct UsageRing {
-    samples: VecDeque<Sample>,
-    capacity: usize,
+    samples: VecDeque<TimedSample>,
 }
 
 impl UsageRing {
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            samples: VecDeque::with_capacity(capacity),
-            capacity,
+    pub fn push(&mut self, at: Timestamp, sample: Sample) {
+        if !sample.cpu.is_finite() || !sample.memory.is_finite() {
+            return;
+        }
+        if self.samples.back().is_some_and(|last| last.at >= at) {
+            return;
+        }
+        self.samples.push_back(TimedSample { at, sample });
+        self.prune(at);
+    }
+
+    pub fn prune(&mut self, now: Timestamp) {
+        let oldest = now.saturating_sub(HISTORY).unwrap_or(Timestamp::MIN);
+        let recent = now
+            .saturating_sub(FULL_RESOLUTION)
+            .unwrap_or(Timestamp::MIN);
+        let mut bucket = None;
+        self.samples.retain(|sample| {
+            if sample.at < oldest || sample.at > now {
+                return false;
+            }
+            if sample.at >= recent {
+                return true;
+            }
+            let next = sample.at.as_second().div_euclid(OLDER_BUCKET.as_secs());
+            if bucket == Some(next) {
+                return false;
+            }
+            bucket = Some(next);
+            true
+        });
+        while self.samples.len() > MAX_SAMPLES {
+            self.samples.pop_front();
         }
     }
 
-    pub fn push(&mut self, sample: Sample) {
-        if self.samples.len() == self.capacity {
-            self.samples.pop_front();
-        }
-        self.samples.push_back(sample);
+    pub fn valid(&self) -> bool {
+        let finite = self
+            .samples
+            .iter()
+            .all(|s| s.sample.cpu.is_finite() && s.sample.memory.is_finite());
+        let ordered = self
+            .samples
+            .iter()
+            .zip(self.samples.iter().skip(1))
+            .all(|(a, b)| a.at < b.at);
+        self.samples.len() <= MAX_SAMPLES && finite && ordered
+    }
+
+    pub fn since(&self) -> Option<Timestamp> {
+        self.samples.front().map(|s| s.at)
     }
 
     pub fn latest(&self) -> Option<Sample> {
-        self.samples.back().copied()
+        self.samples.back().map(|s| s.sample)
     }
 
-    pub fn utilization(&self, cpu_requests: f32) -> Option<Utilization> {
-        if self.samples.is_empty() {
-            return None;
-        }
-        Some(Utilization {
-            range: TimeRange::Hour,
-            cpu: self.samples.iter().map(|s| s.cpu).collect(),
-            memory: self.samples.iter().map(|s| s.memory).collect(),
+    #[allow(clippy::cast_precision_loss)]
+    pub fn utilization(&self, range: TimeRange, now: Timestamp, cpu_requests: f32) -> Utilization {
+        let query = range_query("", range, now);
+        let points: Vec<_> = self
+            .samples
+            .iter()
+            .filter(|s| s.at >= query.start && s.at <= now)
+            .collect();
+        let positions: Vec<_> = points
+            .iter()
+            .map(|s| position(s.at.as_second() as f64, &query))
+            .collect();
+        Utilization {
+            range,
+            cpu: points.iter().map(|s| s.sample.cpu).collect(),
+            memory: points.iter().map(|s| s.sample.memory).collect(),
+            cpu_positions: positions.clone(),
+            memory_positions: positions,
             cpu_requests,
-        })
+        }
     }
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn position(at: f64, query: &RangeQuery) -> f32 {
+    let start = query.start.as_second() as f64;
+    let span = (query.end.as_second() - query.start.as_second()) as f64;
+    narrow((at - start) / span)
 }
 
 pub fn window(range: TimeRange) -> Duration {
@@ -169,6 +236,18 @@ pub fn values(series: &[Series]) -> Vec<f32> {
         .unwrap_or_default()
 }
 
+fn positions(series: &[Series], query: &RangeQuery) -> Vec<f32> {
+    series
+        .first()
+        .map(|s| {
+            s.points
+                .iter()
+                .map(|(at, _)| position(*at, query))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 async fn utilization(
     handle: &ClusterHandle,
     target: &PrometheusTarget,
@@ -186,6 +265,8 @@ async fn utilization(
         cpu: values(&cpu),
         memory: values(&memory),
         cpu_requests: 0.,
+        cpu_positions: positions(&cpu, &cpu_query),
+        memory_positions: positions(&memory, &memory_query),
     })
 }
 
@@ -228,6 +309,29 @@ mod tests {
         assert!(traffic.peak() >= TimeRange::ALL.len() * 2);
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn prometheus_errors_preserve_the_reason() {
+        let (client, _) = crate::fake::client(ROUND_TRIP, |_, path| {
+            path.contains("/proxy/").then(|| {
+                (
+                    http::StatusCode::OK,
+                    r#"{"status":"error","error":"permission denied"}"#.to_owned(),
+                )
+            })
+        });
+        let (_manager, handle) = crate::fake::handle(&client);
+        let target = PrometheusTarget {
+            namespace: "monitoring".to_owned(),
+            service: "prometheus".to_owned(),
+            port: 9090,
+            scheme: "http".to_owned(),
+        };
+        let result = prometheus_utilization(&handle, &target, Timestamp::UNIX_EPOCH).await;
+        assert!(
+            matches!(result, Err(crate::Error::Prometheus(reason)) if reason == "permission denied")
+        );
+    }
+
     fn node(name: &str, cpu: &str, memory: &str) -> Arc<Node> {
         parse(json!({
             "metadata": { "name": name },
@@ -260,23 +364,91 @@ mod tests {
         assert_eq!(sample(&nodes, &[]), None);
     }
 
-    #[test]
-    fn ring_keeps_the_newest_samples_in_order() {
-        let mut ring = UsageRing::new(3);
-        for cpu in [1., 2., 3., 4.] {
-            ring.push(Sample {
-                cpu,
-                memory: cpu * 10.,
-            });
+    fn timestamp(seconds: i64) -> Timestamp {
+        Timestamp::from_second(seconds).unwrap_or_default()
+    }
+
+    fn steady(ring: &mut UsageRing, seconds: impl Iterator<Item = i64>) {
+        for at in seconds {
+            ring.push(
+                timestamp(at),
+                Sample {
+                    cpu: 10.,
+                    memory: 20.,
+                },
+            );
         }
-        let Some(hour) = ring.utilization(74.) else {
-            panic!("utilization");
+    }
+
+    #[test]
+    fn ring_keeps_ordered_finite_samples_and_places_them_in_each_window() {
+        let mut ring = UsageRing::default();
+        steady(&mut ring, 1..=4);
+        let stale = Sample {
+            cpu: 9.,
+            memory: 9.,
         };
-        assert_eq!(hour.cpu, [2., 3., 4.]);
-        assert_eq!(hour.memory, [20., 30., 40.]);
-        assert_eq!(hour.range, TimeRange::Hour);
-        assert_eq!(ring.latest().map(|s| s.cpu), Some(4.));
-        assert_eq!(UsageRing::new(3).utilization(0.), None);
+        ring.push(timestamp(3), stale);
+        let broken = Sample {
+            cpu: f32::NAN,
+            memory: 9.,
+        };
+        ring.push(timestamp(5), broken);
+        assert_eq!(ring.samples.len(), 4);
+        assert_eq!(ring.latest().map(|s| s.cpu), Some(10.));
+        assert_eq!(ring.since(), Some(timestamp(1)));
+        for range in TimeRange::ALL {
+            let found = ring.utilization(range, timestamp(4), 74.);
+            assert_eq!(found.cpu.len(), 4);
+            assert!(found.cpu_positions.first().is_some_and(|at| *at > 0.99));
+            assert_eq!(found.cpu_positions.last(), Some(&1.));
+            assert_eq!(found.cpu_requests, 74.);
+        }
+        let later = ring.utilization(TimeRange::Hour, timestamp(7200), 0.);
+        assert_eq!(later.cpu, Vec::<f32>::new());
+        assert_eq!(
+            ring.utilization(TimeRange::SixHours, timestamp(7200), 0.)
+                .cpu
+                .len(),
+            4
+        );
+    }
+
+    #[test]
+    fn samples_older_than_an_hour_keep_one_point_per_two_minutes() {
+        let mut ring = UsageRing::default();
+        steady(&mut ring, (0..=7200).step_by(5));
+        let old: Vec<_> = ring
+            .samples
+            .iter()
+            .filter(|s| s.at < timestamp(3600))
+            .collect();
+        assert_eq!(old.len(), 30);
+        assert!(
+            old.iter()
+                .zip(old.iter().skip(1))
+                .all(|(a, b)| b.at.duration_since(a.at) >= OLDER_BUCKET)
+        );
+        let hour = ring.utilization(TimeRange::Hour, timestamp(7200), 0.);
+        assert_eq!(hour.cpu.len(), 721);
+    }
+
+    #[test]
+    fn seven_days_stay_under_the_sample_bound_and_older_points_drop() {
+        let mut ring = UsageRing::default();
+        steady(
+            &mut ring,
+            (0..=601_200)
+                .step_by(120)
+                .chain((601_201..=604_800).step_by(1)),
+        );
+        assert!(ring.samples.len() <= MAX_SAMPLES);
+        assert_eq!(ring.since(), Some(timestamp(0)));
+        assert!(ring.valid());
+        let week = ring.utilization(TimeRange::Week, timestamp(604_800), 0.);
+        assert!(week.cpu_positions.first().is_some_and(|at| *at == 0.));
+        ring.prune(timestamp(608_400));
+        assert!(ring.since().is_some_and(|since| since >= timestamp(3600)));
     }
 
     #[test]
