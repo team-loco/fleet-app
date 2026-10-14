@@ -1,5 +1,5 @@
 use flock_core::emptiness::Noun;
-use flock_core::filter::StatusFilter;
+use flock_core::filter::{StatusFilter, label_values};
 use flock_core::nodes::{Node, NodeSummary, Usage};
 use flock_core::overview::{Capacity, Commitment, percent};
 use flock_core::time::age;
@@ -140,6 +140,9 @@ impl NodesScreen {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
+        let node_labels: Vec<_> = self.nodes.iter().map(Node::label_map).collect();
+        let labels = label_values(&node_labels);
+        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
         let (query, chip) = {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())

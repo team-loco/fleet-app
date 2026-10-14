@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::filter::TextFilter;
@@ -64,7 +65,16 @@ impl Node {
             self.internal_ip.as_str(),
         ];
         fields.extend(self.labels.iter().map(String::as_str));
-        query.matches(None, &fields)
+        let labels = self.label_map();
+        query.matches_labeled(None, &labels, &fields)
+    }
+
+    pub fn label_map(&self) -> BTreeMap<String, String> {
+        self.labels
+            .iter()
+            .filter_map(|label| label.split_once('='))
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect()
     }
 
     pub fn is_ready(&self) -> bool {
@@ -188,6 +198,21 @@ pub(crate) mod tests {
             taints: Vec::new(),
             labels: Vec::new(),
         }
+    }
+
+    #[test]
+    fn node_label_tokens_use_metadata_keys_and_values() {
+        let mut node = node("worker", "standard", true, true);
+        node.labels = vec![
+            "topology.kubernetes.io/zone=us-west".into(),
+            "unstructured".into(),
+        ];
+        assert!(node.matches(&TextFilter::parse(
+            "label:topology.kubernetes.io/zone=us-west"
+        )));
+        assert!(node.matches(&TextFilter::parse("l:topology.kubernetes.io/zone")));
+        assert!(!node.matches(&TextFilter::parse("l:topology.kubernetes.io/zone=us-east")));
+        assert_eq!(node.label_map().len(), 1);
     }
 
     #[test]

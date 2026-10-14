@@ -2141,6 +2141,58 @@ fn a_right_clicked_row_menu_takes_the_keyboard() -> anyhow::Result<()> {
 }
 
 #[test]
+fn filter_namespace_completion_chips_and_backspace_work_in_both_appearances() -> anyhow::Result<()>
+{
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    for (appearance, name) in [
+        (flock_ui::theme::Appearance::Dark, "dark"),
+        (flock_ui::theme::Appearance::Light, "light"),
+    ] {
+        let mut ui = Ui::with(Screen::Resources, flock::Preset::default(), appearance)?;
+        assert!(ui.bounds("resource-filter-shortcut").is_some());
+        ui.save_png(&dir.join(format!("filter-empty-{name}.png")))?;
+        ui.press("/")?;
+        ui.type_text("ns:")?;
+        assert!(ui.bounds("resource-filter-shortcut").is_none());
+        assert!(ui.bounds("resource-filter-suggestion-0").is_some());
+        ui.save_png(&dir.join(format!("filter-suggestions-{name}.png")))?;
+        ui.hover("resource-filter-suggestion-0")?;
+        for row in 0..ROWS_UNDER_POPOVER {
+            let more = selector(format!("{DEPLOYMENTS}-row-{row}-more"));
+            assert!(ui.bounds(more).is_none());
+        }
+        ui.press("down up tab")?;
+        assert!(ui.bounds("resource-filter-token-0").is_some());
+        assert!(ui.bounds("resource-filter-suggestion-0").is_none());
+        let namespace = ui.read(|shell, cx| {
+            shell
+                .filter_bar(cx)
+                .and_then(|bar| bar.read(cx).query().namespace.clone())
+        });
+        assert!(namespace.is_some());
+        ui.save_png(&dir.join(format!("filter-chips-{name}.png")))?;
+        ui.press("backspace")?;
+        assert!(ui.bounds("resource-filter-token-0").is_none());
+        assert!(ui.read(|shell, cx| {
+            shell
+                .filter_bar(cx)
+                .is_some_and(|bar| bar.read(cx).query().is_empty())
+        }));
+        ui.type_text("na")?;
+        ui.press("enter")?;
+        assert!(ui.bounds("resource-filter-suggestion-0").is_some());
+        ui.press("escape")?;
+        assert!(ui.bounds("resource-filter-suggestion-0").is_none());
+        assert!(ui.read(|shell, cx| {
+            shell
+                .filter_bar(cx)
+                .is_some_and(|bar| bar.read(cx).query().namespace.as_deref() == Some(""))
+        }));
+    }
+    Ok(())
+}
+
+#[test]
 fn the_pods_dock_waits_for_a_pod_before_offering_log_controls() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Pods)?;
     assert!(ui.bounds("pod-logs-follow").is_some());
@@ -2223,5 +2275,63 @@ fn prometheus_failure_keeps_the_chart_and_offers_retry() -> anyhow::Result<()> {
     assert!(ui.bounds("metrics-empty").is_none());
     ui.click("metrics-retry")?;
     assert_eq!(ui.state().location().page, Page::ClusterOverview);
+    Ok(())
+}
+
+#[test]
+fn label_completion_keeps_free_text_and_tokens_can_be_removed_by_click() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    ui.press("/")?;
+    ui.type_text("checkout l:")?;
+    assert!(ui.bounds("pod-filter-suggestion-0").is_some());
+    ui.press("enter")?;
+    assert!(ui.bounds("pod-filter-suggestion-0").is_some());
+    ui.press("enter")?;
+    assert!(ui.bounds("pod-filter-token-0").is_some());
+    assert_eq!(filter_words(&ui), Some(vec!["checkout".into()]));
+    ui.click("pod-filter-remove-0")?;
+    assert!(ui.bounds("pod-filter-token-0").is_none());
+    assert_eq!(filter_words(&ui), Some(vec!["checkout".into()]));
+    ui.press("cmd-a")?;
+    ui.type_text("ns:payments ")?;
+    assert!(ui.bounds("pod-filter-token-0").is_some());
+    ui.press("backspace")?;
+    assert!(ui.bounds("pod-filter-token-0").is_none());
+    Ok(())
+}
+
+#[test]
+fn every_list_turns_typed_tokens_into_removable_chips() -> anyhow::Result<()> {
+    let lists = [
+        (Screen::Nodes, "node-filter"),
+        (Screen::Namespaces, "namespace-filter"),
+        (Screen::Events, "event-filter"),
+        (Screen::Resources, "resource-filter"),
+        (Screen::Pods, "pod-filter"),
+        (Screen::Gitops, "gitops-filter"),
+        (Screen::Changes, "changes-filter"),
+        #[cfg(feature = "loco")]
+        (Screen::LocoApps, "loco-app-filter"),
+        #[cfg(feature = "loco")]
+        (Screen::LocoBuilds, "loco-build-filter"),
+        #[cfg(feature = "loco")]
+        (Screen::LocoRoutes, "loco-route-filter"),
+    ];
+    for (screen, id) in lists {
+        let mut ui = Ui::open(screen)?;
+        let token = selector(format!("{id}-token-0"));
+        ui.press("/")?;
+        ui.type_text("label:team=checkout ")?;
+        assert!(ui.bounds(token).is_some(), "{screen:?}: no chip");
+        ui.press("backspace")?;
+        assert!(ui.bounds(token).is_none(), "{screen:?}: chip kept");
+        ui.type_text("unmatched-name")?;
+        ui.press("enter")?;
+        assert_eq!(
+            filter_words(&ui),
+            Some(vec!["unmatched-name".into()]),
+            "{screen:?}"
+        );
+    }
     Ok(())
 }

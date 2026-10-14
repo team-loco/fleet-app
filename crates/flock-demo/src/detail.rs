@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use flock_core::cluster::Namespace;
@@ -549,6 +550,7 @@ fn namespaces() -> Vec<Namespace> {
     NAMESPACES
         .iter()
         .map(|seed| Namespace {
+            labels: BTreeMap::new(),
             name: seed.name.into(),
             status: seed.problems.status(),
             phase: "Active".into(),
@@ -695,6 +697,7 @@ fn events() -> Vec<Event> {
     seeds
         .into_iter()
         .map(|seed| Event {
+            labels: BTreeMap::new(),
             details: event_details(seed.object, seed.status, seed.age),
             status: seed.status,
             reason: seed.reason.into(),

@@ -58,6 +58,7 @@ fn everywhere(revision: &str) -> Vec<SyncCell> {
 
 fn row(kind: FluxKind, namespace: &str, name: &str, detail: &str, cells: Vec<SyncCell>) -> SyncRow {
     SyncRow {
+        label_sets: Vec::new(),
         kind,
         namespace: namespace.into(),
         name: name.into(),

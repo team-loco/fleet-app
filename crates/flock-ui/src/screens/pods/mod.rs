@@ -1,5 +1,6 @@
 use crate::kit::SelectableText;
 use flock_core::emptiness::Noun;
+use flock_core::filter::label_values;
 use flock_core::pods::{
     Container, Pod, PodFilter, PodQuery, filter_counts, namespaces, nav_counts,
 };
@@ -275,6 +276,15 @@ impl PodsScreen {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
+        let namespace = self.query.namespace.as_ref();
+        let labels = label_values(
+            self.pods
+                .iter()
+                .filter(|pod| self.cluster.as_ref() == Some(&pod.cluster))
+                .filter(|pod| namespace.is_none_or(|namespace| &pod.namespace == namespace))
+                .map(|pod| &pod.labels),
+        );
+        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
         let rows: Vec<Pod> = match &self.cluster {
             Some(cluster) => self
                 .query

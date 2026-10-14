@@ -246,6 +246,7 @@ mod tests {
                 cells: Vec::new(),
                 age: std::time::Duration::ZERO,
                 yaml: String::new(),
+                labels: std::collections::BTreeMap::new(),
             }],
         );
         snapshot

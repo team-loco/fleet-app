@@ -1,6 +1,6 @@
 use flock_core::cluster::Namespace;
 use flock_core::emptiness::Noun;
-use flock_core::filter::StatusFilter;
+use flock_core::filter::{StatusFilter, label_values};
 use flock_core::time::age;
 use flock_core::{ClusterDetail, ClusterSummary, Counts, Page, Status};
 use gpui::{
@@ -60,6 +60,8 @@ impl NamespacesScreen {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
+        let labels = label_values(self.namespaces.iter().map(|namespace| &namespace.labels));
+        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
         let (query, chip) = {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())

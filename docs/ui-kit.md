@@ -178,6 +178,18 @@ page's bar (the shell routes it; ignored while typing in a field or terminal), E
 clears it. The text is parsed into `flock_core::filter::TextFilter`: plain words must all match,
 `ns:<part>` matches the namespace, `l:key=value` / `label:key` match labels, as in the palette.
 
+The field says “Filter by name, namespace or label”; its separate `/` key cap disappears while
+entering a query. `ns:` completes cluster namespaces, `label:` / `l:` completes keys and then
+values from the current list. ↑ / ↓ moves through suggestions, Tab or Enter completes, and Esc
+closes suggestions before clearing the query. Completed tokens become removable chips; Backspace
+with an empty text field removes the last chip. Plain words remain editable text. Enter keeps its
+normal behavior when no suggestion is open.
+
+Each list passes the labels of its rows with
+`FilterBar::set_labels(flock_core::filter::label_values(rows.iter().map(|row| &row.labels)), cx)`;
+the shell supplies the cluster's namespaces through `set_namespaces`. `FilterBar::text` returns the
+chips and the typed text together.
+
 ```rust
 let filter = cx.new(|cx| FilterBar::new("pod-filter", window, cx).scope(namespace_select.clone()));
 cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| this.refresh(cx)).detach();

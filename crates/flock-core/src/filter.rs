@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
 use crate::Status;
@@ -6,6 +6,12 @@ use crate::Status;
 pub const NAMESPACE_PREFIX: &str = "ns:";
 pub const LABEL_PREFIXES: [&str; 2] = ["label:", "l:"];
 const LABEL_SEPARATOR: char = '=';
+const TOKEN_KEYWORDS: [(&str, &str); 4] = [
+    (NAMESPACE_PREFIX, NAMESPACE_PREFIX),
+    ("namespace", NAMESPACE_PREFIX),
+    (LABEL_PREFIXES[0], LABEL_PREFIXES[0]),
+    (LABEL_PREFIXES[1], LABEL_PREFIXES[1]),
+];
 
 pub type LabelMatch = (String, Option<String>);
 
@@ -32,6 +38,99 @@ pub fn label_matches(wanted: &LabelMatch, labels: &BTreeMap<String, String>) -> 
         (Some(_), None) => true,
         (None, _) => false,
     }
+}
+
+pub type LabelValues = BTreeMap<String, BTreeSet<String>>;
+
+pub fn label_values<'a>(
+    sets: impl IntoIterator<Item = &'a BTreeMap<String, String>>,
+) -> LabelValues {
+    let mut values = LabelValues::new();
+    for (key, value) in sets.into_iter().flatten() {
+        values.entry(key.clone()).or_default().insert(value.clone());
+    }
+    values
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FilterCandidates {
+    pub namespaces: BTreeSet<String>,
+    pub labels: LabelValues,
+}
+
+impl FilterCandidates {
+    pub fn suggest(&self, input: &str) -> Vec<String> {
+        if input.ends_with(char::is_whitespace) {
+            return Vec::new();
+        }
+        let Some(token) = input.split_whitespace().last() else {
+            return Vec::new();
+        };
+        if let Some(part) = token.strip_prefix(NAMESPACE_PREFIX) {
+            return self
+                .namespaces
+                .iter()
+                .filter(|name| name.starts_with(part))
+                .map(|name| format!("{NAMESPACE_PREFIX}{name}"))
+                .collect();
+        }
+        if let Some((prefix, part)) = LABEL_PREFIXES
+            .iter()
+            .find_map(|prefix| Some((*prefix, token.strip_prefix(prefix)?)))
+        {
+            return self.suggest_label(prefix, part);
+        }
+        let prefixes: BTreeSet<&str> = TOKEN_KEYWORDS
+            .iter()
+            .filter(|(keyword, _)| keyword.starts_with(token))
+            .map(|(_, prefix)| *prefix)
+            .collect();
+        prefixes.into_iter().map(str::to_owned).collect()
+    }
+
+    fn suggest_label(&self, prefix: &str, part: &str) -> Vec<String> {
+        match part.split_once(LABEL_SEPARATOR) {
+            Some((key, part)) => self
+                .labels
+                .get(key)
+                .into_iter()
+                .flatten()
+                .filter(|value| value.starts_with(part))
+                .map(|value| format!("{prefix}{key}{LABEL_SEPARATOR}{value}"))
+                .collect(),
+            None => self
+                .labels
+                .keys()
+                .filter(|key| key.starts_with(part))
+                .map(|key| format!("{prefix}{key}{LABEL_SEPARATOR}"))
+                .collect(),
+        }
+    }
+}
+
+pub fn extract_tokens(input: &str) -> (Vec<String>, String) {
+    let mut tokens = Vec::new();
+    let mut text = String::new();
+    for part in input.split_inclusive(char::is_whitespace) {
+        let token = part.trim_end();
+        if part.ends_with(char::is_whitespace) && applied_token(token) {
+            tokens.push(token.to_owned());
+        } else {
+            text.push_str(part);
+        }
+    }
+    if text.trim().is_empty() {
+        text.clear();
+    }
+    (tokens, text)
+}
+
+pub fn applied_token(token: &str) -> bool {
+    if let Some(namespace) = namespace_token(token) {
+        return !namespace.is_empty();
+    }
+    label_token(token)
+        .is_some_and(|(key, value)| !key.is_empty() && value.is_none_or(|value| !value.is_empty()))
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -172,6 +271,81 @@ mod tests {
             .iter()
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect()
+    }
+
+    #[test]
+    fn extracting_complete_tokens_keeps_free_text_and_its_word_boundaries() {
+        assert_eq!(
+            extract_tokens("checkout ns:payments api "),
+            (vec!["ns:payments".into()], "checkout api ".into())
+        );
+        assert_eq!(
+            extract_tokens("ns:payments  "),
+            (vec!["ns:payments".into()], String::new())
+        );
+        assert_eq!(
+            extract_tokens("label:app=cart checkout"),
+            (vec!["label:app=cart".into()], "checkout".into())
+        );
+        assert_eq!(
+            extract_tokens("checkout  l:app="),
+            (Vec::new(), "checkout  l:app=".into())
+        );
+        assert_eq!(
+            extract_tokens("ns:payments"),
+            (Vec::new(), "ns:payments".into())
+        );
+    }
+
+    #[test]
+    fn completion_suggests_prefixes_namespaces_and_only_current_label_values() {
+        let sets = [
+            labels(&[("app", "cart"), ("tier", "api")]),
+            labels(&[("app", "web")]),
+        ];
+        let none: Vec<String> = Vec::new();
+        let candidates = FilterCandidates {
+            namespaces: BTreeSet::from(["payments".into(), "platform".into()]),
+            labels: label_values(&sets),
+        };
+        assert_eq!(candidates.suggest("n"), ["ns:"]);
+        assert_eq!(candidates.suggest("na"), ["ns:"]);
+        assert_eq!(candidates.suggest("l"), ["l:", "label:"]);
+        assert_eq!(candidates.suggest("nginx"), none);
+        assert_eq!(candidates.suggest("ns:"), ["ns:payments", "ns:platform"]);
+        assert_eq!(candidates.suggest("checkout ns:pay"), ["ns:payments"]);
+        assert_eq!(candidates.suggest("l:"), ["l:app=", "l:tier="]);
+        assert_eq!(candidates.suggest("label:a"), ["label:app="]);
+        assert_eq!(
+            candidates.suggest("label:app="),
+            ["label:app=cart", "label:app=web"]
+        );
+        assert_eq!(candidates.suggest("l:app=c"), ["l:app=cart"]);
+        assert_eq!(candidates.suggest("label:unknown="), none);
+        assert_eq!(candidates.suggest("checkout"), none);
+        assert_eq!(candidates.suggest("ns:payments "), none);
+        assert_eq!(candidates.suggest(""), none);
+    }
+
+    #[test]
+    fn chips_require_complete_tokens_and_preserve_label_case() {
+        for token in ["ns:payments", "label:App=Cart", "l:tier"] {
+            assert!(applied_token(token), "{token}");
+        }
+        for token in ["ns:", "label:", "l:app=", "checkout", "label:=cart"] {
+            assert!(!applied_token(token), "{token}");
+        }
+        let filter = TextFilter::parse("checkout ns:payments label:App=Cart");
+        assert!(filter.matches_labeled(
+            Some("payments"),
+            &labels(&[("App", "Cart")]),
+            &["checkout"]
+        ));
+        assert!(!filter.matches_labeled(
+            Some("payments"),
+            &labels(&[("App", "cart")]),
+            &["checkout"]
+        ));
     }
 
     #[test]

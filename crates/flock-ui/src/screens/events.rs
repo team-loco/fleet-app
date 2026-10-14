@@ -1,6 +1,7 @@
 use crate::kit::SelectableText;
 use flock_core::emptiness::Noun;
 use flock_core::events::{self, Event, EventFilter, filter_counts, filter_events};
+use flock_core::filter::label_values;
 use flock_core::overview::plural;
 use flock_core::resources::EVENT_LIST;
 use flock_core::settings::NamespaceSelection;
@@ -188,6 +189,8 @@ impl EventsScreen {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
+        let labels = label_values(self.events.iter().map(|event| &event.labels));
+        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
         let scope = self.preferences.namespace_selection(EVENT_LIST);
         let scoped = events::in_namespace(&self.events, scope.namespace());
         let (query, chip) = {

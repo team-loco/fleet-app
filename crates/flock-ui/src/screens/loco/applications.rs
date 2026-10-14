@@ -1,5 +1,5 @@
 use flock_core::emptiness::Noun;
-use flock_core::filter::TextFilter;
+use flock_core::filter::{TextFilter, label_values};
 use flock_core::loco::{
     AppFilter, Application, Applications, ControllerObject, LocoCommand, Workspace, short_digest,
 };
@@ -198,6 +198,12 @@ impl ApplicationsScreen {
     }
 
     fn refresh_list(&mut self, cx: &mut Context<Self>) {
+        let labels = label_values(
+            self.applications
+                .iter()
+                .map(|(_, application)| &application.labels),
+        );
+        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
         let (query, chip) = {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
@@ -616,6 +622,7 @@ mod tests {
 
     fn app(name: &str, phase: AppPhase) -> Application {
         Application {
+            labels: std::collections::BTreeMap::new(),
             resource: ResourceRef {
                 cluster: ClusterId::new("c"),
                 kind: "Application".into(),

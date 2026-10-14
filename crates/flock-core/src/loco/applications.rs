@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use super::Workspace;
@@ -220,6 +221,7 @@ impl AppRoute {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Application {
+    pub labels: BTreeMap<String, String>,
     pub resource: ResourceRef,
     pub workload_uid: Uid,
     pub name: String,
@@ -310,7 +312,7 @@ impl Application {
             self.image.as_deref().unwrap_or_default(),
             self.hostname.as_deref().unwrap_or_default(),
         ];
-        query.matches(Some(&workspace.namespace), &fields)
+        query.matches_labeled(Some(&workspace.namespace), &self.labels, &fields)
     }
 }
 
@@ -377,6 +379,7 @@ pub(crate) mod tests {
 
     pub(crate) fn application(name: &str, phase: AppPhase, placement: Placement) -> Application {
         Application {
+            labels: BTreeMap::new(),
             resource: ResourceRef {
                 cluster: ClusterId::new("prod"),
                 kind: "Application".into(),
@@ -408,6 +411,18 @@ pub(crate) mod tests {
             applied: Some(applied),
             issue: None,
         }
+    }
+
+    #[test]
+    fn list_label_tokens_match_metadata() {
+        let mut application = application("web", AppPhase::Ready, rev(1, 1));
+        application.labels.insert("team".into(), "checkout".into());
+        let workspace = Workspace {
+            namespace: "ws-1".into(),
+            name: None,
+        };
+        assert!(application.matches(&workspace, &TextFilter::parse("label:team=checkout")));
+        assert!(!application.matches(&workspace, &TextFilter::parse("l:team=platform")));
     }
 
     #[test]

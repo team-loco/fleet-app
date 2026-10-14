@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::filter::TextFilter;
@@ -5,6 +6,7 @@ use crate::{ClusterId, Counts, ResourceRef, Status};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
+    pub labels: BTreeMap<String, String>,
     pub details: EventDetails,
     pub status: Status,
     pub reason: String,
@@ -88,7 +90,8 @@ impl Event {
             self.message.as_str(),
             self.namespace.as_deref().unwrap_or_default(),
         ];
-        filter.keeps(self) && query.matches(self.namespace.as_deref(), &fields)
+        filter.keeps(self)
+            && query.matches_labeled(self.namespace.as_deref(), &self.labels, &fields)
     }
 }
 
@@ -184,6 +187,7 @@ mod tests {
 
     fn event(status: Status, reason: &str, minutes: u64) -> Event {
         Event {
+            labels: BTreeMap::new(),
             details: EventDetails::default(),
             status,
             reason: reason.into(),
@@ -197,6 +201,14 @@ mod tests {
 
     fn reasons(events: &[Event]) -> Vec<&str> {
         events.iter().map(|e| e.reason.as_str()).collect()
+    }
+
+    #[test]
+    fn list_label_tokens_match_metadata() {
+        let mut event = event(Status::Ok, "Created", 1);
+        event.labels.insert("team".into(), "checkout".into());
+        assert!(event.matches(EventFilter::All, &TextFilter::parse("label:team=checkout")));
+        assert!(!event.matches(EventFilter::All, &TextFilter::parse("l:team=platform")));
     }
 
     #[test]

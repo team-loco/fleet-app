@@ -1001,6 +1001,7 @@ fn row(
         cells,
         age,
         yaml: body.to_owned(),
+        labels: BTreeMap::from([("app.kubernetes.io/name".into(), name.into())]),
     }
 }
 

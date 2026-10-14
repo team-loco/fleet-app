@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use flock_core::flux::{
@@ -26,6 +27,7 @@ const DEPLOYED: &str = "deployed";
 const SUCCEEDED_SUFFIX: &str = "Succeeded";
 const UID_POINTER: &str = "/metadata/uid";
 const MANAGED_FIELDS: &str = "/metadata/managedFields";
+const LABELS_POINTER: &str = "/metadata/labels";
 const SUSPENDED_SENTENCE: &str =
     "Reconciliation is suspended, so Flux applies nothing here until it is resumed.";
 
@@ -36,6 +38,16 @@ pub struct Parsed {
 }
 
 impl Parsed {
+    pub fn labels(&self) -> BTreeMap<String, String> {
+        self.raw
+            .pointer(LABELS_POINTER)
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+            .filter_map(|(key, value)| value.as_str().map(|value| (key.clone(), value.to_owned())))
+            .collect()
+    }
+
     pub fn kind(&self) -> ObjectKind {
         self.object.identity.kind
     }
@@ -215,7 +227,9 @@ pub fn flux_object(parsed: &Parsed, inputs: Inputs<'_>) -> Option<FluxObject> {
     let sentence = sentence(parsed, &summary, applied.as_ref());
     let detail = detail(parsed, now, inputs.releases);
     let uid = parsed.uid().map(Uid::new).unwrap_or_default();
+    let labels = parsed.labels();
     Some(FluxObject {
+        labels,
         key,
         uid,
         phase,
@@ -791,7 +805,7 @@ pub(super) mod tests {
         json!({
             "apiVersion": "kustomize.toolkit.fluxcd.io/v1",
             "kind": "Kustomization",
-            "metadata": { "name": name, "namespace": "flux-system", "generation": 1 },
+            "metadata": { "name": name, "namespace": "flux-system", "generation": 1, "labels": { "team": "platform" } },
             "spec": {
                 "interval": "10m", "prune": true, "path": "./kustomize",
                 "sourceRef": { "kind": "GitRepository", "name": "podinfo" }
@@ -919,6 +933,14 @@ pub(super) mod tests {
         assert_eq!(known, Some(Phase::Suspended { since: two_days }));
         let health = health(&parsed(&value), &[], now());
         assert_eq!(Some(health.since), two_days);
+    }
+
+    #[test]
+    fn flux_rows_retain_metadata_labels_for_filtering() {
+        let value = kustomization("apps", "True", "abc");
+        let row = convert(&value, &[]);
+        let team = row.as_ref().and_then(|row| row.labels.get("team"));
+        assert_eq!(team.map(String::as_str), Some("platform"));
     }
 
     #[test]

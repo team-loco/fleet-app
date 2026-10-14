@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use flock_core::flux::{
@@ -244,6 +244,7 @@ fn kustomization(
         &sentence,
     );
     FluxObject {
+        labels: BTreeMap::new(),
         uid: Uid::default(),
         source: Some(fleet_infra(cluster)),
         key,
@@ -426,6 +427,7 @@ fn git_source(cluster: &str) -> FluxObject {
         &sentence,
     );
     FluxObject {
+        labels: BTreeMap::new(),
         uid: Uid::default(),
         key,
         phase,
@@ -487,6 +489,7 @@ fn helm_source(cluster: &str) -> FluxObject {
         &sentence,
     );
     FluxObject {
+        labels: BTreeMap::new(),
         uid: Uid::default(),
         key,
         phase,
@@ -657,6 +660,7 @@ fn helm_release(cluster: &str, version: &str, phase: Phase, sentence: Sentence) 
         &sentence,
     );
     FluxObject {
+        labels: BTreeMap::new(),
         uid: Uid::default(),
         key,
         phase,

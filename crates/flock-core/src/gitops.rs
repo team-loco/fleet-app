@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::filter::TextFilter;
@@ -54,6 +55,7 @@ impl SyncCell {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SyncRow {
+    pub label_sets: Vec<BTreeMap<String, String>>,
     pub kind: FluxKind,
     pub namespace: String,
     pub name: String,
@@ -67,10 +69,14 @@ impl SyncRow {
     }
 
     pub fn matches(&self, query: &TextFilter) -> bool {
-        query.matches(
-            Some(&self.namespace),
-            &[self.name.as_str(), self.namespace.as_str()],
-        )
+        let fields = [self.name.as_str(), self.namespace.as_str()];
+        query.matches_namespace(Some(&self.namespace))
+            && query.matches_text(&fields)
+            && (query.labels.is_empty()
+                || self
+                    .label_sets
+                    .iter()
+                    .any(|labels| query.matches_labels(labels)))
     }
 
     pub fn target(&self, cluster: &ClusterId) -> ResourceRef {
@@ -296,6 +302,7 @@ mod tests {
 
     fn row(kind: FluxKind, name: &str, cells: Vec<SyncCell>) -> SyncRow {
         SyncRow {
+            label_sets: Vec::new(),
             kind,
             namespace: "flux-system".into(),
             name: name.into(),
@@ -339,6 +346,23 @@ mod tests {
             .iter()
             .map(|g| (g.kind, g.rows.iter().map(|r| r.name.as_str()).collect()))
             .collect()
+    }
+
+    #[test]
+    fn grid_label_tokens_match_a_complete_label_set_from_one_cluster() {
+        let mut row = row(FluxKind::Kustomization, "apps", Vec::new());
+        row.label_sets = vec![
+            BTreeMap::from([
+                ("env".into(), "prod".into()),
+                ("team".into(), "platform".into()),
+            ]),
+            BTreeMap::from([
+                ("env".into(), "stage".into()),
+                ("team".into(), "checkout".into()),
+            ]),
+        ];
+        assert!(row.matches(&TextFilter::parse("label:env=stage l:team=checkout")));
+        assert!(!row.matches(&TextFilter::parse("label:env=prod l:team=checkout")));
     }
 
     #[test]

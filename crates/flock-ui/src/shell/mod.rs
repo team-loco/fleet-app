@@ -597,6 +597,20 @@ impl Shell {
         screens.pods.update(cx, |pods, cx| {
             pods.set_context(cluster, resource, &preferences, cx);
         });
+        if let Some(bar) = self.filter_bar_at(ix, location, cx) {
+            let namespaces = snapshot
+                .details
+                .iter()
+                .filter(|(id, _)| cluster.is_none_or(|cluster| cluster == *id))
+                .flat_map(|(_, detail)| {
+                    detail
+                        .namespaces
+                        .iter()
+                        .map(|namespace| namespace.name.clone())
+                })
+                .collect();
+            bar.update(cx, |bar, cx| bar.set_namespaces(namespaces, cx));
+        }
         if let Some((screen, _)) = &screens.workload {
             self.sync_workload_yaml(screen, cx);
         }
