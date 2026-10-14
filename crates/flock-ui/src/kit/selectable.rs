@@ -190,6 +190,7 @@ pub struct Selectable {
     runs: Vec<(SharedString, TextLayout)>,
     links: Vec<(Range<usize>, LinkHandler)>,
     rows: bool,
+    on_selected: bool,
 }
 
 impl Selectable {
@@ -200,6 +201,7 @@ impl Selectable {
             runs: Vec::new(),
             links: Vec::new(),
             rows: false,
+            on_selected: false,
         }
     }
 
@@ -210,6 +212,11 @@ impl Selectable {
 
     pub fn whole_rows(mut self) -> Self {
         self.rows = true;
+        self
+    }
+
+    pub fn on_selected(mut self, on_selected: bool) -> Self {
+        self.on_selected = on_selected;
         self
     }
 
@@ -377,7 +384,12 @@ impl Selectable {
             .collect::<Vec<_>>()
             .join(LINE_BREAK);
         *retained.shared.selected.borrow_mut() = joined(&texts, &ranges);
-        let color = cx.palette().sel;
+        let palette = cx.palette();
+        let color = if self.on_selected {
+            palette.textsel_on_sel
+        } else {
+            palette.sel
+        };
         for ((_, layout), range) in self.runs.iter().zip(ranges) {
             let Some(range) = range.filter(|range| !range.is_empty()) else {
                 continue;
@@ -442,6 +454,7 @@ pub struct SelectableText {
     highlights: Vec<(Range<usize>, HighlightStyle)>,
     mono: Vec<Range<usize>>,
     links: Vec<(Range<usize>, LinkHandler)>,
+    on_selected: bool,
 }
 
 impl SelectableText {
@@ -452,7 +465,13 @@ impl SelectableText {
             highlights: Vec::new(),
             mono: Vec::new(),
             links: Vec::new(),
+            on_selected: false,
         }
+    }
+
+    pub fn on_selected(mut self, on_selected: bool) -> Self {
+        self.on_selected = on_selected;
+        self
     }
 
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
@@ -494,10 +513,14 @@ impl RenderOnce for SelectableText {
             .with_highlights(self.highlights)
             .with_font_family_overrides(fonts);
         let layout = styled.layout().clone();
-        self.links.into_iter().fold(
-            Selectable::new(id, styled).run(self.text, layout),
-            |selectable, (range, handler)| selectable.link(range, handler),
-        )
+        let selectable = Selectable::new(id, styled)
+            .run(self.text, layout)
+            .on_selected(self.on_selected);
+        self.links
+            .into_iter()
+            .fold(selectable, |selectable, (range, handler)| {
+                selectable.link(range, handler)
+            })
     }
 }
 

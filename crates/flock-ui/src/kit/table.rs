@@ -57,7 +57,14 @@ struct TextCell<R> {
 }
 
 impl<R> TextCell<R> {
-    fn render(&self, row: &R, palette: &Palette, words: &[String], selectable: bool) -> AnyElement {
+    fn render(
+        &self,
+        row: &R,
+        palette: &Palette,
+        words: &[String],
+        selectable: bool,
+        selected: bool,
+    ) -> AnyElement {
         let text = (self.text)(row);
         let ranges = highlights(words, &text);
         let content = if selectable {
@@ -66,6 +73,7 @@ impl<R> TextCell<R> {
                 ..HighlightStyle::default()
             };
             SelectableText::new(text)
+                .on_selected(selected)
                 .highlights(ranges.into_iter().map(|range| (range, style)))
                 .into_any_element()
         } else if ranges.is_empty() {
@@ -225,11 +233,19 @@ impl<R: 'static> Column<R> {
         self
     }
 
-    fn render_cell(&self, row: &R, palette: &Palette, words: &[String]) -> AnyElement {
+    fn render_cell(
+        &self,
+        row: &R,
+        palette: &Palette,
+        words: &[String],
+        selected: bool,
+    ) -> AnyElement {
         let content = match &self.cell {
             Cell::Custom(cell) => cell(row, palette),
-            Cell::Text(cell) if self.highlight => cell.render(row, palette, words, self.selectable),
-            Cell::Text(cell) => cell.render(row, palette, &[], self.selectable),
+            Cell::Text(cell) if self.highlight => {
+                cell.render(row, palette, words, self.selectable, selected)
+            }
+            Cell::Text(cell) => cell.render(row, palette, &[], self.selectable, selected),
         };
         match &self.tooltip {
             Some(text) => {
@@ -1019,7 +1035,7 @@ impl<R: 'static> Table<R> {
                     .when(column.mono, |cell| {
                         cell.font_family(FONT_MONO).text_size(TEXT_MONO)
                     })
-                    .child(column.render_cell(row, palette, &self.words))
+                    .child(column.render_cell(row, palette, &self.words, selected))
             })
             .collect();
         let more = (self.hovered == Some(ix))

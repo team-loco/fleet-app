@@ -34,6 +34,7 @@ const DARK_SELFG: (f32, f32) = (0.6, 0.97);
 const LIGHT_SEL: (f32, f32) = (0.77, 0.92);
 const LIGHT_SELLINE: (f32, f32) = (0.69, 0.74);
 const LIGHT_SELFG: (f32, f32) = (0.72, 0.18);
+pub const TEXTSEL_DISTINCT: f32 = 1.2;
 
 const LINEAR_KNEE: f32 = 0.039_28;
 const LINEAR_SLOPE: f32 = 12.92;
@@ -170,18 +171,20 @@ fn primary(palette: &mut Palette, seed: Seed, appearance: Appearance) {
 }
 
 fn secondary(palette: &mut Palette, seed: Seed, appearance: Appearance) {
-    let (sel, selline, selfg, toward) = match appearance {
+    let (sel, selline, selfg, toward, away) = match appearance {
         Appearance::Dark => (
             tone(seed, DARK_SEL),
             tone(seed, DARK_SELLINE),
             tone(seed, DARK_SELFG),
             Appearance::Dark,
+            Appearance::Light,
         ),
         Appearance::Light => (
             tone(seed, LIGHT_SEL),
             tone(seed, LIGHT_SELLINE),
             tone(seed, LIGHT_SELFG),
             Appearance::Light,
+            Appearance::Dark,
         ),
     };
     let texts = [selfg, palette.fg, palette.fg2, palette.mute];
@@ -190,7 +193,11 @@ fn secondary(palette: &mut Palette, seed: Seed, appearance: Appearance) {
         texts.iter().all(|t| contrast(*t, sel) >= TEXT_CONTRAST)
             && glyphs.iter().all(|g| contrast(*g, sel) >= GLYPH_CONTRAST)
     });
+    let textsel = until(sel, away, |textsel| {
+        contrast(textsel, sel) >= TEXTSEL_DISTINCT
+    });
     palette.sel = sel;
+    palette.textsel_on_sel = textsel;
     palette.selline = selline;
     palette.selfg = selfg;
 }
@@ -252,6 +259,15 @@ mod tests {
         check("fg on sel", p.fg, p.sel, TEXT_CONTRAST);
         check("fg2 on sel", p.fg2, p.sel, TEXT_CONTRAST);
         check("mute on sel", p.mute, p.sel, TEXT_CONTRAST);
+        check("selfg on textsel", p.selfg, p.textsel_on_sel, TEXT_CONTRAST);
+        check("fg on textsel", p.fg, p.textsel_on_sel, TEXT_CONTRAST);
+        check("fg2 on textsel", p.fg2, p.textsel_on_sel, TEXT_CONTRAST);
+        check(
+            "textsel distinct from sel",
+            p.textsel_on_sel,
+            p.sel,
+            TEXTSEL_DISTINCT,
+        );
         check("err glyph on sel", p.err, p.sel, GLYPH_CONTRAST);
         check("ok glyph on sel", p.ok, p.sel, GLYPH_CONTRAST);
         check("warn glyph on sel", p.warn, p.sel, GLYPH_CONTRAST);
