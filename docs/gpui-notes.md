@@ -41,9 +41,12 @@ gpui_platform::application()
 - Quit after the last window closes: check `cx.windows().is_empty()` in `on_window_closed`.
   Backend updates go through the shared `flock_ui::Store`; subscribe once per shell so receivers
   broadcast snapshots rather than competing for updates. The Store replays its latest snapshot
-  when a window subscribes. `Command::ForWindow(shell_entity_id, command)` scopes backend
-  navigation and detail watches; `Command::WindowClosed(shell_entity_id)` releases those owners
-  from the window-close event, while cluster connections and mutation actions remain shared.
+  when a window subscribes. Every pane owns a backend scope (`shell::pane::Scope`, an id from a process-wide
+  counter): `Command::ForWindow(scope, command)` scopes backend navigation and detail watches, and
+  `Command::WindowClosed(scope)` releases them when the pane closes, its window closes or the scope
+  drops, while cluster connections and mutation actions remain shared. The shell keeps one
+  `PaneScreens` (every screen entity, the load clock, the strip scroll) per model pane, matched by
+  `tabs::PaneId` in `Shell::sync_panes`.
   Confirmation dialogs have separate focus and handlers per window; the Store publishes shared
   backend notices once so subscribers do not create duplicate toasts.
 

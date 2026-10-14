@@ -8,6 +8,7 @@ pub const FLOCK_KIND: &str = "flock";
 pub const LOGS_KIND: &str = "logs";
 pub const COMPARE_KIND: &str = "compare";
 pub const CLUSTER_KIND: &str = "cluster";
+pub const MAX_PANES: usize = 2;
 const NAME_SEPARATOR: char = '-';
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -18,6 +19,9 @@ impl TabId {
         self.0
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PaneId(u64);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tab {
@@ -68,11 +72,16 @@ pub enum Cycle {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pane {
+    id: PaneId,
     tabs: Vec<Tab>,
     active: usize,
 }
 
 impl Pane {
+    pub const fn id(&self) -> PaneId {
+        self.id
+    }
+
     pub fn tabs(&self) -> &[Tab] {
         &self.tabs
     }
@@ -105,6 +114,7 @@ pub struct Panes {
     all: Vec<Pane>,
     focused: usize,
     next_id: u64,
+    next_pane: u64,
 }
 
 impl Default for Panes {
@@ -119,8 +129,9 @@ impl Panes {
             all: Vec::new(),
             focused: 0,
             next_id: 0,
+            next_pane: 0,
         };
-        for pane in &saved.panes {
+        for pane in saved.panes.iter().take(MAX_PANES) {
             let tabs: Vec<Tab> = pane
                 .tabs
                 .iter()
@@ -131,15 +142,13 @@ impl Panes {
                 .collect();
             if !tabs.is_empty() {
                 let active = pane.active.min(tabs.len() - 1);
-                panes.all.push(Pane { tabs, active });
+                let id = panes.allocate_pane();
+                panes.all.push(Pane { id, tabs, active });
             }
         }
         if panes.all.is_empty() {
-            let id = panes.allocate();
-            panes.all.push(Pane {
-                tabs: vec![Tab::new(id, Location::default())],
-                active: 0,
-            });
+            let pane = panes.pane_at(Location::default());
+            panes.all.push(pane);
         }
         panes.focused = saved.focused.min(panes.all.len() - 1);
         panes
@@ -197,6 +206,46 @@ impl Panes {
         let id = TabId(self.next_id);
         self.next_id += 1;
         id
+    }
+
+    fn allocate_pane(&mut self) -> PaneId {
+        let id = PaneId(self.next_pane);
+        self.next_pane += 1;
+        id
+    }
+
+    fn pane_at(&mut self, location: Location) -> Pane {
+        let tab = Tab::new(self.allocate(), location);
+        Pane {
+            id: self.allocate_pane(),
+            tabs: vec![tab],
+            active: 0,
+        }
+    }
+
+    pub fn pane_of(&self, id: TabId) -> Option<usize> {
+        self.all.iter().position(|pane| pane.position(id).is_some())
+    }
+
+    pub fn focus(&mut self, ix: usize) -> bool {
+        if ix >= self.all.len() || ix == self.focused {
+            return false;
+        }
+        self.focused = ix;
+        true
+    }
+
+    pub fn split(&mut self) {
+        let location = self.active().location.clone();
+        if self.all.len() < MAX_PANES {
+            let pane = self.pane_at(location);
+            let at = self.focused + 1;
+            self.all.insert(at, pane);
+            self.focused = at;
+            return;
+        }
+        self.focused = (self.focused + 1) % self.all.len();
+        self.open(location);
     }
 
     pub fn open(&mut self, location: Location) -> TabId {
@@ -261,28 +310,81 @@ impl Panes {
     }
 
     pub fn close(&mut self, id: TabId) -> bool {
-        let Some(pane_ix) = self.all.iter().position(|pane| pane.position(id).is_some()) else {
+        let Some(pane_ix) = self.pane_of(id) else {
             return false;
         };
-        let replacement = self.allocate();
-        let Some(pane) = self.all.get_mut(pane_ix) else {
+        if self.take(pane_ix, id).is_none() {
             return false;
-        };
-        let Some(ix) = pane.position(id) else {
-            return false;
-        };
-        pane.tabs.remove(ix);
-        if pane.tabs.is_empty() {
-            pane.tabs.push(Tab::new(replacement, Location::default()));
         }
-        if ix < pane.active || pane.active >= pane.tabs.len() {
-            pane.active = pane.active.saturating_sub(1);
+        if self.drop_if_empty(pane_ix) {
+            return true;
+        }
+        let replacement = self.allocate();
+        if let Some(pane) = self.all.get_mut(pane_ix)
+            && pane.tabs.is_empty()
+        {
+            pane.tabs.push(Tab::new(replacement, Location::default()));
         }
         true
     }
 
-    pub fn move_tab(&mut self, id: TabId, to: usize) -> bool {
-        let pane = self.focused_mut();
+    fn take(&mut self, pane_ix: usize, id: TabId) -> Option<Tab> {
+        let pane = self.all.get_mut(pane_ix)?;
+        let ix = pane.position(id)?;
+        let tab = pane.tabs.remove(ix);
+        if ix < pane.active || pane.active >= pane.tabs.len() {
+            pane.active = pane.active.saturating_sub(1);
+        }
+        Some(tab)
+    }
+
+    fn drop_if_empty(&mut self, pane_ix: usize) -> bool {
+        let empty = self
+            .all
+            .get(pane_ix)
+            .is_some_and(|pane| pane.tabs.is_empty());
+        if !empty || self.all.len() == 1 {
+            return false;
+        }
+        self.all.remove(pane_ix);
+        if pane_ix < self.focused || self.focused >= self.all.len() {
+            self.focused = self.focused.saturating_sub(1);
+        }
+        true
+    }
+
+    pub fn move_tab(&mut self, id: TabId, pane: usize, to: usize) -> bool {
+        let Some(from_pane) = self.pane_of(id) else {
+            return false;
+        };
+        if pane >= self.all.len() {
+            return false;
+        }
+        if from_pane == pane {
+            return self.reorder(pane, id, to);
+        }
+        let Some(tab) = self.take(from_pane, id) else {
+            return false;
+        };
+        let target = if self.drop_if_empty(from_pane) && from_pane < pane {
+            pane - 1
+        } else {
+            pane
+        };
+        let Some(destination) = self.all.get_mut(target) else {
+            return false;
+        };
+        let at = to.min(destination.tabs.len());
+        destination.tabs.insert(at, tab);
+        destination.active = at;
+        self.focused = target;
+        true
+    }
+
+    fn reorder(&mut self, pane: usize, id: TabId, to: usize) -> bool {
+        let Some(pane) = self.all.get_mut(pane) else {
+            return false;
+        };
         let Some(from) = pane.position(id) else {
             return false;
         };
@@ -581,13 +683,139 @@ mod tests {
         let first = panes.active().id();
         let nodes = panes.open(at(Page::Nodes));
         let pods = panes.open(at(Page::Pods));
-        assert!(panes.move_tab(pods, 0));
+        assert!(panes.move_tab(pods, 0, 0));
         assert_eq!(ids(&panes), [pods.as_u64(), first.as_u64(), nodes.as_u64()]);
         assert_eq!(panes.active().id(), pods);
-        assert!(!panes.move_tab(nodes, 9));
-        assert!(panes.move_tab(first, 2));
+        assert!(!panes.move_tab(nodes, 0, 9));
+        assert!(!panes.move_tab(nodes, 1, 0));
+        assert!(panes.move_tab(first, 0, 2));
         assert_eq!(ids(&panes), [pods.as_u64(), nodes.as_u64(), first.as_u64()]);
         assert_eq!(panes.active().id(), pods);
+    }
+
+    fn pane_ids(panes: &Panes, ix: usize) -> Vec<TabId> {
+        panes
+            .panes()
+            .get(ix)
+            .map(|pane| pane.tabs().iter().map(Tab::id).collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn splitting_opens_the_active_tab_in_a_focused_pane_on_the_right() {
+        let mut panes = Panes::default();
+        panes.open(at(Page::Nodes));
+        let left = panes.focused().id();
+        panes.split();
+        assert_eq!(panes.panes().len(), 2);
+        assert_eq!(panes.focused_index(), 1);
+        assert_ne!(panes.focused().id(), left);
+        assert_eq!(panes.focused().tabs().len(), 1);
+        assert_eq!(panes.active().location(), &at(Page::Nodes));
+        let right = panes.active().id();
+        assert_eq!(pane_ids(&panes, 0).len(), 2);
+        panes.open(at(Page::Pods));
+        assert!(panes.focus(0));
+        assert!(!panes.focus(0));
+        assert!(!panes.focus(2));
+        assert_eq!(panes.active().location(), &at(Page::Nodes));
+        panes.split();
+        assert_eq!(panes.panes().len(), MAX_PANES);
+        assert_eq!(panes.focused_index(), 1);
+        assert_eq!(panes.active().id(), right);
+        assert!(panes.activate(pane_ids(&panes, 0)[0]));
+        assert_eq!(panes.focused_index(), 0);
+    }
+
+    #[test]
+    fn navigation_moves_only_the_focused_panes_tabs() {
+        let mut panes = Panes::default();
+        panes.split();
+        panes.open(at(Page::Pods));
+        panes.open(at(Page::Events));
+        assert!(panes.cycle(Cycle::Next));
+        assert!(panes.activate_nth(1));
+        assert_eq!(panes.active().location(), &at(Page::Pods));
+        assert_eq!(pane_ids(&panes, 0).len(), 1);
+        assert!(panes.focus(0));
+        assert!(!panes.cycle(Cycle::Next));
+    }
+
+    #[test]
+    fn closing_a_panes_last_tab_closes_the_pane() {
+        let mut panes = Panes::default();
+        panes.open(at(Page::Nodes));
+        panes.split();
+        let right = panes.active().id();
+        assert!(panes.close(right));
+        assert_eq!(panes.panes().len(), 1);
+        assert_eq!(panes.focused_index(), 0);
+        assert_eq!(panes.active().location(), &at(Page::Nodes));
+        panes.split();
+        assert!(panes.focus(0));
+        let left: Vec<TabId> = pane_ids(&panes, 0);
+        for id in left {
+            assert!(panes.close(id));
+        }
+        assert_eq!(panes.panes().len(), 1);
+        assert_eq!(panes.focused_index(), 0);
+        assert_eq!(panes.active().location(), &at(Page::Nodes));
+        let last = panes.active().id();
+        assert!(panes.close(last));
+        assert_eq!(panes.panes().len(), 1);
+        assert_eq!(panes.active().location(), &Location::default());
+    }
+
+    #[test]
+    fn closing_the_left_pane_while_the_right_is_focused_keeps_the_right_focused() {
+        let mut panes = Panes::default();
+        let home = panes.active().id();
+        panes.split();
+        panes.open(at(Page::Pods));
+        assert!(panes.close(home));
+        assert_eq!(panes.panes().len(), 1);
+        assert_eq!(panes.focused_index(), 0);
+        assert_eq!(panes.active().location(), &at(Page::Pods));
+    }
+
+    #[test]
+    fn moving_a_tab_to_the_other_pane_focuses_it_there() {
+        let mut panes = Panes::default();
+        let home = panes.active().id();
+        let nodes = panes.open(at(Page::Nodes));
+        panes.split();
+        let right = panes.active().id();
+        assert!(panes.move_tab(home, 1, 0));
+        assert_eq!(pane_ids(&panes, 0), [nodes]);
+        assert_eq!(pane_ids(&panes, 1), [home, right]);
+        assert_eq!(panes.focused_index(), 1);
+        assert_eq!(panes.active().id(), home);
+        assert!(panes.move_tab(nodes, 1, 9));
+        assert_eq!(panes.panes().len(), 1);
+        assert_eq!(panes.focused_index(), 0);
+        assert_eq!(pane_ids(&panes, 0), [home, right, nodes]);
+        assert_eq!(panes.active().id(), nodes);
+        assert!(!panes.move_tab(nodes, 1, 0));
+    }
+
+    #[test]
+    fn split_windows_save_and_restore_both_panes() {
+        let mut panes = Panes::default();
+        panes.open(at(Page::Nodes));
+        panes.split();
+        panes.open(at(Page::Pods));
+        let saved = panes.saved();
+        assert_eq!(saved.panes.len(), 2);
+        assert_eq!(saved.focused, 1);
+        let restored = Panes::restore(&saved);
+        assert_eq!(restored.saved(), saved);
+        assert_eq!(restored.active().location(), &at(Page::Pods));
+        let mut crowded = saved.clone();
+        crowded.panes.push(saved.panes[0].clone());
+        crowded.focused = 2;
+        let capped = Panes::restore(&crowded);
+        assert_eq!(capped.panes().len(), MAX_PANES);
+        assert_eq!(capped.focused_index(), 1);
     }
 
     #[test]

@@ -3,8 +3,9 @@ mod builds;
 mod platform;
 mod routes;
 
+use flock_core::history::Location;
 use flock_core::loco::LocoCluster;
-use flock_core::{AppState, Command, Page, ResourceRef};
+use flock_core::{Command, Page, ResourceRef, Snapshot};
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, IntoElement, ParentElement, Render,
     Styled, Subscription, Window, div,
@@ -87,13 +88,17 @@ impl LocoScreens {
         }
     }
 
-    pub fn set_context(&mut self, state: &AppState, cx: &mut Context<Self>) {
-        self.page = state.location().page;
-        let loco = state
-            .location()
+    pub fn set_context(
+        &mut self,
+        location: &Location,
+        snapshot: &Snapshot,
+        cx: &mut Context<Self>,
+    ) {
+        self.page = location.page;
+        let loco = location
             .cluster
             .as_ref()
-            .and_then(|id| state.snapshot.loco.get(id));
+            .and_then(|id| snapshot.loco.get(id));
         if self.loco.as_ref() != loco {
             self.loco = loco.cloned();
             if let Some(loco) = &self.loco {

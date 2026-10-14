@@ -7,7 +7,7 @@ use crate::tabs::{Panes, SavedWindow, TabId};
 use crate::{
     AddClusterStep, CheckLine, ClusterId, ContextRef, ExecRequest, FluxAction, FluxKey, FluxKind,
     KubeconfigFile, LogRequest, NewCluster, Notice, Page, Preferences, ResourceRef, Seen, Sink,
-    Snapshot, Uid, Verdict, Workload, WorkloadKind,
+    Snapshot, Uid, Verdict, Workload,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -247,19 +247,18 @@ impl AppState {
     }
 
     pub fn cluster_available(&self) -> bool {
-        self.location()
+        self.available(self.location())
+    }
+
+    pub fn available(&self, location: &Location) -> bool {
+        location
             .cluster
             .as_ref()
             .is_none_or(|id| self.snapshot.cluster(id).is_some())
     }
 
     pub fn workload(&self) -> Option<&ResourceRef> {
-        let location = self.location();
-        location
-            .resource
-            .as_ref()
-            .filter(|_| location.page != Page::Compare && location.page != Page::Logs)
-            .filter(|target| WorkloadKind::from_kind(&target.kind).is_some())
+        self.location().workload()
     }
 }
 

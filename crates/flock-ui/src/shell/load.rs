@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use flock_core::history::Location;
 use flock_core::watch::{NOT_STARTED, WATCH_SYNC_TIMEOUT};
 use flock_core::{ClusterId, Command, Page, Status, WatchState};
 use gpui::{AnyElement, Context, IntoElement, ParentElement, Task, div};
@@ -20,13 +21,13 @@ pub(super) struct LoadClock {
 }
 
 impl Shell {
-    fn tracked(&self) -> Option<(ClusterId, Page)> {
-        let page = self.state.location().page;
-        let cluster = self.state.location().cluster.clone()?;
+    fn tracked(location: &Location) -> Option<(ClusterId, Page)> {
+        let page = location.page;
+        let cluster = location.cluster.clone()?;
         let tracked = !page.is_flock()
             && page != Page::Compare
-            && self.state.location().resource.is_none()
-            && self.state.location().flux_object.is_none();
+            && location.resource.is_none()
+            && location.flux_object.is_none();
         tracked.then_some((cluster, page))
     }
 
@@ -49,54 +50,66 @@ impl Shell {
     }
 
     pub(super) fn track_load(&mut self, cx: &mut Context<Self>) {
-        let tracked = self.tracked();
-        if self.load.key != tracked {
-            self.load = LoadClock {
-                key: tracked.clone(),
+        for ix in 0..self.panes.len() {
+            self.track_pane_load(ix, cx);
+        }
+    }
+
+    fn track_pane_load(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let tracked = Self::tracked(self.location_at(ix));
+        let pending = tracked.as_ref().is_some_and(|(cluster, page)| {
+            matches!(self.reported(cluster, *page), WatchState::Pending(_))
+        });
+        let load = &mut self.screens_mut(ix).load;
+        if load.key != tracked {
+            *load = LoadClock {
+                key: tracked,
                 ..LoadClock::default()
             };
         }
-        let pending = tracked.is_some_and(|(cluster, page)| {
-            matches!(self.reported(&cluster, page), WatchState::Pending(_))
-        });
         if !pending {
-            self.load.since = None;
-            self.load.wake = None;
+            load.since = None;
+            load.wake = None;
             return;
         }
-        if self.load.since.is_some() {
+        if load.since.is_some() {
             return;
         }
-        self.load.since = Some(Instant::now());
-        self.load.wake = Some(cx.spawn(async move |this, cx| {
+        load.since = Some(Instant::now());
+        load.wake = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(WATCH_SYNC_TIMEOUT).await;
             this.update(cx, |_, cx| cx.notify()).ok();
         }));
     }
 
-    pub(super) fn page_state(&self) -> Option<WatchState> {
-        let (cluster, page) = self.tracked()?;
+    fn page_state(&self, ix: usize, location: &Location) -> Option<WatchState> {
+        let (cluster, page) = Self::tracked(location)?;
         let reported = self.reported(&cluster, page);
-        let waited = self.load.since.map(|since| since.elapsed());
+        let waited = self.screens(ix).load.since.map(|since| since.elapsed());
         Some(reported.expire(waited.unwrap_or_default()))
     }
 
-    pub(super) fn load_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let state = self.page_state()?;
-        let cluster = self.selected_cluster()?;
+    pub(super) fn load_view(
+        &self,
+        ix: usize,
+        location: &Location,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let state = self.page_state(ix, location)?;
+        let cluster = self.cluster_of(location)?;
         let id = cluster.id.clone();
-        let page = self.state.location().page;
+        let page = location.page;
         let element = match state {
             WatchState::Synced => {
                 if self.state.snapshot.page_rows(&id, page) != Some(0) {
                     return None;
                 }
                 let sentence = format!("No {} in {}.", page.label(), cluster.name);
-                EmptyState::new(sentence, empty_action(id, page, cx)).into_any_element()
+                EmptyState::new(sentence, empty_action(ix, id, page, cx)).into_any_element()
             }
             WatchState::Failed(reason) => {
                 let retry = Button::new("page-retry", RETRY)
-                    .on_click(cx.listener(move |this, _, _, cx| this.retry(id.clone(), cx)));
+                    .on_click(cx.listener(move |this, _, _, cx| this.retry(ix, id.clone(), cx)));
                 ErrorState::new(&reason, retry).into_any_element()
             }
             WatchState::Pending(step) => {
@@ -113,18 +126,20 @@ impl Shell {
         Some(element)
     }
 
-    fn retry(&mut self, cluster: ClusterId, cx: &mut Context<Self>) {
-        self.load = LoadClock::default();
+    fn retry(&mut self, ix: usize, cluster: ClusterId, cx: &mut Context<Self>) {
+        if let Some(screens) = self.panes.get_mut(ix) {
+            screens.load = LoadClock::default();
+        }
         self.dispatch(Command::Connect(cluster), cx);
     }
 }
 
-fn empty_action(cluster: ClusterId, page: Page, cx: &mut Context<Shell>) -> Button {
+fn empty_action(ix: usize, cluster: ClusterId, page: Page, cx: &mut Context<Shell>) -> Button {
     if is_flux_list(page) {
         return Button::new("page-empty-action", OPEN_GITOPS).on_click(
             cx.listener(|this, _, _, cx| this.dispatch(Command::SelectPage(Page::GitOps), cx)),
         );
     }
     Button::new("page-empty-action", REFRESH)
-        .on_click(cx.listener(move |this, _, _, cx| this.retry(cluster.clone(), cx)))
+        .on_click(cx.listener(move |this, _, _, cx| this.retry(ix, cluster.clone(), cx)))
 }

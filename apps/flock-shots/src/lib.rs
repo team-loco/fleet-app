@@ -77,7 +77,7 @@ fn view(
     let view = root_view(screen, preset, store, window, cx);
     let shell = view.clone().downcast::<Shell>().ok();
     if let Some((shell, tabs)) = shell.as_ref().zip(screen.tabs(preset)) {
-        shell.update(cx, |shell, cx| shell.restore_tabs(&tabs, cx));
+        shell.update(cx, |shell, cx| shell.restore_tabs(&tabs, window, cx));
     }
     (view, shell)
 }
@@ -374,8 +374,9 @@ impl Ui {
 
     pub fn restore(&mut self, tabs: &flock_core::tabs::SavedWindow) -> anyhow::Result<()> {
         let shell = self.shell.clone();
-        self.cx
-            .update(|_, cx| shell.update(cx, |shell, cx| shell.restore_tabs(tabs, cx)));
+        self.cx.update(|window, cx| {
+            shell.update(cx, |shell, cx| shell.restore_tabs(tabs, window, cx));
+        });
         self.settle()
     }
 
