@@ -4,6 +4,13 @@ use flock_core::app_settings::{Highlight, ThemeChoice};
 use flock_core::{AppSettings, Status};
 use gpui::{App, Global, Hsla, Pixels, Window, WindowAppearance, px, rgb, rgba};
 
+const TITLE_ROW_HEIGHT: f32 = 32.;
+const TRAFFIC_LIGHT_LEFT: f32 = 10.;
+const TRAFFIC_LIGHT_SIZE: f32 = 14.;
+const TRAFFIC_LIGHT_GAP: f32 = 9.;
+const TRAFFIC_LIGHT_COUNT: f32 = 3.;
+const TRAFFIC_LIGHT_CLEARANCE: f32 = 8.;
+
 const ANSI_BASE: [u32; 16] = [
     0x001d_2027,
     0x00c5_3030,
@@ -68,15 +75,13 @@ pub const ROW_ROLLOUT: Pixels = px(25.);
 pub const ROW_MATRIX: Pixels = px(38.);
 pub const ROW_CATALOG: Pixels = px(44.);
 
-pub const STRIP: Pixels = px(28.);
+pub const TITLE_ROW: Pixels = px(TITLE_ROW_HEIGHT);
 pub const SIDEBAR: Pixels = px(200.);
 pub const SIDEBAR_HEADER: Pixels = px(32.);
-pub const SIDEBAR_COLLAPSED: Pixels = px(76.);
 pub const SWITCHER_WIDTH: Pixels = px(290.);
 pub const SWITCHER_GEAR: Pixels = px(26.);
 pub const SWITCHER_LIST: Pixels = px(420.);
 pub const PAGE_HEADER: Pixels = px(44.);
-pub const TAB_STRIP: Pixels = px(32.);
 pub const TAB_CLOSE: Pixels = px(14.);
 pub const STATUS_BAR: Pixels = px(26.);
 pub const ASIDE_WIDTH: Pixels = px(300.);
@@ -87,8 +92,12 @@ pub const ICON_BUTTON: Pixels = px(22.);
 pub const GLYPH_SLOT: Pixels = px(10.);
 pub const CONTAINER_SQUARE: Pixels = px(8.);
 pub const CONTAINER_SQUARE_GAP: Pixels = px(3.);
-pub const TRAFFIC_LIGHT_X: Pixels = px(10.);
-pub const TRAFFIC_LIGHT_Y: Pixels = px(8.);
+pub const TRAFFIC_LIGHT_X: Pixels = px(TRAFFIC_LIGHT_LEFT);
+pub const TRAFFIC_LIGHT_Y: Pixels = px((TITLE_ROW_HEIGHT - TRAFFIC_LIGHT_SIZE) / 2.);
+pub const TRAFFIC_LIGHTS_INSET: Pixels = px(TRAFFIC_LIGHT_LEFT
+    + TRAFFIC_LIGHT_COUNT * TRAFFIC_LIGHT_SIZE
+    + (TRAFFIC_LIGHT_COUNT - 1.) * TRAFFIC_LIGHT_GAP
+    + TRAFFIC_LIGHT_CLEARANCE);
 
 pub const SPACE_1: Pixels = px(2.);
 pub const SPACE_2: Pixels = px(4.);

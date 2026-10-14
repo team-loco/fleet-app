@@ -83,3 +83,4 @@ Spec column points at `design/`.
 | HL1 | primary and secondary highlight colours: presets or hex, derived for dark and light with WCAG checks | claude | themes | done |
 | NAME1 | rename the product to Flock: crates, binary, bundle id, env vars, docs; move the old data and cache dirs on launch | claude | rename-to-flock | done |
 | C167 | share multi-file kubeconfig isolation across E2E harnesses (#167) | codex | fix-167 | done |
+| HDR1 | one 32px title row with the traffic lights; collapsed sidebar hidden, lights and chevron lead the tab strip; singular node count (#165) | claude | header-traffic-lights | done |

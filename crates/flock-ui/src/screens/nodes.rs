@@ -310,14 +310,7 @@ impl NodesScreen {
 impl Render for NodesScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
-        let summary = &self.summary;
-        let meta = format!(
-            "{} nodes · {} ready · {} cordoned · {}",
-            summary.total,
-            summary.ready,
-            summary.cordoned,
-            summary.instance_label()
-        );
+        let meta = self.summary.meta_line();
         let current = self.selected_node().cloned();
         self.presence.track(current.as_ref(), presence, cx);
         let inspector = match current {

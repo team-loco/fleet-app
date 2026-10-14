@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::filter::TextFilter;
-use crate::overview::Commitment;
+use crate::overview::{Commitment, plural};
 use crate::{Status, Uid};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -116,6 +116,16 @@ impl NodeSummary {
         }
     }
 
+    pub fn meta_line(&self) -> String {
+        format!(
+            "{} · {} ready · {} cordoned · {}",
+            plural(self.total, "node", "nodes"),
+            self.ready,
+            self.cordoned,
+            self.instance_label()
+        )
+    }
+
     pub fn instance_label(&self) -> String {
         let parts: Vec<String> = self
             .instance_types
@@ -205,6 +215,23 @@ pub(crate) mod tests {
         assert_eq!(summary.pod_capacity, 440);
         assert_eq!(summary.instance_label(), "m6i.4xlarge ×3 · g5.2xlarge ×1");
         assert_eq!(summary.compact_instance_label(), "m6i.4xlarge ×3 · g5 ×1");
+    }
+
+    #[test]
+    fn meta_line_counts_one_node_in_the_singular() {
+        let one = NodeSummary::of(&[node("a", "m6i.large", true, true)]);
+        assert_eq!(
+            one.meta_line(),
+            "1 node · 1 ready · 0 cordoned · m6i.large ×1"
+        );
+        let two = NodeSummary::of(&[
+            node("a", "m6i.large", true, true),
+            node("b", "m6i.large", false, true),
+        ]);
+        assert_eq!(
+            two.meta_line(),
+            "2 nodes · 1 ready · 1 cordoned · m6i.large ×2"
+        );
     }
 
     #[test]

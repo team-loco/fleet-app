@@ -32,8 +32,11 @@ gpui_platform::application()
 - `gpui_component::init(cx)` must run before any component and before `Theme::change`.
 - Every window's root view must be `Root` (overlays, menus, dialogs, notifications hang off it).
 - `WindowOptions.titlebar = TitlebarOptions { title: None, appears_transparent: true,
-  traffic_light_position: Some(point(px(10.), px(8.))) }` gives the hidden titlebar with traffic lights
-  in our 28px strip. Dragging: `on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())`
+  traffic_light_position: Some(point(TRAFFIC_LIGHT_X, TRAFFIC_LIGHT_Y)) }` gives the hidden titlebar with
+  traffic lights in our 32px title row. gpui sizes the titlebar container to the button height plus
+  twice `y`, so `y = (TITLE_ROW - 14) / 2` centres the 14px buttons; AppKit spaces them 9px apart, so
+  they end 60px after `x`. The position is fixed for the window's life (`set_traffic_light_position`
+  exists, but the layout keeps one row height so it never has to move). Dragging: `on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())`
   on the strip and page header; buttons inside call `cx.stop_propagation()` on mouse down.
 - Quit after the last window closes: check `cx.windows().is_empty()` in `on_window_closed`.
   Backend updates go through the shared `flock_ui::Store`; subscribe once per shell so receivers

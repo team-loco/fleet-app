@@ -14,8 +14,8 @@ use crate::assets::{CHEVRON_LEFT, CHEVRON_RIGHT};
 use crate::kit::{Tooltip, status_symbols};
 use crate::theme::{
     ActiveTheme, COLLAPSE, FONT_MONO, ICON, ICON_BUTTON, Palette, RADIUS, ROW_NAV, RULE, SIDEBAR,
-    SIDEBAR_COLLAPSED, SIDEBAR_HEADER, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_8, STRIP,
-    TEXT_LABEL, TEXT_SMALL, TEXT_UI,
+    SIDEBAR_HEADER, SPACE_2, SPACE_3, SPACE_4, SPACE_6, SPACE_8, TEXT_LABEL, TEXT_SMALL, TEXT_UI,
+    TITLE_ROW, TRAFFIC_LIGHTS_INSET,
 };
 
 const COLLAPSE_TOOLTIP: &str = "Collapse sidebar  ⌘B";
@@ -30,15 +30,11 @@ impl Shell {
             .sidebar_focus
             .is_focused(window)
             .then(|| self.keys.nav_cursor.unwrap_or(self.state.location().page));
-        let content = if open {
-            self.sidebar_open(cursor, &palette, cx).into_any_element()
-        } else {
-            sidebar_collapsed(&palette, cx).into_any_element()
-        };
+        let content = open.then(|| self.sidebar_open(cursor, &palette, cx));
         let (from, to) = if open {
-            (SIDEBAR_COLLAPSED, SIDEBAR)
+            (Pixels::ZERO, SIDEBAR)
         } else {
-            (SIDEBAR, SIDEBAR_COLLAPSED)
+            (SIDEBAR, Pixels::ZERO)
         };
         let panel = div()
             .debug_selector(|| "sidebar".to_owned())
@@ -48,17 +44,66 @@ impl Shell {
             .overflow_hidden()
             .w(to)
             .bg(palette.panel)
-            .border_r(RULE)
-            .border_color(palette.line)
-            .child(content);
+            .when(open, |panel| {
+                panel.border_r(RULE).border_color(palette.line)
+            })
+            .children(content);
+        self.slide(panel, "sidebar", from, to)
+    }
+
+    pub(super) fn window_controls(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let open = self.state.sidebar_open;
+        if open && self.sidebar_generation == 0 {
+            return None;
+        }
+        let palette = *cx.palette();
+        let expand = icon_button("expand-sidebar", CHEVRON_RIGHT, EXPAND_TOOLTIP, &palette)
+            .on_click(cx.listener(|this, _, _, cx| this.dispatch(Command::ToggleSidebar, cx)));
+        let width = TRAFFIC_LIGHTS_INSET + ICON_BUTTON + SPACE_3;
+        let (from, to) = if open {
+            (width, Pixels::ZERO)
+        } else {
+            (Pixels::ZERO, width)
+        };
+        let controls = div()
+            .debug_selector(|| "window-controls".to_owned())
+            .id("window-controls")
+            .flex()
+            .flex_col()
+            .flex_none()
+            .h_full()
+            .overflow_hidden()
+            .w(to)
+            .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
+            .child(div().h(RULE))
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .items_center()
+                    .w(width)
+                    .pl(TRAFFIC_LIGHTS_INSET)
+                    .child(expand),
+            )
+            .child(div().h(RULE).bg(palette.line));
+        Some(self.slide(controls, "window-controls", from, to))
+    }
+
+    fn slide(
+        &self,
+        element: gpui::Stateful<gpui::Div>,
+        name: &'static str,
+        from: Pixels,
+        to: Pixels,
+    ) -> AnyElement {
         if self.sidebar_generation == 0 {
-            return panel.into_any_element();
+            return element.into_any_element();
         }
         let animation = Animation::new(COLLAPSE).with_easing(ease_out_quint());
-        let key = ElementId::NamedInteger("sidebar".into(), self.sidebar_generation as u64);
-        panel
-            .with_animation(key, animation, move |panel, delta| {
-                panel.w(from + (to - from) * delta)
+        let key = ElementId::NamedInteger(name.into(), self.sidebar_generation as u64);
+        element
+            .with_animation(key, animation, move |element, delta| {
+                element.w(from + (to - from) * delta)
             })
             .into_any_element()
     }
@@ -148,23 +193,11 @@ impl Shell {
     }
 }
 
-fn sidebar_collapsed(palette: &Palette, cx: &mut Context<Shell>) -> impl IntoElement {
-    let expand = icon_button("expand-sidebar", CHEVRON_RIGHT, EXPAND_TOOLTIP, palette)
-        .on_click(cx.listener(|this, _, _, cx| this.dispatch(Command::ToggleSidebar, cx)));
-    div()
-        .w(SIDEBAR_COLLAPSED)
-        .h_full()
-        .flex()
-        .flex_col()
-        .child(top_strip(palette))
-        .child(div().flex().justify_center().pt(SPACE_5).child(expand))
-}
-
 fn top_strip(palette: &Palette) -> gpui::Div {
     div()
         .flex()
         .items_center()
-        .h(STRIP)
+        .h(TITLE_ROW)
         .flex_none()
         .bg(palette.chrome)
         .border_b(RULE)
