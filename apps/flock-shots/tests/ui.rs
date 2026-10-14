@@ -1432,6 +1432,24 @@ fn tabs_move_between_panes_by_menu_and_by_drag() -> anyhow::Result<()> {
 }
 
 #[test]
+fn dragging_the_divider_writes_tabs_once_on_release() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Split)?;
+    let writes = std::rc::Rc::new(std::cell::Cell::new(0_usize));
+    let counted = writes.clone();
+    ui.update_app(|cx| {
+        let save: flock_ui::session::Saver = std::rc::Rc::new(move |_| {
+            counted.set(counted.get() + 1);
+            Ok(())
+        });
+        flock_ui::session::install(save, cx);
+    });
+    ui.drag("panes-divider", gpui::point(gpui::px(-200.), gpui::px(0.)))?;
+    assert!(ui.state().panes().divider().share() < 0.5);
+    assert_eq!(writes.get(), 1);
+    Ok(())
+}
+
+#[test]
 fn dragging_the_divider_resizes_the_panes_and_is_restored() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Split)?;
     let before = ui.bounds("pane-0").map(|b| b.size.width);

@@ -17,6 +17,7 @@ struct SplitRatios(HashMap<SharedString, f32>);
 impl Global for SplitRatios {}
 
 pub type OnResize = Rc<dyn Fn(f32, &mut Window, &mut App)>;
+pub type OnResizeEnd = Rc<dyn Fn(&mut Window, &mut App)>;
 
 struct SplitState {
     bounds: Bounds<Pixels>,
@@ -45,6 +46,7 @@ pub struct Split {
     collapsed: bool,
     line: Option<Hsla>,
     on_resize: Option<OnResize>,
+    on_resize_end: Option<OnResizeEnd>,
 }
 
 impl Split {
@@ -79,6 +81,7 @@ impl Split {
             collapsed: false,
             line: None,
             on_resize: None,
+            on_resize_end: None,
         }
     }
 
@@ -99,6 +102,14 @@ impl Split {
 
     pub fn on_resize(mut self, on_resize: impl Fn(f32, &mut Window, &mut App) + 'static) -> Self {
         self.on_resize = Some(Rc::new(on_resize));
+        self
+    }
+
+    pub fn on_resize_end(
+        mut self,
+        on_resize_end: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_resize_end = Some(Rc::new(on_resize_end));
         self
     }
 }
@@ -144,10 +155,24 @@ fn divider(
     }
 }
 
+fn end_drag(
+    state: &Entity<SplitState>,
+    on_end: Option<&OnResizeEnd>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let was_dragging = state.update(cx, |state, _| std::mem::replace(&mut state.dragging, false));
+    if was_dragging && let Some(on_end) = on_end {
+        on_end(window, cx);
+    }
+}
+
 fn drag_ratio(
     state: &Entity<SplitState>,
     axis: Axis,
     event: &MouseMoveEvent,
+    on_end: Option<&OnResizeEnd>,
+    window: &mut Window,
     cx: &mut App,
 ) -> Option<f32> {
     let (dragging, bounds) = {
@@ -158,7 +183,7 @@ fn drag_ratio(
         return None;
     }
     if !event.dragging() {
-        state.update(cx, |state, _| state.dragging = false);
+        end_drag(state, on_end, window, cx);
         return None;
     }
     let (offset, total) = match axis {
@@ -244,6 +269,8 @@ impl RenderOnce for Split {
         let releasing = state.clone();
         let store_id = id.clone();
         let on_resize = self.on_resize.clone();
+        let moved_end = self.on_resize_end.clone();
+        let released_end = self.on_resize_end.clone();
         div()
             .id(ElementId::NamedInteger(id, 0))
             .relative()
@@ -251,7 +278,7 @@ impl RenderOnce for Split {
             .flex()
             .when(axis == Axis::Vertical, Styled::flex_col)
             .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
-                let resized = drag_ratio(&moving, axis, event, cx);
+                let resized = drag_ratio(&moving, axis, event, moved_end.as_ref(), window, cx);
                 if let Some(ratio) = resized {
                     match &on_resize {
                         Some(on_resize) => on_resize(ratio, window, cx),
@@ -260,8 +287,8 @@ impl RenderOnce for Split {
                     window.refresh();
                 }
             })
-            .on_mouse_up(MouseButton::Left, move |_, _, cx| {
-                releasing.update(cx, |state, _| state.dragging = false);
+            .on_mouse_up(MouseButton::Left, move |_, window, cx| {
+                end_drag(&releasing, released_end.as_ref(), window, cx);
             })
             .child(recorder)
             .child(first)

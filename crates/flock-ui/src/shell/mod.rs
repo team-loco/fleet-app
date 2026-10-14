@@ -659,6 +659,7 @@ impl Shell {
         };
         let palette = *cx.palette();
         let shell = cx.weak_entity();
+        let released = shell.clone();
         Split::horizontal(PANES_SPLIT, first, second)
             .ratio(self.state.panes().divider().share())
             .line(palette.line2)
@@ -666,6 +667,9 @@ impl Shell {
                 shell
                     .update(cx, |shell, cx| shell.resize_panes(share, cx))
                     .ok();
+            })
+            .on_resize_end(move |_, cx| {
+                released.update(cx, Shell::finish_resize_panes).ok();
             })
             .into_any_element()
     }

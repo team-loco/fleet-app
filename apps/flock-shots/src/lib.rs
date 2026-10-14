@@ -27,6 +27,7 @@ const POLL: Duration = Duration::from_millis(5);
 const SEED: u64 = 0;
 const SPACE: &str = "space";
 const SINGLE: usize = 1;
+const DRAG_MOVES: u16 = 10;
 const DOUBLE: usize = 2;
 
 fn text_system() -> Arc<dyn PlatformTextSystem> {
@@ -209,7 +210,11 @@ fn apply(step: &Step, window: &mut Window, cx: &mut App) -> anyhow::Result<()> {
             window.dispatch_event(mouse_move(*from, None), cx);
             let none = Modifiers::none();
             window.dispatch_event(mouse_down(*from, MouseButton::Left, SINGLE, none), cx);
-            window.dispatch_event(mouse_move(*to, Some(MouseButton::Left)), cx);
+            for step in 1..=DRAG_MOVES {
+                let along = f32::from(step) / f32::from(DRAG_MOVES);
+                let at = *from + (*to - *from) * along;
+                window.dispatch_event(mouse_move(at, Some(MouseButton::Left)), cx);
+            }
             window.dispatch_event(mouse_up(*to, MouseButton::Left, SINGLE, none), cx);
         }
     }
