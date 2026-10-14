@@ -44,6 +44,16 @@ Generated from the binding table in `crates/flock-ui/src/keymap.rs`; run `mise r
 | / | Focus the page filter |
 | ⌘F | Focus the page filter |
 
+## Selecting text
+
+| Keys | Action |
+|---|---|
+| drag | Select text |
+| double click / triple click | Select a word, a line |
+| ⇧-click | Extend the selection |
+| ⌘C | Copy the selected text |
+| ⌘A | Select all of the clicked text block |
+
 ## Navigate
 
 | Keys | Action |

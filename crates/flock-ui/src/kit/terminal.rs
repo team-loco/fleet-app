@@ -2,10 +2,11 @@ use std::ops::Range;
 
 use flock_core::TermSize;
 use gpui::{
-    AnyElement, App, ClipboardItem, Context, ElementId, EventEmitter, FocusHandle, Focusable,
-    FontWeight, InteractiveElement, IntoElement, KeyDownEvent, Keystroke, ParentElement, Pixels,
-    Render, SharedString, StatefulInteractiveElement, Styled, UniformListScrollHandle, Window,
-    canvas, div, font, prelude::FluentBuilder, uniform_list,
+    AnyElement, App, ClipboardItem, Context, CursorStyle, ElementId, EventEmitter, FocusHandle,
+    Focusable, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, Keystroke, MouseButton,
+    MouseDownEvent, MouseMoveEvent, ParentElement, Pixels, Render, SharedString,
+    StatefulInteractiveElement, Styled, UniformListScrollHandle, Window, canvas, div, font,
+    prelude::FluentBuilder, uniform_list,
 };
 
 use crate::theme::{
@@ -134,6 +135,14 @@ impl TerminalBuffer {
     }
 
     pub fn export(&mut self) -> String {
+        let mut lines = self.lines();
+        while lines.last().is_some_and(String::is_empty) {
+            lines.pop();
+        }
+        lines.join("\n")
+    }
+
+    fn lines(&mut self) -> Vec<String> {
         let history = self.history();
         let mut lines = Vec::new();
         for line in 0..self.line_count() {
@@ -146,10 +155,7 @@ impl TerminalBuffer {
             lines.push(text);
         }
         self.parser.screen_mut().set_scrollback(0);
-        while lines.last().is_some_and(String::is_empty) {
-            lines.pop();
-        }
-        lines.join("\n")
+        lines
     }
 
     fn runs(&mut self, line: usize, history: usize) -> Vec<Run> {
@@ -356,6 +362,14 @@ pub fn grid(width: Pixels, height: Pixels, cell: Pixels) -> TermSize {
 }
 
 #[expect(
+    clippy::cast_precision_loss,
+    reason = "terminal columns stay far below f32 precision"
+)]
+fn cell_count(count: usize) -> f32 {
+    count as f32
+}
+
+#[expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     reason = "clamped to the u16 range first"
@@ -367,12 +381,81 @@ fn cells(count: f32) -> u16 {
     count.clamp(1., f32::from(u16::MAX)) as u16
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct GridPoint {
+    pub line: usize,
+    pub col: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GridSelection {
+    anchor: GridPoint,
+    head: GridPoint,
+}
+
+impl GridSelection {
+    pub fn new(anchor: GridPoint, head: GridPoint) -> Self {
+        Self { anchor, head }
+    }
+
+    fn ordered(self) -> (GridPoint, GridPoint) {
+        (self.anchor.min(self.head), self.anchor.max(self.head))
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.anchor == self.head
+    }
+
+    pub fn columns(self, line: usize, width: usize) -> Option<Range<usize>> {
+        let (start, end) = self.ordered();
+        if self.is_empty() || line < start.line || line > end.line {
+            return None;
+        }
+        let from = if line == start.line { start.col } else { 0 };
+        let to = if line == end.line { end.col } else { width };
+        (from < to).then_some(from..to)
+    }
+
+    pub fn text(self, lines: &[String]) -> String {
+        let (start, end) = self.ordered();
+        lines
+            .iter()
+            .enumerate()
+            .take(end.line + 1)
+            .skip(start.line)
+            .map(|(line, text)| {
+                let width = text.chars().count();
+                let columns = self.columns(line, width).unwrap_or_default();
+                let picked: String = text
+                    .chars()
+                    .skip(columns.start)
+                    .take(columns.len())
+                    .collect();
+                picked.trim_end().to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+pub fn column_at(x: Pixels, left: Pixels, advance: Pixels) -> usize {
+    let offset = (f32::from(x - left - SPACE_6) / f32::from(advance)).round();
+    if offset.is_nan() || offset <= 0. {
+        return 0;
+    }
+    cells(offset).into()
+}
+
 pub struct Terminal {
     id: SharedString,
     buffer: TerminalBuffer,
     size: Option<TermSize>,
     scroll: UniformListScrollHandle,
     focus: FocusHandle,
+    left: Pixels,
+    advance: Pixels,
+    selection: Option<GridSelection>,
+    selecting: bool,
 }
 
 impl EventEmitter<TerminalEvent> for Terminal {}
@@ -385,6 +468,10 @@ impl Terminal {
             size: None,
             scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle(),
+            left: Pixels::ZERO,
+            advance: TEXT_MONO,
+            selection: None,
+            selecting: false,
         }
     }
 
@@ -397,8 +484,45 @@ impl Terminal {
     }
 
     pub fn copy(&mut self, cx: &mut Context<Self>) {
-        let text = self.buffer.export();
+        let text = match self.selection.filter(|selection| !selection.is_empty()) {
+            Some(selection) => selection.text(&self.buffer.lines()),
+            None => self.buffer.export(),
+        };
         cx.write_to_clipboard(ClipboardItem::new_string(text));
+    }
+
+    pub fn select(&mut self, selection: Option<GridSelection>, cx: &mut Context<Self>) {
+        self.selection = selection;
+        cx.notify();
+    }
+
+    fn point(&self, line: usize, x: Pixels) -> GridPoint {
+        GridPoint {
+            line,
+            col: column_at(x, self.left, self.advance),
+        }
+    }
+
+    fn press(&mut self, line: usize, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        let at = self.point(line, event.position.x);
+        let anchor = match self.selection {
+            Some(selection) if event.modifiers.shift => selection.anchor,
+            _ => at,
+        };
+        self.selection = Some(GridSelection::new(anchor, at));
+        self.selecting = true;
+        cx.notify();
+    }
+
+    fn drag(&mut self, line: usize, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if !self.selecting || event.pressed_button != Some(MouseButton::Left) {
+            return;
+        }
+        let head = self.point(line, event.position.x);
+        if let Some(selection) = self.selection.as_mut() {
+            selection.head = head;
+            cx.notify();
+        }
     }
 
     pub fn export(&mut self) -> String {
@@ -431,7 +555,8 @@ impl Terminal {
         self.size
     }
 
-    fn measured(&mut self, size: TermSize, cx: &mut Context<Self>) {
+    fn measured(&mut self, size: TermSize, left: Pixels, cx: &mut Context<Self>) {
+        self.left = left;
         if self.size != Some(size) {
             self.size = Some(size);
             self.buffer.resize(size);
@@ -473,6 +598,7 @@ impl Terminal {
         }
         let application_cursor = self.buffer.parser.screen().application_cursor();
         if let Some(bytes) = input_bytes(keystroke, application_cursor) {
+            self.selection = None;
             cx.emit(TerminalEvent::Input(bytes));
             cx.stop_propagation();
         }
@@ -496,16 +622,30 @@ impl Terminal {
             .text_system()
             .em_advance(font_id, TEXT_MONO)
             .unwrap_or(TEXT_MONO);
+        self.advance = advance;
         let history = self.buffer.history();
+        let width = self.size.map_or(DEFAULT_COLS, |size| size.cols).into();
         range
             .map(|line| {
+                let highlight = self
+                    .selection
+                    .and_then(|selection| selection.columns(line, width))
+                    .map(|columns| {
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left(SPACE_6 + advance * cell_count(columns.start))
+                            .w(advance * cell_count(columns.len()))
+                            .h(LOG_LINE)
+                            .bg(palette.sel)
+                    });
                 let runs = self.buffer.runs(line, history).into_iter().map(|run| {
                     let (fg, bg) = run_colors(run.style, &palette);
                     div()
                         .flex_none()
                         .w(advance * f32::from(run.cells))
                         .h(LOG_LINE)
-                        .bg(bg)
+                        .when(bg != palette.editor, |cell| cell.bg(bg))
                         .text_color(fg)
                         .when(run.style.intensity == Intensity::Bold, |style| {
                             style.font_weight(FontWeight::BOLD)
@@ -515,11 +655,21 @@ impl Terminal {
                         .child(run.text)
                 });
                 div()
+                    .relative()
                     .flex()
                     .items_center()
                     .h(LOG_LINE)
                     .px(SPACE_6)
                     .whitespace_nowrap()
+                    .cursor(CursorStyle::IBeam)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event, _, cx| this.press(line, event, cx)),
+                    )
+                    .on_mouse_move(
+                        cx.listener(move |this, event, _, cx| this.drag(line, event, cx)),
+                    )
+                    .children(highlight)
                     .children(runs)
                     .into_any_element()
             })
@@ -545,7 +695,8 @@ impl Render for Terminal {
                     return;
                 };
                 let size = grid(bounds.size.width, bounds.size.height, cell);
-                this.update(cx, |terminal, cx| terminal.measured(size, cx))
+                let left = bounds.origin.x;
+                this.update(cx, |terminal, cx| terminal.measured(size, left, cx))
                     .ok();
             },
             |_, (), _, _| {},
@@ -568,6 +719,10 @@ impl Render for Terminal {
             .on_action(cx.listener(|this, _: &SendTab, _, cx| this.send_tab(false, cx)))
             .on_action(cx.listener(|this, _: &SendBackTab, _, cx| this.send_tab(true, cx)))
             .on_click(cx.listener(|this, _, window, cx| window.focus(&this.focus, cx)))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, _| this.selecting = false),
+            )
             .relative()
             .size_full()
             .flex()
@@ -778,6 +933,52 @@ mod tests {
                 "~ $ "
             ]
         );
+    }
+
+    fn at(line: usize, col: usize) -> GridPoint {
+        GridPoint { line, col }
+    }
+
+    #[test]
+    fn a_selection_spans_from_the_anchor_to_the_head_in_either_direction() {
+        let lines: Vec<String> = ["$ kubectl get pods", "", "NAME   READY", "api-0  1/1"]
+            .iter()
+            .map(|line| (*line).to_owned())
+            .collect();
+        let down = GridSelection::new(at(0, 2), at(2, 4));
+        assert_eq!(down.text(&lines), "kubectl get pods\n\nNAME");
+        let up = GridSelection::new(at(2, 4), at(0, 2));
+        assert_eq!(up.text(&lines), down.text(&lines));
+        assert_eq!(down.columns(0, 80), Some(2..80));
+        assert_eq!(down.columns(1, 80), Some(0..80));
+        assert_eq!(down.columns(2, 80), Some(0..4));
+        assert_eq!(down.columns(3, 80), None);
+        let click = GridSelection::new(at(1, 3), at(1, 3));
+        assert!(click.is_empty());
+        assert_eq!(click.columns(1, 80), None);
+    }
+
+    #[test]
+    fn columns_round_to_the_nearest_cell_boundary() {
+        let left = px(100.);
+        let advance = px(8.);
+        assert_eq!(column_at(left, left, advance), 0);
+        assert_eq!(column_at(left + SPACE_6 + px(11.), left, advance), 1);
+        assert_eq!(column_at(left + SPACE_6 + px(13.), left, advance), 2);
+    }
+
+    #[gpui::test]
+    fn copy_takes_the_selection_when_there_is_one(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+
+        let terminal = cx.new(|cx| Terminal::new("select-terminal", cx));
+        terminal.update(cx, |terminal, cx| {
+            terminal.feed(b"first line\r\nsecond line", cx);
+            terminal.select(Some(GridSelection::new(at(0, 6), at(1, 6))), cx);
+            terminal.copy(cx);
+        });
+        let text = cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text()));
+        assert_eq!(text.as_deref(), Some("line\nsecond"));
     }
 
     #[gpui::test]

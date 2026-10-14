@@ -148,6 +148,22 @@ shipped `flock` binary never links it (`mise run bundle:loco` builds `-p flock` 
 - `ScrollHandle::scroll_to_item` on the strip runs only when the active tab changes, so wheel
   scrolling the strip is not undone on the next frame.
 
+## Text selection
+
+- gpui-base (pulled in by gpui-component, now a direct dependency) has window-wide text selection:
+  `Root` mounts `TextSelectionLayer` and binds ⌘C (`Root` context) to copy
+  `TextSelection::selected_text`. Participants are `TextSelectionHandle`s that register a hitbox and
+  their `TextLayout`s every frame; `kit::Selectable` is ours.
+- Participants between the anchor and the cursor in document order take part, so the order must be
+  stable from frame to frame: `kit::selectable` numbers participants in paint order and resets the
+  counter after each draw (`window.defer`). An order that grows across frames makes coverage flip
+  and the window redraws forever.
+- A `cx.stop_propagation()` in a bubble-phase mouse-down above text stops the layer from starting a
+  selection (it registers first, so it runs last); modals no longer stop it.
+- Copy text joins participants with newlines and drops blank ones; a block with several lines uses
+  one participant and its own copy text so blank lines survive. Paint-time copy text is one frame
+  behind a drag; `TextSelection::has_selection` is current.
+
 ## Lints
 
 `clippy::pedantic` is on; `match_same_arms` is allowed because AGENTS.md wants one arm per meaning, and

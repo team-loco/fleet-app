@@ -76,7 +76,7 @@ impl RenderOnce for Inspector {
             .text_size(TEXT_UI)
             .font_weight(FontWeight::SEMIBOLD)
             .when(self.mono, |title| title.font_family(FONT_MONO))
-            .child(self.title);
+            .child(super::selectable::SelectableText::new(self.title));
         let header = div()
             .flex()
             .flex_col()

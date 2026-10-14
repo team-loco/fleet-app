@@ -1996,6 +1996,7 @@ version = "0.2.0"
 dependencies = [
  "async-channel",
  "flock-core",
+ "gpui-base",
  "gpui-component",
  "gpui-pre",
  "serde",

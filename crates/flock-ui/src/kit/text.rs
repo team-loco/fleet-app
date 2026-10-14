@@ -7,28 +7,11 @@ use gpui::{
     Styled, StyledText, Window, div, prelude::FluentBuilder,
 };
 
+use super::selectable::SelectableText;
 use crate::theme::{
     ActiveTheme, FONT_MONO, KV_LABEL, RADIUS, RULE, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_7,
     SPACE_8, TEXT_LABEL, TEXT_SMALL,
 };
-
-#[derive(IntoElement)]
-pub struct BreakAnywhere {
-    text: SharedString,
-}
-
-impl BreakAnywhere {
-    pub fn new(text: impl Into<SharedString>) -> Self {
-        Self { text: text.into() }
-    }
-}
-
-impl RenderOnce for BreakAnywhere {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        let cells = self.text.chars().map(|c| div().child(c.to_string()));
-        div().flex().flex_wrap().children(cells)
-    }
-}
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
@@ -257,6 +240,10 @@ impl KeyValue {
     pub fn row(mut self, label: impl Into<SharedString>, value: impl IntoElement) -> Self {
         self.rows.push((label.into(), value.into_any_element()));
         self
+    }
+
+    pub fn text(self, label: impl Into<SharedString>, value: impl Into<SharedString>) -> Self {
+        self.row(label, SelectableText::new(value))
     }
 }
 

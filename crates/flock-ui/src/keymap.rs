@@ -9,7 +9,7 @@ use crate::actions::{
     ShowAllClusters, ShowCommands, ShowFluxOwner, SplitRight, ToggleClusterSwitcher,
     ToggleCommandPalette, ToggleDock, ToggleSidebar,
 };
-use crate::kit::{SendBackTab, SendTab, TERMINAL_CONTEXT};
+use crate::kit::{SelectAllText, SendBackTab, SendTab, TERMINAL_CONTEXT};
 use crate::screens::command::PALETTE_CONTEXT;
 use crate::screens::flux_object::{self, FLUX_CONTEXT};
 use crate::screens::workload::{self, KEY_CONTEXT as WORKLOAD_CONTEXT};
@@ -23,6 +23,9 @@ const COMMAND_CLICK: &str = "cmd-click";
 const MIDDLE_CLICK: &str = "middle click";
 const DRAG: &str = "drag";
 const RIGHT_CLICK: &str = "right click";
+const DOUBLE_CLICK: &str = "double click";
+const TRIPLE_CLICK: &str = "triple click";
+const SHIFT_CLICK: &str = "shift-click";
 pub const PANE_KEYS: [&str; 2] = ["cmd-alt-1", "cmd-alt-2"];
 pub const TAB_KEYS: [&str; 9] = [
     "cmd-1", "cmd-2", "cmd-3", "cmd-4", "cmd-5", "cmd-6", "cmd-7", "cmd-8", "cmd-9",
@@ -36,6 +39,7 @@ pub enum Group {
     General,
     Tabs,
     View,
+    Text,
     Navigate,
     Lists,
     Resource,
@@ -46,10 +50,11 @@ pub enum Group {
 }
 
 impl Group {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::General,
         Self::Tabs,
         Self::View,
+        Self::Text,
         Self::Navigate,
         Self::Lists,
         Self::Resource,
@@ -64,6 +69,7 @@ impl Group {
             Self::General => "General",
             Self::Tabs => "Tabs",
             Self::View => "View",
+            Self::Text => "Selecting text",
             Self::Navigate => "Navigate",
             Self::Lists => "Lists and tables",
             Self::Resource => "Selected resource",
@@ -126,6 +132,21 @@ impl Binding {
 }
 
 pub const BINDINGS: &[Binding] = &[
+    Binding::built_in(&[DRAG], "Select text", Group::Text),
+    Binding::built_in(
+        &[DOUBLE_CLICK, TRIPLE_CLICK],
+        "Select a word, a line",
+        Group::Text,
+    ),
+    Binding::built_in(&[SHIFT_CLICK], "Extend the selection", Group::Text),
+    Binding::built_in(&["cmd-c"], "Copy the selected text", Group::Text),
+    Binding::new(
+        &["cmd-a"],
+        "Select all of the clicked text block",
+        Group::Text,
+        |k, c| KeyBinding::new(k, SelectAllText, c),
+    )
+    .within(OUTSIDE_TEXT),
     Binding::new(
         &["cmd-p"],
         "Quick open: resources, clusters and pages",
