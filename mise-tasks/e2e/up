@@ -19,6 +19,10 @@ for cluster in "${CLUSTERS[@]}"; do
   mise exec -- kubectl --context "${context}" -n kube-system rollout status deployment/metrics-server --timeout="${WAIT_TIMEOUT}"
   mise exec -- flux install --context "${context}" --timeout "${WAIT_TIMEOUT}"
   mise exec -- kubectl --context "${context}" apply -f "${ROOT}/e2e/scenarios/common/namespaces.yaml"
+  if live_pod="$(mise exec -- kubectl --context "${context}" -n apps get pod unschedulable -o json 2>/dev/null)" \
+    && python3 "${ROOT}/e2e/migrate.py" <<<"${live_pod}"; then
+    mise exec -- kubectl --context "${context}" -n apps delete pod unschedulable --wait
+  fi
   mise exec -- kubectl --context "${context}" apply -k "${ROOT}/e2e/scenarios/${cluster}"
 done
 

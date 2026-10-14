@@ -35,12 +35,15 @@ const PHRASE_BREAK: &str = " ·\u{a0}";
 const AGE_COLUMN: Pixels = px(40.);
 const REVISION_COLUMN: Pixels = px(70.);
 const COUNT_COLUMN: Pixels = px(34.);
+const COUNT_MAX: Pixels = px(90.);
+const REVISION_MAX: Pixels = px(160.);
 const PEER_GLYPH: Pixels = px(12.);
 const PEER_CLUSTER: Pixels = px(96.);
 const PEER_REVISION: Pixels = px(64.);
 const SPEC_LABEL: Pixels = px(64.);
 const VALUES_LABEL: Pixels = px(140.);
 
+const NO_VALUES: &str = "No values set.";
 const RECONCILE: &str = "Reconcile";
 const RECONCILE_KEYS: &str = "⌘R";
 const WITH_SOURCE_KEYS: &str = "⇧⌘R";
@@ -199,7 +202,9 @@ impl FluxObjectPage {
             .object()
             .map(|object| object.inventory(self.filter))
             .unwrap_or_default();
+        let empty = self.object().map_or("", FluxObject::inventory_empty);
         self.inventory.update(cx, |table, cx| {
+            table.set_empty(empty, cx);
             table.set_rows(rows, cx);
             table.select(None, cx);
         });
@@ -589,11 +594,7 @@ impl FluxObjectPage {
                     .into_any_element()
             })
             .collect();
-        let values = match &object.detail {
-            FluxDetail::HelmRelease(detail) => Some(spec_list(&detail.values, VALUES_LABEL)),
-            FluxDetail::Kustomization => None,
-            FluxDetail::Source(_) => None,
-        };
+        let values = values_block(object, palette);
         div()
             .id("flux-aside")
             .w_full()
@@ -832,6 +833,26 @@ fn spec_value(value: &str) -> AnyElement {
     SelectableText::new(wrappable(value)).into_any_element()
 }
 
+fn values_block(object: &FluxObject, palette: &Palette) -> Option<AnyElement> {
+    match &object.detail {
+        FluxDetail::HelmRelease(detail) if detail.values.is_empty() => Some(no_values(palette)),
+        FluxDetail::HelmRelease(detail) => {
+            Some(spec_list(&detail.values, VALUES_LABEL).into_any_element())
+        }
+        FluxDetail::Kustomization => None,
+        FluxDetail::Source(_) => None,
+    }
+}
+
+fn no_values(palette: &Palette) -> AnyElement {
+    div()
+        .px(SPACE_6)
+        .text_size(TEXT_SMALL)
+        .text_color(palette.mute)
+        .child(NO_VALUES)
+        .into_any_element()
+}
+
 fn spec_list(rows: &[SpecRow], label_width: Pixels) -> impl IntoElement {
     let list = rows.iter().fold(KeyValue::new(), |list, row| {
         list.row(row.label.clone(), spec_value(&row.value))
@@ -1003,7 +1024,7 @@ fn history_columns() -> Vec<Column<HistoryEntry>> {
         )
         .mono()
         .selectable()
-        .fixed(REVISION_COLUMN),
+        .auto(REVISION_COLUMN, REVISION_MAX),
         Column::colored_text(
             "Message",
             |h: &HistoryEntry| h.message.clone().into(),
@@ -1019,7 +1040,7 @@ fn history_columns() -> Vec<Column<HistoryEntry>> {
         )
         .mono()
         .end()
-        .fixed(COUNT_COLUMN),
+        .auto(COUNT_COLUMN, COUNT_MAX),
     ]
 }
 
@@ -1039,7 +1060,7 @@ fn release_columns() -> Vec<Column<HelmRevision>> {
             |_, p| p.acc,
         )
         .mono()
-        .fixed(REVISION_COLUMN),
+        .auto(REVISION_COLUMN, REVISION_MAX),
         Column::colored_text(
             "Description",
             |r: &HelmRevision| format!("{} · {}", r.state, r.description).into(),
@@ -1054,7 +1075,7 @@ fn release_columns() -> Vec<Column<HelmRevision>> {
         )
         .mono()
         .end()
-        .fixed(COUNT_COLUMN),
+        .auto(COUNT_COLUMN, COUNT_MAX),
     ]
 }
 

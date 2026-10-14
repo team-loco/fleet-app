@@ -323,11 +323,11 @@ pub fn nodes(
 pub fn namespaces(
     namespaces: &[Arc<core::Namespace>],
     index: &PodIndex,
-    usage: &[PodUsage],
+    usage: Option<&[PodUsage]>,
     now: Timestamp,
 ) -> Vec<Namespace> {
     let mut used: HashMap<&str, Totals> = HashMap::new();
-    for pod in usage {
+    for pod in usage.unwrap_or_default() {
         used.entry(pod.namespace.as_str()).or_default().add(Totals {
             cpu: pod.usage.cpu_millicores,
             memory: pod.usage.memory_bytes,
@@ -348,8 +348,8 @@ pub fn namespaces(
                     .unwrap_or_default(),
                 pods: facts.pods,
                 problems: facts.problems,
-                cpu: cores(totals.cpu),
-                memory: gib(totals.memory),
+                cpu: usage.map(|_| cores(totals.cpu)),
+                memory: usage.map(|_| gib(totals.memory)),
                 age: age(&ns.metadata, now),
                 name,
             }
@@ -631,13 +631,23 @@ mod tests {
                 memory_bytes: 536_870_912.,
             },
         }];
-        let rows = namespaces(&[namespace], &index, &usage, now());
+        let rows = namespaces(
+            std::slice::from_ref(&namespace),
+            &index,
+            Some(&usage),
+            now(),
+        );
         let row = &rows[0];
         assert_eq!(row.pods, 2);
         assert_eq!(row.problems, Counts::default().with_err(1));
         assert_eq!(row.status, Status::Err);
-        assert_eq!((row.cpu, row.memory), (0.25, 0.5));
+        assert_eq!((row.cpu, row.memory), (Some(0.25), Some(0.5)));
         assert_eq!(row.phase, "Active");
+        let before_first_poll = namespaces(&[namespace], &index, None, now());
+        assert_eq!(
+            (before_first_poll[0].cpu, before_first_poll[0].memory),
+            (None, None)
+        );
     }
 
     #[test]

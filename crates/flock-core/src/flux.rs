@@ -4,6 +4,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ClusterId, Page, ResourceRef, Snapshot, Status, Uid, time};
 
+const FILTER_HIDES_ALL: &str = "Nothing matches this filter.";
+const NOTHING_APPLIED_RECONCILING: &str =
+    "Nothing applied yet: the first reconcile is still running.";
+const NOTHING_APPLIED_FAILING: &str = "Nothing applied: the last reconcile failed.";
+const NOTHING_APPLIED_RETRYING: &str =
+    "Nothing applied: the last reconcile failed and is being retried.";
+const NOTHING_APPLIED_SUSPENDED: &str = "Nothing applied while suspended.";
+const NOTHING_MANAGED: &str = "This object manages nothing.";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum FluxKind {
     Kustomization,
@@ -351,6 +360,19 @@ impl FluxObject {
             .collect()
     }
 
+    pub fn inventory_empty(&self) -> &'static str {
+        if !self.inventory.is_empty() {
+            return FILTER_HIDES_ALL;
+        }
+        match self.phase {
+            Phase::Reconciling => NOTHING_APPLIED_RECONCILING,
+            Phase::Failing => NOTHING_APPLIED_FAILING,
+            Phase::Retrying => NOTHING_APPLIED_RETRYING,
+            Phase::Suspended { .. } => NOTHING_APPLIED_SUSPENDED,
+            Phase::Ready => NOTHING_MANAGED,
+        }
+    }
+
     pub fn shown_last_healthy(&self) -> Option<&Revision> {
         let applied = self.applied.as_ref().map(|r| r.id.as_str());
         self.last_healthy
@@ -562,6 +584,20 @@ pub(crate) mod tests {
             InventoryFilter::Changed.label(applied),
             "Changed in a41e07c"
         );
+    }
+
+    #[test]
+    fn an_empty_inventory_names_the_object_not_the_filter() {
+        let mut ks = object("east", Phase::Failing, "a41e07c");
+        assert_eq!(ks.inventory_empty(), NOTHING_APPLIED_FAILING);
+        ks.phase = Phase::Suspended {
+            since: Duration::from_secs(DAY),
+        };
+        assert_eq!(ks.inventory_empty(), NOTHING_APPLIED_SUSPENDED);
+        ks.phase = Phase::Ready;
+        assert_eq!(ks.inventory_empty(), NOTHING_MANAGED);
+        ks.inventory = vec![managed(Status::Ok, false)];
+        assert_eq!(ks.inventory_empty(), FILTER_HIDES_ALL);
     }
 
     #[test]

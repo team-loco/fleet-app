@@ -83,6 +83,7 @@ pub struct Workload {
     pub managed_by: Option<ResourceRef>,
     pub pods: Vec<Pod>,
     pub revisions: Vec<Revision>,
+    pub history_pending: bool,
     pub containers: Vec<ContainerSpec>,
     pub events: Vec<Event>,
 }
@@ -110,8 +111,11 @@ impl Workload {
     }
 
     pub fn image(&self) -> Option<&str> {
-        self.current_revision()
-            .map(|revision| short_image(&revision.image))
+        let revision = self
+            .current_revision()
+            .map(|revision| revision.image.as_str());
+        let container = self.containers.first().map(|c| c.image.as_str());
+        revision.or(container).map(short_image)
     }
 
     pub fn status(&self) -> Status {
@@ -332,11 +336,12 @@ impl Pod {
     }
 
     pub fn cpu_label(&self) -> String {
-        self.cpu_millis.map(format_cpu).unwrap_or_default()
+        self.cpu_millis.map_or_else(|| NONE.to_owned(), format_cpu)
     }
 
     pub fn memory_label(&self) -> String {
-        self.memory_bytes.map(format_memory).unwrap_or_default()
+        self.memory_bytes
+            .map_or_else(|| NONE.to_owned(), format_memory)
     }
 
     pub fn age_label(&self) -> String {
@@ -631,6 +636,7 @@ pub(crate) mod tests {
             managed_by: None,
             pods,
             revisions: vec![revision(37, true), revision(36, false), revision(35, false)],
+            history_pending: false,
             containers: Vec::new(),
             events: Vec::new(),
         }
@@ -879,5 +885,33 @@ pub(crate) mod tests {
         assert_eq!(current.status(), Some(Status::Err));
         assert_eq!(revision(36, false).pods_label(), "0");
         assert_eq!(revision(36, false).status(), None);
+    }
+
+    #[test]
+    fn pods_without_metrics_show_a_dash() {
+        let mut p = pod("a", "Running", Status::Ok, true);
+        assert_eq!(
+            (p.cpu_label().as_str(), p.memory_label().as_str()),
+            ("—", "—")
+        );
+        p.cpu_millis = Some(120);
+        assert_ne!(p.cpu_label(), "—");
+    }
+
+    #[test]
+    fn the_image_comes_from_the_spec_until_the_history_arrives() {
+        let mut w = workload(Vec::new(), false);
+        w.revisions.clear();
+        assert_eq!(w.image(), None);
+        w.containers.push(ContainerSpec {
+            name: "api".into(),
+            image: "ghcr.io/acme/checkout-api:2.14.0".into(),
+            ports: Vec::new(),
+            requests: Resources::default(),
+            limits: Resources::default(),
+            readiness: None,
+            env: Vec::new(),
+        });
+        assert_eq!(w.image(), Some("checkout-api:2.14.0"));
     }
 }

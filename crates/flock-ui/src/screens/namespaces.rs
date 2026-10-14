@@ -6,7 +6,7 @@ use flock_core::time::age;
 use flock_core::{ClusterDetail, ClusterSummary, Counts, Page, Status};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
-    Render, Styled, Window, div, px,
+    Render, SharedString, Styled, Window, div, px,
 };
 
 use super::{ListShape, ScreenEvent, empty_list};
@@ -22,6 +22,7 @@ const PODS_WIDTH: Pixels = px(52.);
 const CPU_WIDTH: Pixels = px(84.);
 const MEMORY_WIDTH: Pixels = px(84.);
 const AGE_WIDTH: Pixels = px(44.);
+const NO_USAGE: &str = "—";
 
 pub struct NamespacesScreen {
     cluster_name: String,
@@ -192,6 +193,13 @@ fn name_cell(namespace: &Namespace, palette: &Palette) -> AnyElement {
         .into_any_element()
 }
 
+fn usage_label(value: Option<f32>, unit: &str) -> SharedString {
+    match value {
+        Some(value) => format!("{} {unit}", fixed(value)).into(),
+        None => NO_USAGE.into(),
+    }
+}
+
 fn columns() -> Vec<Column<Namespace>> {
     vec![
         Column::new("Name", name_cell)
@@ -209,22 +217,26 @@ fn columns() -> Vec<Column<Namespace>> {
             .sort_by_key(|n: &Namespace| n.pods),
         Column::colored_text(
             "CPU",
-            |n: &Namespace| format!("{} {CPU_UNIT}", fixed(n.cpu)).into(),
+            |n: &Namespace| usage_label(n.cpu, CPU_UNIT),
             |_, p| p.fg2,
         )
         .mono()
         .end()
         .fixed(CPU_WIDTH)
-        .sortable(|a: &Namespace, b: &Namespace| a.cpu.total_cmp(&b.cpu)),
+        .sortable(|a: &Namespace, b: &Namespace| {
+            a.cpu.unwrap_or(-1.).total_cmp(&b.cpu.unwrap_or(-1.))
+        }),
         Column::colored_text(
             "Memory",
-            |n: &Namespace| format!("{} {MEMORY_UNIT}", fixed(n.memory)).into(),
+            |n: &Namespace| usage_label(n.memory, MEMORY_UNIT),
             |_, p| p.fg2,
         )
         .mono()
         .end()
         .fixed(MEMORY_WIDTH)
-        .sortable(|a: &Namespace, b: &Namespace| a.memory.total_cmp(&b.memory)),
+        .sortable(|a: &Namespace, b: &Namespace| {
+            a.memory.unwrap_or(-1.).total_cmp(&b.memory.unwrap_or(-1.))
+        }),
         Column::colored_text("Age", |n: &Namespace| age(n.age).into(), |_, p| p.mute)
             .mono()
             .fixed(AGE_WIDTH)

@@ -295,7 +295,10 @@ PageUp / PageDown move the selection, Enter emits `Opened`, typed letters jump t
 dispatches `actions::CloseInspector` (open row menus take Esc first). The table is a tab stop;
 keyboard position is shown by the selected row fill, without a focus outline.
 
-Column options: `.fixed(px)`, `.flex(weight, min)`, `.end()`, `.center()`, `.mono()` (Plex Mono 12;
+Column options: `.fixed(px)`, `.flex(weight, min)`, `.auto(min, max)` (width follows the widest cell text, so a
+status or revision column never truncates while it has room; the column needs text to measure, from
+`Column::text`, `colored_text`, `status_text` or `.fit_by(text, extra)` / `.fit_status_by(text)` on a custom cell; give
+long free-text columns `.flex(..)` so they take the remainder and truncate first), `.end()`, `.center()`, `.mono()` (Plex Mono 12;
 rows are otherwise Sans 12.5), `.sortable(cmp)` / `.sort_by_key(key)`, `.highlight()` (text columns
 draw the filter's matches in `acc`, see `set_highlight`), `.fit_by(text, extra)` (what a custom cell
 measures to when its border is double-clicked). `Column::status_text(title, status, text)` is a glyph
@@ -321,6 +324,7 @@ row's items. `hovered_row()` reads the hovered row. Table options:
 `.row_height(px)` (default `ROW_TABLE` 26), `.headerless()`, `.sorted_by(col, dir)`,
 `.column_gap(px)` (default `SPACE_6`), `.inset(px)` (leading row and header padding, default `SPACE_8`),
 `.mono_header()` (Plex Mono 10.5 header titles, e.g. short cluster lanes),
+`set_empty(text, cx)` changes the empty-table sentence when the reason changes, and
 `.click_opens()` (a single click also emits `Opened`, for rows that act as links) and
 `.span_rows(|row, palette| Option<AnyElement>)`: rows for which it returns `Some` render that
 element across the full width instead of cells (group headers). `set_columns(columns, cx)` swaps

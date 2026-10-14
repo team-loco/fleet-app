@@ -649,8 +649,8 @@ mod tests {
             phase: String::new(),
             pods: 0,
             problems: flock_core::Counts::default(),
-            cpu: 0.,
-            memory: 0.,
+            cpu: None,
+            memory: None,
             age: std::time::Duration::ZERO,
         };
         flock_core::ClusterDetail {

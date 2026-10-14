@@ -273,6 +273,7 @@ pub fn changes_log(repos: &[Repo<'_>], clusters: &[ClusterId], now: Timestamp) -
     let mut commits: Vec<Commit> = Vec::new();
     let mut fetched: Option<Timestamp> = None;
     let mut unavailable: Vec<String> = Vec::new();
+    let mut pending = false;
     for repo in repos {
         match &repo.state {
             Some(MirrorState::Ready {
@@ -290,8 +291,8 @@ pub fn changes_log(repos: &[Repo<'_>], clusters: &[ClusterId], now: Timestamp) -
             Some(MirrorState::Unavailable(reason)) => {
                 unavailable.push(format!("{}: {reason}", repo.key.name()));
             }
-            Some(MirrorState::Fetching) => {}
-            None => {}
+            Some(MirrorState::Fetching) => pending = true,
+            None => pending = true,
         }
     }
     commits.sort_by_key(|commit| commit.age);
@@ -307,6 +308,7 @@ pub fn changes_log(repos: &[Repo<'_>], clusters: &[ClusterId], now: Timestamp) -
         lanes: lanes.iter().map(lane).collect(),
         commits,
         unavailable: (!unavailable.is_empty()).then(|| unavailable.join(REPO_SEPARATOR)),
+        pending,
     }
 }
 
@@ -510,5 +512,27 @@ mod tests {
             Some("private: Permission denied (publickey).")
         );
         assert_eq!(log.commits, Vec::new());
+        assert!(!log.pending);
+    }
+
+    #[test]
+    fn history_is_pending_while_a_source_is_still_being_fetched() {
+        let repo = |state| Repo {
+            key: RepoKey {
+                url: "https://github.com/stefanprodan/podinfo".to_owned(),
+                branch: "master".to_owned(),
+            },
+            state,
+            consumers: Vec::new(),
+        };
+        let fetching = changes_log(
+            &[repo(Some(MirrorState::Fetching))],
+            &[],
+            Timestamp::UNIX_EPOCH,
+        );
+        assert!(fetching.pending);
+        let unstarted = changes_log(&[repo(None)], &[], Timestamp::UNIX_EPOCH);
+        assert!(unstarted.pending);
+        assert!(!changes_log(&[], &[], Timestamp::UNIX_EPOCH).pending);
     }
 }

@@ -19,8 +19,8 @@ pub struct Namespace {
     pub phase: String,
     pub pods: u32,
     pub problems: Counts,
-    pub cpu: f32,
-    pub memory: f32,
+    pub cpu: Option<f32>,
+    pub memory: Option<f32>,
     pub age: Duration,
 }
 
@@ -132,8 +132,8 @@ mod tests {
             phase: ACTIVE_PHASE.into(),
             pods: 0,
             problems,
-            cpu: 0.,
-            memory: 0.,
+            cpu: None,
+            memory: None,
             age: Duration::ZERO,
         }
     }

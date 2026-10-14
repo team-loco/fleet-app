@@ -2018,3 +2018,29 @@ fn a_right_clicked_row_menu_takes_the_keyboard() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn the_pods_dock_waits_for_a_pod_before_offering_log_controls() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    assert!(ui.bounds("pod-logs-follow").is_some());
+    assert!(ui.bounds("pods-dock-empty").is_none());
+    ui.press("/")?;
+    ui.type_text("nothing-is-called-this")?;
+    assert!(ui.bounds("pod-logs-follow").is_none());
+    assert!(ui.bounds("pod-logs-download").is_none());
+    assert!(ui.bounds("pods-dock-empty").is_some());
+    ui.click("empty-clear-filter")?;
+    assert!(ui.bounds("pod-logs-follow").is_some());
+    Ok(())
+}
+
+#[test]
+fn a_list_header_has_no_count_while_its_rows_are_loading() -> anyhow::Result<()> {
+    use flock_shots::StateFixture;
+    let mut loaded = Ui::open(Screen::Resources)?;
+    assert!(loaded.bounds("page-note").is_some());
+    let mut loading = Ui::with_state(Screen::Resources, StateFixture::Loading)?;
+    assert!(loading.bounds("loading-skeleton").is_some());
+    assert!(loading.bounds("page-note").is_none());
+    Ok(())
+}

@@ -613,6 +613,8 @@ pub async fn build(
         handle.pod_usage(Some(&namespace)),
     );
     let usage = usage.unwrap_or_default();
+    let history_pending = kind == WorkloadKind::Deployment
+        && !handle.watch_state(&WatchKind::ReplicaSets).is_loaded();
     let owners: BTreeSet<String> = revisions.iter().map(|r| r.owner.clone()).collect();
     let pod_names = names(&raw);
     let events = events(
@@ -632,6 +634,7 @@ pub async fn build(
         managed_by: managed_by(target, &spec.meta),
         pods: pods(target, &raw, &usage, now),
         revisions,
+        history_pending,
         containers: containers(spec.template.as_ref(), &keys),
         events,
     })

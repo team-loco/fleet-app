@@ -63,6 +63,9 @@ Upstream charts, Git branch, container tags, and metrics-server's release URL
 follow their published defaults; an upstream change can alter the fixtures.
 The verification script catches changes that break the expected states.
 
+`mise run e2e:up` is safe to repeat on existing clusters. It deletes `Pod/apps/unschedulable` first
+when its node selector predates the scenario (pod specs are immutable), then reapplies everything.
+
 `mise run e2e:test` is the one-command proof. It runs `e2e:up` (reusing existing
 clusters), `e2e/verify`, then every `FLOCK_E2E` test with and without
 `--features flock/loco`, against a temporary kubeconfig that holds only

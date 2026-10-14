@@ -9,7 +9,8 @@ use gpui::{
 
 use crate::kit::status_symbols;
 use crate::kit::{
-    Column, Link, SectionHeader, Segmented, StatusGlyph, StatusText, Table, TableEvent,
+    Column, EmptyState, Link, SectionHeader, Segmented, Skeleton, StatusGlyph, StatusText, Table,
+    TableEvent,
 };
 use crate::screens::new_tab_item;
 use crate::shell::switcher::{Run, cluster_items};
@@ -32,9 +33,9 @@ const CLUSTER_NAME_WEIGHT: f32 = 1.3;
 const PROBLEM_GLYPH: Pixels = px(14.);
 const PROBLEM_KIND: Pixels = px(104.);
 const PROBLEM_OBJECT_MIN: Pixels = px(220.);
-const PROBLEM_OBJECT_WEIGHT: f32 = 1.1;
+const PROBLEM_OBJECT_WEIGHT: f32 = 1.;
 const PROBLEM_MESSAGE_MIN: Pixels = px(280.);
-const PROBLEM_MESSAGE_WEIGHT: f32 = 2.;
+const PROBLEM_MESSAGE_WEIGHT: f32 = 3.;
 const PROBLEM_AGE: Pixels = px(44.);
 
 const COMMIT_SHA: Pixels = px(72.);
@@ -213,6 +214,18 @@ impl FlockScreen {
             )
     }
 
+    fn commits_body(&self) -> AnyElement {
+        if !self.changes.commits.is_empty() {
+            return self.commit_table.clone().into_any_element();
+        }
+        if self.changes.pending {
+            return Skeleton::rows().into_any_element();
+        }
+        EmptyState::new(self.changes.empty_reason())
+            .selector("flock-commits-empty")
+            .into_any_element()
+    }
+
     fn changes_section(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
         let all = Link::new("all-changes", ALL_CHANGES).on_click(cx.listener(|_, _, _, cx| {
             cx.emit(Command::SelectPage(Page::Changes));
@@ -230,7 +243,7 @@ impl FlockScreen {
                 div()
                     .border_t(RULE)
                     .border_color(palette.line)
-                    .child(self.commit_table.clone()),
+                    .child(self.commits_body()),
             )
     }
 }

@@ -33,7 +33,7 @@ pub struct Prometheus {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Extras {
     pub node_usage: Option<Vec<NodeUsage>>,
-    pub pod_usage: Vec<PodUsage>,
+    pub pod_usage: Option<Vec<PodUsage>>,
     pub ring: UsageRing,
     pub prometheus: Option<Prometheus>,
 }
@@ -42,7 +42,7 @@ impl Extras {
     pub fn new(samples: usize) -> Self {
         Self {
             node_usage: None,
-            pod_usage: Vec::new(),
+            pod_usage: None,
             ring: UsageRing::new(samples),
             prometheus: None,
         }
@@ -113,7 +113,13 @@ pub fn cluster(
     };
     let summary = summarize(id.clone(), id.to_string(), handle, facts);
     let pod_rows = if selection.is_some_and(|selection| selection.pod_rows) {
-        crate::pods::pods(id, &pods, &events, &extras.pod_usage, now)
+        crate::pods::pods(
+            id,
+            &pods,
+            &events,
+            extras.pod_usage.as_deref().unwrap_or_default(),
+            now,
+        )
     } else {
         Vec::new()
     };
@@ -235,7 +241,7 @@ fn cluster_detail(
         namespaces: detail::namespaces(
             &handle.objects::<Namespace>(),
             index,
-            &extras.pod_usage,
+            extras.pod_usage.as_deref(),
             now,
         ),
         events: detail::events(events, selection.event_limit, now),

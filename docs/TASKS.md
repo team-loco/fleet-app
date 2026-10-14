@@ -90,3 +90,4 @@ Spec column points at `design/`.
 | BG1 | every nav kind watched in the background; nav counts and badges for every cluster at all times; bounded event window (#177) | claude | background-watches | done |
 | BG2 | pages read the background stores, namespace picker filters the view, no skeleton when data is in memory (#177, #178) | claude | pages-from-stores | done |
 | EMP1 | list pages keep the filter bar in every state; empty states name what hides the rows and offer Show all namespaces or Clear filter (#190) | claude | empty-state-filters | done |
+| QFB | list-page QA fixes: on-demand section states, e2e:up across the rename, content-sized columns, Pods dock empty state (#204-#207) | claude | qa-fixes-lists | done |

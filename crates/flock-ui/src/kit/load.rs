@@ -185,6 +185,11 @@ impl EmptyState {
         }
     }
 
+    pub fn selector(mut self, selector: &'static str) -> Self {
+        self.selector = selector;
+        self
+    }
+
     pub fn detail(mut self, detail: impl Into<SharedString>) -> Self {
         self.detail = Some(detail.into());
         self

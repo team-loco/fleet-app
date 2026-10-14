@@ -79,7 +79,7 @@ impl Shell {
         }));
     }
 
-    fn page_state(&self, ix: usize, location: &Location) -> Option<WatchState> {
+    pub(super) fn page_state(&self, ix: usize, location: &Location) -> Option<WatchState> {
         let (cluster, page) = Self::tracked(location)?;
         let reported = self.reported(&cluster, page);
         let waited = self.screens(ix).load.since.map(|since| since.elapsed());

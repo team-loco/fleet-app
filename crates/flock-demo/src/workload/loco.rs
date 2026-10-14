@@ -58,6 +58,7 @@ pub fn checkout() -> Workload {
             commit: None,
             current: true,
         }],
+        history_pending: false,
         containers: vec![container()],
         events: vec![Event {
             age,

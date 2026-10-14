@@ -55,6 +55,7 @@ pub fn checkout_api() -> Workload {
         }),
         pods: pods(),
         revisions: revisions(),
+        history_pending: false,
         containers: vec![api_container(), envoy_container()],
         events: events(),
     }
