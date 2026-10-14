@@ -508,11 +508,12 @@ impl Render for CommandPalette {
             .justify_center()
             .items_start()
             .pt(PALETTE_TOP)
-            .occlude()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, window, cx| this.close(window, cx)),
-            )
+            .when(phase == Phase::Open, |scrim| {
+                scrim.occlude().on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| this.close(window, cx)),
+                )
+            })
             .child(panel)
             .with_animation(scrim_key, scrim_animation, move |scrim, t| {
                 scrim.bg(scrim_color.opacity(reveal(t, phase)))

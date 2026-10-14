@@ -403,6 +403,20 @@ fn right_clicking_a_row_opens_its_actions_and_destructive_ones_confirm() -> anyh
 }
 
 #[test]
+fn right_clicking_a_row_works_after_the_palette_closes() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Resources)?;
+    ui.press("cmd-k")?;
+    ui.type_text("nodes")?;
+    ui.press("escape")?;
+    ui.right_click(selector(format!("{DEPLOYMENTS}-row-1")))?;
+    assert!(
+        ui.bounds(selector(format!("{DEPLOYMENTS}-row-menu-item-0")))
+            .is_some()
+    );
+    Ok(())
+}
+
+#[test]
 fn command_p_quick_opens_a_page_and_command_shift_p_runs_a_command() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     ui.press("cmd-p")?;
