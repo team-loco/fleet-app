@@ -751,6 +751,27 @@ fn overview_sections_navigate_to_their_lists() -> anyhow::Result<()> {
 }
 
 #[test]
+fn overview_sections_fill_their_cells_between_the_rules() -> anyhow::Result<()> {
+    use flock_ui::theme::RULE;
+
+    let mut ui = Ui::open(Screen::Cluster)?;
+    let pods = ui
+        .bounds("overview-pods")
+        .ok_or_else(|| anyhow::anyhow!("missing pods section"))?;
+    let nodes = ui
+        .bounds("overview-nodes")
+        .ok_or_else(|| anyhow::anyhow!("missing nodes section"))?;
+    let memory = ui
+        .bounds("overview-capacity-Memory")
+        .ok_or_else(|| anyhow::anyhow!("missing memory meter"))?;
+    assert_eq!(pods.size.height, nodes.size.height);
+    assert_eq!(pods.origin.y, nodes.origin.y);
+    assert_eq!(pods.origin.x + pods.size.width + RULE, nodes.origin.x);
+    assert!(pods.origin.x > memory.origin.x);
+    Ok(())
+}
+
+#[test]
 fn overview_sections_accept_keyboard_activation() -> anyhow::Result<()> {
     for key in ["enter", "space"] {
         let mut ui = Ui::open(Screen::Cluster)?;

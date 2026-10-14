@@ -17,6 +17,7 @@ mod overlay;
 mod popover;
 mod presence;
 mod prose;
+mod section;
 mod select;
 mod selectable;
 mod split;
@@ -49,6 +50,7 @@ pub use overlay::{
 pub(crate) use popover::{Dismissal, Step, above_right, appear, shadow, step, surface};
 pub use presence::{Presence, slide_in, slide_out, swap_in};
 pub use prose::Prose;
+pub use section::ClickableSection;
 pub use select::{Select, SelectEvent};
 pub use selectable::{SelectAllText, Selectable, SelectableText};
 pub use split::Split;
