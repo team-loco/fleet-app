@@ -13,8 +13,8 @@ use crate::kit::{
     Toast, Toggle, confirm, overlay_layer, parse_unified, toast,
 };
 use crate::theme::{
-    self, ActiveTheme, DOCK_HEIGHT, FONT_MONO, Palette, RULE, SPACE_4, SPACE_6, SPACE_8, STRIP,
-    TEXT_MONO, TEXT_SMALL, TEXT_UI,
+    self, ActiveTheme, DOCK_HEIGHT, FONT_MONO, Palette, RULE, SPACE_4, SPACE_6, SPACE_8, TEXT_MONO,
+    TEXT_SMALL, TEXT_UI, TITLE_ROW,
 };
 
 const SELECT_WIDTH: Pixels = px(220.);
@@ -842,7 +842,7 @@ impl Render for Gallery {
             .text_size(TEXT_UI)
             .child(
                 div()
-                    .h(STRIP)
+                    .h(TITLE_ROW)
                     .flex_none()
                     .bg(palette.chrome)
                     .border_b(RULE)

@@ -182,3 +182,12 @@ Settled; change only with a new entry that says why.
     yet: a rename, or a copy that leaves the old folder in place when the rename fails
     (`flock_kube::migrate`). Sample data keeps the Flux convention repo name `fleet-infra`, and the
     kind scenario clusters stay `fleet-a` and `fleet-b`.
+29. **One title row; the collapsed sidebar is hidden** (#165, product owner; supersedes the strip and
+    collapsed width in 25): the sidebar's top strip and the pane tab strip are one 32px title row
+    (`theme::TITLE_ROW`, the design's tab strip height; the 44px page header sits below the tab
+    strip, so it never shares a row with the lights). The traffic lights are centred in it
+    (`TRAFFIC_LIGHT_X` 10px, `TRAFFIC_LIGHT_Y` 9px) and never move. ⌘B collapses the sidebar to 0px;
+    the first pane's tab strip then starts with the window controls: `TRAFFIC_LIGHTS_INSET` (78px,
+    the 60px measured span of the three lights from x 10 plus 8px) of empty, draggable row, then the
+    expand chevron. The controls' width animates with the sidebar's, so tabs never pass under the
+    lights. Empty parts of the title row drag the window in both states.

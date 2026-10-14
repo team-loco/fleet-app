@@ -9,7 +9,7 @@ use super::Shell;
 use crate::kit::{Tooltip, status_symbols};
 use crate::theme::{
     ActiveTheme, FONT_MONO, FONT_STATUS, Palette, RULE, SPACE_3, SPACE_4, SPACE_6, TAB_CLOSE,
-    TAB_STRIP, TEXT_BODY, TEXT_GLYPH, TEXT_LABEL, TEXT_UI,
+    TEXT_BODY, TEXT_GLYPH, TEXT_LABEL, TEXT_UI, TITLE_ROW,
 };
 
 const CLOSE_GLYPH: &str = "×";
@@ -34,7 +34,7 @@ impl Render for DraggedTab {
         let palette = *cx.palette();
         div()
             .flex()
-            .h(TAB_STRIP)
+            .h(TITLE_ROW)
             .bg(palette.editor)
             .border(RULE)
             .border_color(palette.line2)
@@ -44,7 +44,11 @@ impl Render for DraggedTab {
 }
 
 impl Shell {
-    pub(super) fn tab_strip(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn tab_strip(
+        &mut self,
+        leading: Option<AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let palette = *cx.palette();
         let pane = self.state.panes().focused();
         let active = pane.active_index();
@@ -72,18 +76,25 @@ impl Shell {
             }))
             .child(div().flex_1())
             .child(div().h(RULE).bg(palette.line));
+        let tabs = div()
+            .id("tab-strip-tabs")
+            .flex()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .overflow_x_scroll()
+            .track_scroll(&self.tab_strip.scroll)
+            .children(children)
+            .child(rest);
         div()
-            .id("tab-strip")
             .debug_selector(|| "tab-strip".to_owned())
             .flex()
             .flex_none()
             .w_full()
-            .h(TAB_STRIP)
+            .h(TITLE_ROW)
             .bg(palette.chrome)
-            .overflow_x_scroll()
-            .track_scroll(&self.tab_strip.scroll)
-            .children(children)
-            .child(rest)
+            .children(leading)
+            .child(tabs)
             .into_any_element()
     }
 

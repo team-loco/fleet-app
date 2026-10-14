@@ -3,7 +3,8 @@ use flock_core::resources::EVENT_LIST;
 use flock_core::{ClusterId, ClusterSummary, Command, Page};
 use flock_shots::Ui;
 use flock_ui::Shell;
-use flock_ui::theme::{SIDEBAR, SIDEBAR_COLLAPSED};
+use flock_ui::theme::{ICON_BUTTON, SIDEBAR, SPACE_3, TITLE_ROW, TRAFFIC_LIGHTS_INSET};
+use gpui::Pixels;
 
 const EXPECTED_WIDTH: u32 = 2880;
 const EXPECTED_HEIGHT: u32 = 1800;
@@ -19,20 +20,47 @@ fn command_k_opens_the_palette_and_enter_runs_the_top_hit() -> anyhow::Result<()
     Ok(())
 }
 
+fn width(ui: &mut Ui, selector: &'static str) -> Option<Pixels> {
+    ui.bounds(selector).map(|bounds| bounds.size.width)
+}
+
+fn left(ui: &mut Ui, selector: &'static str) -> Option<Pixels> {
+    ui.bounds(selector).map(|bounds| bounds.origin.x)
+}
+
 #[test]
-fn command_b_collapses_the_sidebar_to_a_narrow_strip() -> anyhow::Result<()> {
+fn command_b_hides_the_sidebar_and_insets_the_tab_strip() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     let before = ui.state();
     assert!(before.sidebar_open);
-    let open = ui.bounds("sidebar").map(|bounds| bounds.size.width);
-    assert_eq!(open, Some(SIDEBAR));
+    assert_eq!(width(&mut ui, "sidebar"), Some(SIDEBAR));
+    assert!(ui.bounds("window-controls").is_none());
+    assert_eq!(left(&mut ui, "tab-0"), Some(SIDEBAR));
     ui.press("cmd-b")?;
     assert!(!ui.state().sidebar_open);
     assert_eq!(ui.state().location().cluster, before.location().cluster);
-    let collapsed = ui.bounds("sidebar").map(|bounds| bounds.size.width);
-    assert_eq!(collapsed, Some(SIDEBAR_COLLAPSED));
-    assert!(ui.bounds("expand-sidebar").is_some());
+    assert_eq!(width(&mut ui, "sidebar"), Some(Pixels::ZERO));
+    let controls = TRAFFIC_LIGHTS_INSET + ICON_BUTTON + SPACE_3;
+    assert_eq!(width(&mut ui, "window-controls"), Some(controls));
+    assert_eq!(left(&mut ui, "tab-0"), Some(controls));
     ui.press("cmd-b")?;
+    assert!(ui.state().sidebar_open);
+    assert_eq!(width(&mut ui, "sidebar"), Some(SIDEBAR));
+    assert_eq!(width(&mut ui, "window-controls"), Some(Pixels::ZERO));
+    assert_eq!(left(&mut ui, "tab-0"), Some(SIDEBAR));
+    Ok(())
+}
+
+#[test]
+fn the_expand_chevron_sits_after_the_traffic_lights_in_the_title_row() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.press("cmd-b")?;
+    let chevron = ui
+        .bounds("expand-sidebar")
+        .ok_or_else(|| anyhow::anyhow!("no expand chevron"))?;
+    assert_eq!(chevron.origin.x, TRAFFIC_LIGHTS_INSET);
+    assert_eq!(chevron.center().y, TITLE_ROW / 2.);
+    ui.click("expand-sidebar")?;
     assert!(ui.state().sidebar_open);
     Ok(())
 }
@@ -1183,7 +1211,7 @@ fn the_switcher_gear_opens_settings_and_right_click_offers_connection_actions() 
 }
 
 #[test]
-fn the_sidebar_names_its_scope_and_collapses_to_a_bare_chevron() -> anyhow::Result<()> {
+fn the_sidebar_names_its_scope_and_hides_it_when_collapsed() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     assert!(ui.bounds("sidebar-scope").is_some());
     ui.press("cmd-b")?;

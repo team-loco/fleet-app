@@ -666,6 +666,7 @@ impl Render for Shell {
         let palette = *cx.palette();
         self.keep_keyboard_focus(window, cx);
         let page = self.page(window, cx);
+        let controls = self.window_controls(cx);
         let root = div()
             .id("shell")
             .key_context(KEY_CONTEXT)
@@ -725,7 +726,7 @@ impl Render for Shell {
                             .flex_col()
                             .flex_1()
                             .min_w_0()
-                            .child(self.tab_strip(cx))
+                            .child(self.tab_strip(controls, cx))
                             .child(div().flex().flex_1().min_h_0().child(page)),
                     ),
             )
