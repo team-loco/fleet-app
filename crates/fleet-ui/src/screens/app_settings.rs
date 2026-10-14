@@ -1,22 +1,35 @@
-use fleet_core::app_settings::{PollInterval, SnapshotCap, ThemeChoice};
+use fleet_core::app_settings::{Highlight, PollInterval, Rgb, SnapshotCap, ThemeChoice};
 use fleet_core::{AppSettings, Command, Page, Status};
 use gpui::{
-    AnyElement, App, Context, EventEmitter, FontWeight, InteractiveElement as _, IntoElement,
-    MouseButton, ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled,
-    Subscription, Window, div, relative,
+    AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter, FontWeight, Hsla,
+    InteractiveElement as _, IntoElement, MouseButton, ParentElement, Render, SharedString,
+    StatefulInteractiveElement as _, Styled, Subscription, Window, div, relative,
 };
 
+use crate::highlight;
 use crate::keymap;
-use crate::kit::{Kbd, Link, SectionLabel, Segmented, Toast, Toggle, toast};
+use crate::kit::{
+    InputEvent, Kbd, Link, SectionLabel, Segmented, TextField, TextFieldState, Toast, Toggle,
+    Tooltip, toast,
+};
 use crate::settings::{self, Settings};
 use crate::theme::{
-    ActiveTheme, LINE_PROSE, PAGE_HEADER, Palette, ROW_DOCUMENT, RULE, SETTINGS_COLUMN, SPACE_1,
-    SPACE_2, SPACE_6, SPACE_7, SPACE_8, TEXT_SMALL, TEXT_TITLE,
+    ActiveTheme, Appearance, HEX_FIELD, LINE_PROSE, PAGE_HEADER, Palette, RADIUS, RADIUS_SMALL,
+    ROW_DOCUMENT, RULE, SETTINGS_COLUMN, SPACE_1, SPACE_2, SPACE_4, SPACE_6, SPACE_7, SPACE_8,
+    SWATCH, TEXT_SMALL, TEXT_TITLE, Theme,
 };
 
 const APPEARANCE: &str = "Appearance";
 const THEME: &str = "Theme";
 const THEME_HINT: &str = "System follows macOS as it switches between light and dark.";
+const HIGHLIGHT_SENTENCE: &str = "Pick a preset or type a hex colour. Fleet derives the light and \
+dark variants and adjusts their lightness so text stays readable.";
+const PRIMARY: &str = "Primary highlight";
+const PRIMARY_HINT: &str = "Links, primary buttons, the focus ring and the active tab.";
+const SECONDARY: &str = "Secondary highlight";
+const SECONDARY_HINT: &str = "Selected rows and navigation.";
+const HEX_PLACEHOLDER: &str = "#hex";
+const BAD_HEX: &str = "Expected a colour like #3a7bd5.";
 const REFRESH: &str = "Data refresh";
 const REFRESH_SENTENCE: &str =
     "Resource changes are pushed by Kubernetes watches as they happen; only metrics are polled.";
@@ -39,16 +52,186 @@ const UNBUNDLED: &str =
 const SAVE_FAILED: &str = "Settings could not be saved";
 const SHORTCUTS: &str = "Keyboard shortcuts";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Slot {
+    Primary,
+    Secondary,
+}
+
+impl Slot {
+    const ALL: [Self; 2] = [Self::Primary, Self::Secondary];
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Primary => 0,
+            Self::Secondary => 1,
+        }
+    }
+
+    const fn id(self) -> &'static str {
+        match self {
+            Self::Primary => "primary",
+            Self::Secondary => "secondary",
+        }
+    }
+
+    fn get(self, settings: &AppSettings) -> Highlight {
+        match self {
+            Self::Primary => settings.primary,
+            Self::Secondary => settings.secondary,
+        }
+    }
+
+    fn set(self, settings: &mut AppSettings, highlight: Highlight) {
+        match self {
+            Self::Primary => settings.primary = highlight,
+            Self::Secondary => settings.secondary = highlight,
+        }
+    }
+
+    fn swatch(self, highlight: Highlight, appearance: Appearance) -> Hsla {
+        let base = Palette::for_appearance(appearance);
+        let derived = highlight::apply(base, appearance, highlight, highlight);
+        match self {
+            Self::Primary => derived.acc,
+            Self::Secondary => derived.selline,
+        }
+    }
+}
+
 pub struct AppSettingsScreen {
+    hex: [Entity<TextFieldState>; 2],
+    invalid: [bool; 2],
     _settings: Subscription,
+    _hex_events: [Subscription; 2],
 }
 
 impl EventEmitter<Command> for AppSettingsScreen {}
 
 impl AppSettingsScreen {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let observe = cx.observe_global::<Settings>(|_, cx| cx.notify());
-        Self { _settings: observe }
+        let current = settings::current(cx).clone();
+        let hex = Slot::ALL.map(|slot| {
+            let value = match slot.get(&current) {
+                Highlight::Custom(rgb) => rgb.to_string(),
+                _ => String::new(),
+            };
+            cx.new(|cx| {
+                TextFieldState::new(window, cx)
+                    .placeholder(HEX_PLACEHOLDER)
+                    .default_value(value)
+            })
+        });
+        let hex_events = Slot::ALL.map(|slot| {
+            let field = hex[slot.index()].clone();
+            cx.subscribe(&field, move |this, field, event: &InputEvent, cx| {
+                if let InputEvent::Change = event {
+                    let text = field.read(cx).value();
+                    this.typed(slot, &text, cx);
+                }
+            })
+        });
+        Self {
+            hex,
+            invalid: [false; 2],
+            _settings: observe,
+            _hex_events: hex_events,
+        }
+    }
+
+    fn typed(&mut self, slot: Slot, text: &str, cx: &mut Context<Self>) {
+        let parsed = (!text.trim().is_empty()).then(|| text.parse::<Rgb>());
+        let invalid = matches!(parsed, Some(Err(_)));
+        if let Some(Ok(rgb)) = parsed {
+            change(cx, |s| slot.set(s, Highlight::Custom(rgb)));
+        }
+        if let Some(flag) = self.invalid.get_mut(slot.index()) {
+            *flag = invalid;
+        }
+        cx.notify();
+    }
+
+    fn pick(&mut self, slot: Slot, preset: Highlight, window: &mut Window, cx: &mut Context<Self>) {
+        change(cx, |s| slot.set(s, preset));
+        if let Some(field) = self.hex.get(slot.index()) {
+            field.update(cx, |field, cx| field.set_value(String::new(), window, cx));
+        }
+        if let Some(flag) = self.invalid.get_mut(slot.index()) {
+            *flag = false;
+        }
+        cx.notify();
+    }
+
+    fn highlight_row(
+        &self,
+        slot: Slot,
+        current: &AppSettings,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let appearance = cx.global::<Theme>().appearance;
+        let chosen = slot.get(current);
+        let swatches: Vec<AnyElement> = Highlight::PRESETS
+            .iter()
+            .map(|preset| {
+                let preset = *preset;
+                let fill = slot.swatch(preset, appearance);
+                let selected = chosen == preset;
+                let label = preset.label();
+                let selector = format!("{}-{}", slot.id(), label.to_lowercase());
+                div()
+                    .id(ElementId::Name(selector.clone().into()))
+                    .debug_selector(move || selector.clone())
+                    .size(SWATCH)
+                    .flex_none()
+                    .p(SPACE_1)
+                    .rounded(RADIUS)
+                    .border(RULE)
+                    .border_color(if selected {
+                        palette.fg
+                    } else {
+                        gpui::transparent_black()
+                    })
+                    .cursor_pointer()
+                    .tooltip(Tooltip::text(label))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.pick(slot, preset, window, cx);
+                    }))
+                    .child(div().size_full().rounded(RADIUS_SMALL).bg(fill))
+                    .into_any_element()
+            })
+            .collect();
+        let field = self.hex.get(slot.index()).map(|field| {
+            div()
+                .debug_selector(move || format!("{}-hex", slot.id()))
+                .child(TextField::new(field).width(HEX_FIELD).compact())
+        });
+        let control = div()
+            .flex()
+            .items_center()
+            .gap(SPACE_2)
+            .children(swatches)
+            .child(div().w(SPACE_4))
+            .children(field);
+        let invalid = self.invalid.get(slot.index()).copied().unwrap_or_default();
+        let (title, hint) = match slot {
+            Slot::Primary => (PRIMARY, PRIMARY_HINT),
+            Slot::Secondary => (SECONDARY, SECONDARY_HINT),
+        };
+        let error = invalid.then(|| {
+            div()
+                .text_size(TEXT_SMALL)
+                .text_color(palette.status(Status::Warn))
+                .child(BAD_HEX)
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap(SPACE_1)
+            .child(row(title, hint, control, palette))
+            .children(error)
+            .into_any_element()
     }
 
     fn header(palette: &Palette) -> impl IntoElement {
@@ -69,7 +252,7 @@ impl AppSettingsScreen {
             )
     }
 
-    fn appearance(current: &AppSettings, palette: &Palette) -> impl IntoElement {
+    fn appearance(current: &AppSettings, palette: &Palette) -> gpui::Div {
         let selected = ThemeChoice::ALL
             .iter()
             .position(|choice| *choice == current.theme)
@@ -86,6 +269,19 @@ impl AppSettingsScreen {
                 }
             });
         section(APPEARANCE, palette).child(row(THEME, THEME_HINT, choices, palette))
+    }
+
+    fn highlights(
+        &self,
+        current: &AppSettings,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let mut rows = vec![prose(HIGHLIGHT_SENTENCE, palette).into_any_element()];
+        for slot in Slot::ALL {
+            rows.push(self.highlight_row(slot, current, palette, cx));
+        }
+        rows
     }
 
     fn refresh(
@@ -290,6 +486,8 @@ impl Render for AppSettingsScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
         let current = settings::current(cx).clone();
+        let highlights = self.highlights(&current, &palette, cx);
+        let appearance = Self::appearance(&current, &palette);
         let column = div()
             .flex()
             .flex_col()
@@ -297,7 +495,7 @@ impl Render for AppSettingsScreen {
             .max_w(SETTINGS_COLUMN)
             .px(SPACE_8)
             .pb(SPACE_8)
-            .child(Self::appearance(&current, &palette))
+            .child(appearance.children(highlights))
             .child(Self::refresh(&current, &palette, cx))
             .child(Self::notifications(&current, &palette, cx))
             .child(shortcuts(&palette));

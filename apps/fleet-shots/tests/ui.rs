@@ -222,6 +222,40 @@ fn command_comma_opens_settings_and_its_controls_change_the_app_settings() -> an
     Ok(())
 }
 
+#[test]
+fn highlight_swatches_and_hex_fields_recolour_the_app_live() -> anyhow::Result<()> {
+    use fleet_core::app_settings::{Highlight, Rgb};
+    use fleet_ui::theme::{ActiveTheme, Palette};
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.press("cmd-,")?;
+    let current = |ui: &Ui| ui.read(|_, cx| fleet_ui::settings::current(cx).clone());
+    let palette = |ui: &Ui| ui.read_app(|cx| *cx.palette());
+    let dark = Palette::dark();
+    assert_eq!(palette(&ui), dark);
+    ui.click("primary-purple")?;
+    assert_eq!(current(&ui).primary, Highlight::Purple);
+    assert_ne!(palette(&ui).acc, dark.acc);
+    assert_eq!(palette(&ui).sel, dark.sel);
+    ui.click("secondary-hex")?;
+    ui.type_text("#12")?;
+    assert_eq!(current(&ui).secondary, Highlight::Blue);
+    ui.type_text("ab5g")?;
+    assert_eq!(current(&ui).secondary, Highlight::Blue);
+    ui.press("backspace backspace")?;
+    ui.type_text("56")?;
+    let custom = Highlight::Custom(Rgb {
+        r: 0x12,
+        g: 0xab,
+        b: 0x56,
+    });
+    assert_eq!(current(&ui).secondary, custom);
+    assert_ne!(palette(&ui).sel, dark.sel);
+    ui.click("secondary-blue")?;
+    ui.click("primary-blue")?;
+    assert_eq!(palette(&ui), dark);
+    Ok(())
+}
+
 const DEPLOYMENTS: &str = "resources-Deployment";
 const SAMPLE: &str = "prod-us-east";
 const DRAG: f32 = 80.;
@@ -1036,7 +1070,12 @@ fn the_workload_dock_opens_a_pods_logs_in_a_tab() -> anyhow::Result<()> {
     assert!(location.container.is_some());
     assert_eq!(
         tab_pages(&ui),
-        [Page::Deployments, Page::Logs, Page::Kustomizations, Page::Deployments]
+        [
+            Page::Deployments,
+            Page::Logs,
+            Page::Kustomizations,
+            Page::Deployments
+        ]
     );
     assert_eq!(active_tab(&ui), 1);
     assert!(ui.bounds("tab-logs-follow").is_some());

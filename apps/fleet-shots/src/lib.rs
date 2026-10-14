@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow, bail};
 use fleet::{Preset, Screen, WINDOW_HEIGHT, WINDOW_WIDTH, bind_keys, root_view};
+use fleet_core::app_settings::Highlight;
 use fleet_core::{AppState, Backend, Command, Receiver, Sender, Update};
 use fleet_demo::DemoBackend;
 use fleet_ui::theme::Appearance;
@@ -36,11 +37,21 @@ fn window_size() -> Size<Pixels> {
     size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT))
 }
 
-fn setup(appearance: Appearance, cx: &mut App) -> anyhow::Result<()> {
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Highlights {
+    pub primary: Highlight,
+    pub secondary: Highlight,
+}
+
+fn setup(appearance: Appearance, highlights: Highlights, cx: &mut App) -> anyhow::Result<()> {
     fleet_ui::init(Some(appearance), cx)?;
     bind_keys(cx);
     cx.set_reduce_motion(true);
-    Ok(())
+    fleet_ui::settings::update(cx, |settings| {
+        settings.primary = highlights.primary;
+        settings.secondary = highlights.secondary;
+    })
+    .map_err(|error| anyhow!("applying highlights: {error}"))
 }
 
 fn demo(state: Option<StateFixture>) -> (Receiver<Update>, Sender<Command>) {
@@ -213,6 +224,7 @@ impl Headless {
         screen: Screen,
         preset: &Preset,
         appearance: Appearance,
+        highlights: Highlights,
         state: Option<StateFixture>,
     ) -> anyhow::Result<Self> {
         let mut cx = HeadlessAppContext::with_platform(
@@ -220,7 +232,7 @@ impl Headless {
             Arc::new(Assets),
             gpui_platform::current_headless_renderer,
         );
-        cx.update(|cx| setup(appearance, cx))?;
+        cx.update(|cx| setup(appearance, highlights, cx))?;
         let mut shell = None;
         let window = cx.open_window(window_size(), |window, cx| {
             let (view, built) = view(screen, preset, state, window, cx);
@@ -261,16 +273,17 @@ pub fn render(
     preset: &Preset,
     appearance: Appearance,
 ) -> anyhow::Result<RgbaImage> {
-    Headless::open(screen, preset, appearance, None)?.image()
+    Headless::open(screen, preset, appearance, Highlights::default(), None)?.image()
 }
 
 pub fn render_state(
     screen: Screen,
     preset: &Preset,
     appearance: Appearance,
+    highlights: Highlights,
     state: Option<StateFixture>,
 ) -> anyhow::Result<RgbaImage> {
-    Headless::open(screen, preset, appearance, state)?.image()
+    Headless::open(screen, preset, appearance, highlights, state)?.image()
 }
 
 pub fn save(image: &RgbaImage, path: &Path) -> anyhow::Result<()> {
@@ -314,7 +327,7 @@ impl Ui {
     ) -> anyhow::Result<Self> {
         let mut app =
             TestAppContext::build_with_text_system(TestDispatcher::new(SEED), None, text_system());
-        app.update(|cx| setup(appearance, cx))?;
+        app.update(|cx| setup(appearance, Highlights::default(), cx))?;
         let mut shell = None;
         let window = app.open_window(window_size(), |window, cx| {
             let (view, built) = view(screen, &preset, state, window, cx);
@@ -435,7 +448,13 @@ impl Ui {
     }
 
     pub fn save_png(&self, path: &Path) -> anyhow::Result<()> {
-        let mut headless = Headless::open(self.screen, &self.preset, self.appearance, self.state)?;
+        let mut headless = Headless::open(
+            self.screen,
+            &self.preset,
+            self.appearance,
+            Highlights::default(),
+            self.state,
+        )?;
         for step in &self.steps {
             headless.run(step)?;
         }

@@ -80,3 +80,4 @@ Spec column points at `design/`.
 | UPD1 | release pipeline: `mise run release`, tag-triggered arm64 build, ed25519-signed zip on GitHub Releases | claude | auto-update | done |
 | UPD2 | in-app updater: check, verify, stage, restart to update; menu, palette, settings and status bar | claude | auto-update-app | in progress |
 | TABS1 | pane tabs (one pane), v3 sidebar and status-bar switcher, tabs persisted per window | claude | tabs-and-shell-v3 | doing |
+| HL1 | primary and secondary highlight colours: presets or hex, derived for dark and light with WCAG checks | claude | themes | done |

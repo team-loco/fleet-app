@@ -63,6 +63,8 @@ gpui_platform::application()
 - `theme::init` also pushes fonts, radius and the main colours into `gpui_component::Theme` via
   `Theme::change(mode, None, cx)` then `Theme::update(cx, |t| ...)` (use `update`, not `global_mut`, so
   the kit's tokens and base projection stay in sync). Restyle more kit fields there as screens need them.
+- `theme::configure(&AppSettings)` sets the mode and the two highlights; the palette is
+  `highlight::apply(Palette::for_appearance(..), ..)`, re-derived on every mode or highlight change.
 - OS appearance: `cx.observe_window_appearance(window, |_, window, cx| theme::follow_window(window, cx))`
   in the root view; `window.appearance()` returns `WindowAppearance::{Light, VibrantLight, Dark, VibrantDark}`.
   `--appearance dark|light` sets `Theme.forced`, which wins over the OS.
