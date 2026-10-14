@@ -4,11 +4,13 @@ use gpui::{
     Subscription, Task, Window, div,
 };
 
-use crate::kit::{Button, InputEvent, LogView, MetaLine, PageHeader, TextField, TextFieldState};
+use crate::kit::{
+    Button, InputEvent, LOG_FILTER_PLACEHOLDER, LogView, MetaLine, PageHeader, TextField,
+    TextFieldState,
+};
 use crate::screens::workload::kit_line;
 use crate::theme::{ActiveTheme, RULE, SPACE_3, SPACE_4, SPACE_8};
 
-const FILTER_PLACEHOLDER: &str = "filter  /regex/";
 const FOLLOW: &str = "follow";
 const WRAP: &str = "wrap";
 const META_SEPARATOR: &str = " · ";
@@ -33,7 +35,8 @@ impl LogsScreen {
         cx: &mut Context<Self>,
     ) -> Self {
         let logs = cx.new(|_| LogView::new("tab-logs"));
-        let filter = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER_PLACEHOLDER));
+        let filter =
+            cx.new(|cx| TextFieldState::new(window, cx).placeholder(LOG_FILTER_PLACEHOLDER));
         let filter_events = cx.subscribe(&filter, |this, filter, event: &InputEvent, cx| {
             if let InputEvent::Change = event {
                 let query = filter.read(cx).value();

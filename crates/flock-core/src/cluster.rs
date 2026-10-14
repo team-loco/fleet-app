@@ -6,10 +6,11 @@ use crate::filter::TextFilter;
 use crate::nodes::{Node, NodeSummary};
 use crate::overview::{Capacity, Overview, WorkloadHealth};
 use crate::resources::{Resource, ResourceKind};
+use crate::units::{self, CPU_UNIT, MEMORY_UNIT, NOT_MEASURED, WAITING_FOR_METRICS};
 use crate::{Counts, Page, Status};
 
-pub const CPU_UNIT: &str = "cores";
-pub const MEMORY_UNIT: &str = "GiB";
+const CPU_NOTE: &str = "CPU in use by the pods in this namespace";
+const MEMORY_NOTE: &str = "Memory in use by the pods in this namespace";
 pub const ACTIVE_PHASE: &str = "Active";
 
 #[derive(Clone, Debug, PartialEq)]
@@ -27,6 +28,24 @@ pub struct Namespace {
 impl Namespace {
     pub fn matches(&self, query: &TextFilter) -> bool {
         query.matches(Some(&self.name), &[self.name.as_str(), self.phase.as_str()])
+    }
+
+    pub fn cpu_label(&self) -> String {
+        self.cpu
+            .map_or_else(|| NOT_MEASURED.into(), units::cpu_cores)
+    }
+
+    pub fn memory_label(&self) -> String {
+        self.memory
+            .map_or_else(|| NOT_MEASURED.into(), units::memory_gib)
+    }
+
+    pub fn cpu_note(&self) -> &'static str {
+        self.cpu.map_or(WAITING_FOR_METRICS, |_| CPU_NOTE)
+    }
+
+    pub fn memory_note(&self) -> &'static str {
+        self.memory.map_or(WAITING_FOR_METRICS, |_| MEMORY_NOTE)
     }
 
     pub fn phase_note(&self) -> Option<&str> {
@@ -118,6 +137,22 @@ mod tests {
     }
 
     #[test]
+    fn namespace_usage_reads_a_dash_until_metrics_arrive() {
+        let mut ns = namespace("payments", Counts::default());
+        assert_eq!(ns.cpu_label(), "—");
+        assert_eq!(ns.memory_label(), "—");
+        assert_eq!(ns.cpu_note(), "Waiting for metrics");
+        ns.cpu = Some(0.026);
+        ns.memory = Some(0.25);
+        assert_eq!(ns.cpu_label(), "26m");
+        assert_eq!(ns.memory_label(), "256 MiB");
+        assert_eq!(
+            ns.memory_note(),
+            "Memory in use by the pods in this namespace"
+        );
+    }
+
+    #[test]
     fn namespace_filter_matches_its_name() {
         let ns = namespace("payments", Counts::default());
         assert!(ns.matches(&TextFilter::parse("pay")));
@@ -180,8 +215,8 @@ mod tests {
             allocatable: 8.,
         };
         let detail = detail(PodPhases::default(), vec![a, b]);
-        assert_eq!(detail.cpu().amount(), "4 / 16 cores");
-        assert_eq!(detail.memory().amount(), "0 / 0 GiB");
+        assert_eq!(detail.cpu().amount(), "4.0 / 16.0 cores");
+        assert_eq!(detail.memory().amount(), "0.0 / 0.0 GiB");
     }
 
     #[test]

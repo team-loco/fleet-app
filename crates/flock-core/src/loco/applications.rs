@@ -125,18 +125,26 @@ pub struct Resources {
 impl Resources {
     pub fn summary(&self) -> String {
         let replicas = if self.min_replicas == self.max_replicas {
-            format!("{} replicas", self.min_replicas)
+            format!(
+                "{} {}",
+                self.min_replicas,
+                if self.min_replicas == 1 {
+                    "replica"
+                } else {
+                    "replicas"
+                }
+            )
         } else {
             format!("{}–{} replicas", self.min_replicas, self.max_replicas)
         };
         let mut parts = vec![
-            format!("cpu {}", self.cpu),
-            format!("mem {}", self.memory),
+            format!("CPU {}", self.cpu),
+            format!("memory {}", self.memory),
             replicas,
         ];
         parts.extend(
             self.cpu_target
-                .map(|target| format!("scale at {target}% cpu")),
+                .map(|target| format!("scales at {target}% CPU")),
         );
         parts.join(SEPARATOR)
     }
@@ -433,7 +441,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             resources.summary(),
-            "cpu 500m · mem 512Mi · 2–6 replicas · scale at 70% cpu"
+            "CPU 500m · memory 512Mi · 2–6 replicas · scales at 70% CPU"
         );
         let check = HealthCheck {
             path: "/healthz".into(),

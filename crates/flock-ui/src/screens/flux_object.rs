@@ -34,7 +34,7 @@ const PHRASE_SEPARATOR: &str = " · ";
 const PHRASE_BREAK: &str = " ·\u{a0}";
 const AGE_COLUMN: Pixels = px(40.);
 const REVISION_COLUMN: Pixels = px(70.);
-const COUNT_COLUMN: Pixels = px(34.);
+const COUNT_COLUMN: Pixels = px(72.);
 const COUNT_MAX: Pixels = px(90.);
 const REVISION_MAX: Pixels = px(160.);
 const PEER_GLYPH: Pixels = px(12.);
@@ -414,10 +414,12 @@ impl FluxObjectPage {
             }
         };
         let mut prose = Prose::new("flux-meta");
+        let mut has_text = false;
         match &object.detail {
             FluxDetail::Kustomization => {}
             FluxDetail::HelmRelease(detail) => {
-                prose = prose.text(format!("chart {} · ", detail.chart));
+                prose = prose.text(format!("chart {}", detail.chart));
+                has_text = true;
             }
             FluxDetail::Source(source) => {
                 let fetched = time::age(source.fetched);
@@ -434,12 +436,13 @@ impl FluxObjectPage {
         }
         let commits = object.key.kind == FluxKind::Kustomization;
         if let Some(applied) = &object.applied {
-            prose = prose.text("applied ");
+            prose = prose.text(format!("{}applied ", separator(has_text)));
             prose = revision_link(prose, &applied.id, commits, open_commit(applied.id.clone()));
             prose = prose.text(format!(" {} ago", time::age(applied.age)));
+            has_text = true;
         }
         if let Some(healthy) = object.shown_last_healthy() {
-            prose = prose.text(" · last healthy ");
+            prose = prose.text(format!("{}last healthy ", separator(has_text)));
             prose = revision_link(prose, &healthy.id, commits, open_commit(healthy.id.clone()));
             prose = prose.text(format!(" {} ago", time::age(healthy.age)));
         }
@@ -1042,6 +1045,10 @@ fn history_columns() -> Vec<Column<HistoryEntry>> {
         .end()
         .auto(COUNT_COLUMN, COUNT_MAX),
     ]
+}
+
+fn separator(after_text: bool) -> &'static str {
+    if after_text { PHRASE_SEPARATOR } else { "" }
 }
 
 fn release_columns() -> Vec<Column<HelmRevision>> {

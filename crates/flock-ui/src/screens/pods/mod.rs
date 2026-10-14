@@ -16,12 +16,13 @@ use gpui::{
 
 mod streams;
 
-use streams::{LogSession, SEARCH_PLACEHOLDER, ShellSession, TERMINAL_ID};
+use streams::{LogSession, ShellSession, TERMINAL_ID};
 
 use crate::kit::{
     Button, Column, ConfirmDialog, DockState, FilterBar, FilterEvent, InputEvent, InspectorPane,
-    KeyValue, Link, LogView, MenuItem, SectionLabel, Select, SelectEvent, ShowAll, StatusGlyph,
-    StatusText, Table, TableEvent, Terminal, TextFieldState, chip_label, confirm, swap_in,
+    KeyValue, LOG_FILTER_PLACEHOLDER, Link, LogView, MenuItem, SectionLabel, Select, SelectEvent,
+    ShowAll, StatusGlyph, StatusText, Table, TableEvent, Terminal, TextFieldState, chip_label,
+    confirm, swap_in,
 };
 use crate::screens::{ListShape, empty_list, new_tab_item};
 use crate::theme::{
@@ -34,7 +35,7 @@ const INSPECTOR_ID: &str = "pod-inspector";
 const NAME_MIN: Pixels = px(220.);
 const NAME_WEIGHT: f32 = 2.;
 const NAMESPACE: Pixels = px(100.);
-const CONTAINERS: Pixels = px(72.);
+const CONTAINERS: Pixels = px(96.);
 const RESTARTS: Pixels = px(64.);
 const AGE: Pixels = px(48.);
 const STATUS_MIN: Pixels = px(110.);
@@ -90,7 +91,8 @@ impl PodsScreen {
                 .row_key(|pod: &Pod| pod.name.clone().into())
                 .column_gap(SPACE_7)
         });
-        let search = cx.new(|cx| TextFieldState::new(window, cx).placeholder(SEARCH_PLACEHOLDER));
+        let search =
+            cx.new(|cx| TextFieldState::new(window, cx).placeholder(LOG_FILTER_PLACEHOLDER));
         let namespace = cx.new(|cx| {
             Select::new("pod-namespace", vec![ALL_NAMESPACES.into()], cx)
                 .mono()
@@ -685,8 +687,8 @@ fn events(pod: &Pod, palette: &Palette) -> impl IntoElement {
                         .child(StatusGlyph::new(event.status))
                         .child(div().flex_1().child(event.reason.clone()))
                         .child(div().text_color(palette.mute).child(format!(
-                            "×{} · {}",
-                            event.count,
+                            "{} · {}",
+                            flock_core::units::times(event.count),
                             flock_core::time::age(event.age)
                         ))),
                 )
@@ -812,7 +814,7 @@ fn columns() -> Vec<Column<Pod>> {
         .highlight()
         .fixed(NAMESPACE)
         .sort_by_key(|p: &Pod| p.namespace.clone()),
-        Column::new("Ctrs", container_squares).fixed(CONTAINERS),
+        Column::new("Containers", container_squares).fixed(CONTAINERS),
         Column::new("Restarts", |p: &Pod, palette| {
             let color = p
                 .restart_status()

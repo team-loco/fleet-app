@@ -1,12 +1,11 @@
-use flock_core::cluster::{CPU_UNIT, MEMORY_UNIT, Namespace};
+use flock_core::cluster::Namespace;
 use flock_core::emptiness::Noun;
 use flock_core::filter::StatusFilter;
-use flock_core::overview::fixed;
 use flock_core::time::age;
 use flock_core::{ClusterDetail, ClusterSummary, Counts, Page, Status};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
-    Render, SharedString, Styled, Window, div, px,
+    Render, Styled, Window, div, px,
 };
 
 use super::{ListShape, ScreenEvent, empty_list};
@@ -22,7 +21,6 @@ const PODS_WIDTH: Pixels = px(52.);
 const CPU_WIDTH: Pixels = px(84.);
 const MEMORY_WIDTH: Pixels = px(84.);
 const AGE_WIDTH: Pixels = px(44.);
-const NO_USAGE: &str = "—";
 
 pub struct NamespacesScreen {
     cluster_name: String,
@@ -193,13 +191,6 @@ fn name_cell(namespace: &Namespace, palette: &Palette) -> AnyElement {
         .into_any_element()
 }
 
-fn usage_label(value: Option<f32>, unit: &str) -> SharedString {
-    match value {
-        Some(value) => format!("{} {unit}", fixed(value)).into(),
-        None => NO_USAGE.into(),
-    }
-}
-
 fn columns() -> Vec<Column<Namespace>> {
     vec![
         Column::new("Name", name_cell)
@@ -215,27 +206,29 @@ fn columns() -> Vec<Column<Namespace>> {
             .end()
             .fixed(PODS_WIDTH)
             .sort_by_key(|n: &Namespace| n.pods),
-        Column::colored_text(
-            "CPU",
-            |n: &Namespace| usage_label(n.cpu, CPU_UNIT),
-            |_, p| p.fg2,
-        )
-        .mono()
-        .end()
-        .fixed(CPU_WIDTH)
-        .sortable(|a: &Namespace, b: &Namespace| {
-            a.cpu.unwrap_or(-1.).total_cmp(&b.cpu.unwrap_or(-1.))
-        }),
+        Column::colored_text("CPU", |n: &Namespace| n.cpu_label().into(), |_, p| p.fg2)
+            .mono()
+            .end()
+            .fixed(CPU_WIDTH)
+            .tooltip(|n: &Namespace| n.cpu_note().into())
+            .sortable(|a: &Namespace, b: &Namespace| {
+                a.cpu
+                    .unwrap_or_default()
+                    .total_cmp(&b.cpu.unwrap_or_default())
+            }),
         Column::colored_text(
             "Memory",
-            |n: &Namespace| usage_label(n.memory, MEMORY_UNIT),
+            |n: &Namespace| n.memory_label().into(),
             |_, p| p.fg2,
         )
         .mono()
         .end()
         .fixed(MEMORY_WIDTH)
+        .tooltip(|n: &Namespace| n.memory_note().into())
         .sortable(|a: &Namespace, b: &Namespace| {
-            a.memory.unwrap_or(-1.).total_cmp(&b.memory.unwrap_or(-1.))
+            a.memory
+                .unwrap_or_default()
+                .total_cmp(&b.memory.unwrap_or_default())
         }),
         Column::colored_text("Age", |n: &Namespace| age(n.age).into(), |_, p| p.mute)
             .mono()

@@ -1,6 +1,7 @@
 use crate::kit::SelectableText;
 use flock_core::changes::LineChange;
 use flock_core::compare::{Cell, Comparison, Field, SpecDiff};
+use flock_core::overview::plural;
 use flock_core::{ClusterId, Command, Page, ResourceRef, Snapshot, Status};
 use gpui::{
     AnyElement, Context, EventEmitter, FontWeight, InteractiveElement as _, IntoElement,
@@ -168,10 +169,8 @@ impl CompareScreen {
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let meta = format!(
-            "{} clusters{SEPARATOR}{LIVE_NOTE}",
-            comparison.clusters.len()
-        );
+        let clusters = plural(comparison.clusters.len(), "cluster", "clusters");
+        let meta = format!("{clusters}{SEPARATOR}{LIVE_NOTE}");
         let fields = comparison.visible(self.differences_only);
         let heads = cluster_row(comparison, self.resource.as_ref(), palette, cx);
         let spec = comparison

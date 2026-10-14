@@ -40,7 +40,7 @@ pub use input::{
 };
 pub use inspector::{Inspector, InspectorPane, clamp_inspector_width};
 pub use load::{ConnectionProgress, EmptyState, ErrorState, ShowAll, Skeleton};
-pub use log::{LOG_CAPACITY, Level, LogLine, LogView, strip_ansi};
+pub use log::{LOG_CAPACITY, LOG_FILTER_PLACEHOLDER, Level, LogLine, LogView, strip_ansi};
 pub use matrix::{Matrix, MatrixCell};
 pub use menu::{ActionMenu, MenuItem};
 pub use modal::Modal;

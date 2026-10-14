@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ClusterId, Page, ResourceRef, Snapshot, Status, Uid, time};
+use crate::{ClusterId, Page, ResourceRef, Snapshot, Status, Uid, time, units};
 
 const FILTER_HIDES_ALL: &str = "Nothing matches this filter.";
 const NOTHING_APPLIED_RECONCILING: &str =
@@ -262,7 +262,7 @@ impl HistoryEntry {
     }
 
     pub fn count_label(&self) -> Option<String> {
-        (self.count > 1).then(|| format!("×{}", self.count))
+        (self.count > 1).then(|| units::times(self.count))
     }
 }
 
@@ -625,7 +625,7 @@ pub(crate) mod tests {
             ..entry
         };
         assert_eq!(repeated.age_label(), "4m");
-        assert_eq!(repeated.count_label().as_deref(), Some("×18"));
+        assert_eq!(repeated.count_label().as_deref(), Some("18 times"));
     }
 
     #[test]

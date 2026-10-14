@@ -503,7 +503,7 @@ pub const EVENT_OBJECT_MIN: Pixels = px(290.);
 pub const EVENT_NAMESPACE_WIDTH: Pixels = px(110.);
 pub const EVENT_MESSAGE_WEIGHT: f32 = 2.;
 pub const EVENT_MESSAGE_MIN: Pixels = px(260.);
-pub const EVENT_COUNT_WIDTH: Pixels = px(40.);
+pub const EVENT_COUNT_WIDTH: Pixels = px(56.);
 pub const EVENT_AGE_WIDTH: Pixels = px(44.);
 
 pub fn terminal_color(color: vt100::Color, default: Hsla, palette: &Palette) -> Hsla {

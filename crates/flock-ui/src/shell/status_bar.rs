@@ -1,5 +1,6 @@
 use flock_core::action::forwards_label;
 use flock_core::gitops::flux_ready;
+use flock_core::overview::plural;
 use flock_core::palette::{COMMAND_PREFIX, STOP_FORWARD};
 use flock_core::{Command, Page, Status};
 use gpui::{
@@ -42,9 +43,9 @@ impl Shell {
                 format!("flux {}/{} ready", flux.ready, flux.total)
             }
             None => format!(
-                "{} of {} clusters connected",
+                "{} of {} connected",
                 snapshot.connected(),
-                snapshot.clusters.len()
+                plural(snapshot.clusters.len(), "cluster", "clusters")
             ),
         };
         div()

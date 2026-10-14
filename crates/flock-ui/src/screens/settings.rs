@@ -454,7 +454,20 @@ impl SettingsScreen {
         section(PREFERENCES, palette)
             .gap(SPACE_6)
             .child(labelled(DEFAULT_NAMESPACE, self.namespace.clone()))
-            .child(labelled(METRICS_SOURCE, TextField::new(&self.metrics)))
+            .child(labelled(
+                METRICS_SOURCE,
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(SPACE_3)
+                    .child(TextField::new(&self.metrics))
+                    .child(
+                        div()
+                            .text_size(TEXT_SMALL)
+                            .text_color(palette.mute)
+                            .child(MetricsSource::hint()),
+                    ),
+            ))
             .child(confirm)
             .child(notify)
     }

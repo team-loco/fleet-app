@@ -1,5 +1,6 @@
 use flock_core::emptiness::Noun;
 use flock_core::filter::StatusFilter;
+use flock_core::overview::plural;
 use flock_core::{ClusterSummary, Command, Counts, FluxAction, FluxObject, Page};
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
@@ -97,7 +98,7 @@ impl FluxListScreen {
 
     pub fn header_note(&self) -> (Counts, String) {
         let counts = Counts::of(self.objects.iter().map(FluxObject::status));
-        (counts, format!("{} objects", self.objects.len()))
+        (counts, plural(self.objects.len(), "object", "objects"))
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {

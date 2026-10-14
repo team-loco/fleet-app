@@ -7,10 +7,10 @@ use gpui::{
 
 use crate::kit::{
     ActionMenu, Button, Checkbox, CodeView, Column, ConfirmDialog, DiffFile, DiffLine, DiffView,
-    Dock, DockState, DockTab, IconButton, InputEvent, Kbd, KeyValue, Level, LineChart, LineKind,
-    Link, LogLine, LogView, MenuItem, Meter, MiniMeter, PageHeader, Rule, SectionHeader, Segmented,
-    Select, Series, Split, StackedBar, StatusGlyph, StatusText, Table, TextField, TextFieldState,
-    Toast, Toggle, confirm, overlay_layer, parse_unified, toast,
+    Dock, DockState, DockTab, IconButton, InputEvent, Kbd, KeyValue, LOG_FILTER_PLACEHOLDER, Level,
+    LineChart, LineKind, Link, LogLine, LogView, MenuItem, Meter, MiniMeter, PageHeader, Rule,
+    SectionHeader, Segmented, Select, Series, Split, StackedBar, StatusGlyph, StatusText, Table,
+    TextField, TextFieldState, Toast, Toggle, confirm, overlay_layer, parse_unified, toast,
 };
 use crate::theme::{
     self, ActiveTheme, DOCK_HEIGHT, FONT_MONO, Palette, RULE, SPACE_4, SPACE_6, SPACE_8, TEXT_MONO,
@@ -264,7 +264,8 @@ impl Gallery {
                 .fit_content()
         });
         let path = cx.new(|cx| TextFieldState::new(window, cx).default_value("apps/payments"));
-        let filter = cx.new(|cx| TextFieldState::new(window, cx).placeholder("filter  /regex/"));
+        let filter =
+            cx.new(|cx| TextFieldState::new(window, cx).placeholder(LOG_FILTER_PLACEHOLDER));
         let logs = cx.new(|cx| {
             let mut view = LogView::new("logs");
             let lines = LOGS.map(|(ts, level, msg)| LogLine::new(Some(ts), Some(level), msg));
@@ -456,8 +457,8 @@ impl Gallery {
             KeyValue::new()
                 .text("image", "ghcr.io/acme/checkout-api:2.14.0")
                 .text("ports", "8080/TCP http")
-                .text("requests", "cpu 500m · mem 512Mi")
-                .text("limits", "cpu 1 · mem 1Gi")
+                .text("requests", "CPU 500m · memory 512Mi")
+                .text("limits", "CPU 1 · memory 1Gi")
                 .row(
                     "last exit",
                     div().text_color(palette.err).child("1 (Error) · 2m ago"),
@@ -608,7 +609,11 @@ impl Gallery {
                         .detail("7")
                         .content(self.events.clone()),
                 )
-                .tab(DockTab::new("Terminal").detail("debug").content(terminal)),
+                .tab(
+                    DockTab::new("Terminal")
+                        .detail("debug container")
+                        .content(terminal),
+                ),
         )
     }
 
@@ -705,7 +710,7 @@ fn event_columns() -> Vec<Column<Event>> {
         Column::colored_text("Message", |e: &Event| e.message.into(), |_, p| p.fg2).mono(),
         Column::colored_text(
             "Count",
-            |e: &Event| format!("×{}", e.count).into(),
+            |e: &Event| flock_core::units::times(e.count).into(),
             |_, p| p.mute,
         )
         .mono()

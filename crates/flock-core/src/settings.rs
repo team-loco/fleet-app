@@ -148,6 +148,11 @@ impl MetricsSource {
         }
     }
 
+    pub fn hint() -> String {
+        let names: Vec<String> = Self::ALL.into_iter().map(|s| s.label(None)).collect();
+        format!("One of: {}. Press Return to save.", names.join(", "))
+    }
+
     pub fn parse(text: &str) -> Option<Self> {
         let name = text
             .split(SEPARATOR.trim())
@@ -374,6 +379,14 @@ mod tests {
             changed
                 .context_sentence()
                 .is_some_and(|sentence| sentence.contains("certificate authority"))
+        );
+    }
+
+    #[test]
+    fn metrics_hint_lists_every_accepted_value() {
+        assert_eq!(
+            MetricsSource::hint(),
+            "One of: auto, metrics-server, prometheus. Press Return to save."
         );
     }
 

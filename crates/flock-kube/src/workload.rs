@@ -773,7 +773,7 @@ mod tests {
         );
         let specs = containers(Some(&template), &keys);
         let spec = &specs[0];
-        assert_eq!(spec.requests.label(), "cpu 100m · mem 64Mi");
+        assert_eq!(spec.requests.label(), "CPU 100m · memory 64Mi");
         assert_eq!(
             spec.readiness.as_ref().map(Probe::label).as_deref(),
             Some("GET :9898/readyz · 5s")

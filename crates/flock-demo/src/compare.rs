@@ -93,10 +93,10 @@ fn checkout_api() -> Comparison {
                 ],
             ),
             field(
-                "CPU req / limit",
+                "CPU request / limit",
                 [plain("500m / 1"), plain("500m / 1"), warn("250m / 500m")],
             ),
-            field("Memory req / limit", same("512Mi / 1Gi")),
+            field("Memory request / limit", same("512Mi / 1Gi")),
             field("Strategy", same("RollingUpdate 25% / 25%")),
             field(
                 LAST_ROLLOUT,

@@ -1,7 +1,7 @@
 use flock_core::events::Event;
 use flock_core::nodes::NodeSummary;
 use flock_core::overview::{
-    Capacity, PodPhases, TimeRange, Utilization, WorkloadHealth, percent, thousands,
+    Capacity, PodPhases, TimeRange, Utilization, WorkloadHealth, percent, plural, thousands,
 };
 use flock_core::time::age;
 use flock_core::{ClusterDetail, ClusterSummary, Page, Status};
@@ -37,7 +37,7 @@ const NAMESPACE_WIDTH: Pixels = px(110.);
 const MESSAGE_WEIGHT: f32 = 2.;
 const MESSAGE_MIN: Pixels = px(260.);
 const AGE_WIDTH: Pixels = px(56.);
-const COUNT_WIDTH: Pixels = px(44.);
+const COUNT_WIDTH: Pixels = px(56.);
 
 #[derive(Clone, Debug, PartialEq)]
 struct OverviewData {
@@ -55,7 +55,7 @@ struct OverviewData {
 impl OverviewData {
     fn new(cluster: &ClusterSummary, detail: &ClusterDetail) -> Self {
         let version = cluster.version.clone().unwrap_or_default();
-        let namespaces = format!("{} namespaces", detail.namespaces.len());
+        let namespaces = plural(detail.namespaces.len(), "namespace", "namespaces");
         let metrics = format!("metrics {}", detail.overview.metrics_source);
         let meta = [
             cluster.distro.clone(),
@@ -448,7 +448,7 @@ fn warning_columns() -> Vec<Column<Event>> {
         .mono()
         .fixed(AGE_WIDTH),
         Column::colored_text(
-            "×",
+            "Count",
             |e: &Event| e.count.to_string().into(),
             |_, palette| palette.mute,
         )

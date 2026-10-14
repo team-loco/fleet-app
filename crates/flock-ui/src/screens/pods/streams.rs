@@ -16,7 +16,6 @@ use crate::kit::{
 use crate::screens::workload::kit_line;
 use crate::theme::SPACE_3;
 
-pub const SEARCH_PLACEHOLDER: &str = "filter  /regex/";
 pub const TERMINAL_ID: &str = "pod-terminal";
 const LOGS_TAB: usize = 0;
 const TERMINAL_TAB: usize = 1;
@@ -28,7 +27,7 @@ const TIMESTAMPS: &str = "timestamps";
 const SELECT_FOR_LOGS: &str = "Select a pod to see its logs.";
 const SELECT_FOR_SHELL: &str = "Select a pod to open a shell.";
 const DOCK_EMPTY: &str = "pods-dock-empty";
-const DEBUG: &str = "debug";
+const DEBUG: &str = "debug container";
 const DOWNLOAD_TOOLTIP: &str = "Download logs";
 const DOWNLOADS: &str = "Downloads";
 const SAVE_FAILED: &str = "Could not save the logs";

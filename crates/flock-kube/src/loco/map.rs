@@ -1054,7 +1054,7 @@ mod tests {
         );
         assert_eq!(
             api.resources.as_ref().map(Resources::summary).as_deref(),
-            Some("cpu 500m · mem 512Mi · 2–6 replicas · scale at 70% cpu")
+            Some("CPU 500m · memory 512Mi · 2–6 replicas · scales at 70% CPU")
         );
         assert_eq!(
             api.rollout.as_ref().map(Rollout::summary).as_deref(),

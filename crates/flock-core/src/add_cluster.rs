@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::Status;
+use crate::overview::plural;
 
 const GKE_PREFIX: &str = "gke_";
 const GKE_SEPARATOR: char = '_';
@@ -292,7 +293,7 @@ impl AddClusterFlow {
         match self.ready().as_slice() {
             [] => "Add".to_owned(),
             [one] => format!("Add {}", one.name),
-            many => format!("Add {} clusters", many.len()),
+            many => format!("Add {}", plural(many.len(), "cluster", "clusters")),
         }
     }
 

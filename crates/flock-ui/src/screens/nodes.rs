@@ -1,8 +1,9 @@
 use flock_core::emptiness::Noun;
 use flock_core::filter::StatusFilter;
 use flock_core::nodes::{Node, NodeSummary, Usage};
-use flock_core::overview::{Capacity, Commitment, number, percent};
+use flock_core::overview::{Capacity, Commitment, percent};
 use flock_core::time::age;
+use flock_core::units::{CPU_UNIT, MEMORY_UNIT};
 use flock_core::{
     ClusterDetail, ClusterId, ClusterSummary, Command, Counts, Page, ResourceRef, Seen, Status,
 };
@@ -473,14 +474,14 @@ fn node_capacity(node: &Node, palette: &Palette) -> gpui::Div {
             "CPU",
             node.cpu,
             node.cpu_commitment,
-            "cores",
+            CPU_UNIT,
             palette.acc,
         ))
         .child(capacity_row(
             "Memory",
             node.memory,
             node.memory_commitment,
-            "GiB",
+            MEMORY_UNIT,
             palette.ai,
         ))
         .child(usage_row(
@@ -489,7 +490,6 @@ fn node_capacity(node: &Node, palette: &Palette) -> gpui::Div {
                 used: count(node.pods),
                 allocatable: count(node.pod_capacity),
             },
-            "",
             palette,
         ))
 }
@@ -517,12 +517,8 @@ fn capacity_row(
         .child(CapacityMeter::new(id, capacity, color))
 }
 
-fn usage_row(label: &'static str, usage: Usage, unit: &str, palette: &Palette) -> impl IntoElement {
-    let amount = format!(
-        "{} / {} {unit}",
-        number(usage.used),
-        number(usage.allocatable)
-    );
+fn usage_row(label: &'static str, usage: Usage, palette: &Palette) -> impl IntoElement {
+    let amount = format!("{} / {}", usage.used, usage.allocatable);
     div()
         .flex()
         .flex_col()
