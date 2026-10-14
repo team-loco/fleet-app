@@ -94,3 +94,4 @@ Spec column points at `design/`.
 | QAF1 | QA Flux fixes: failing objects stay failing through retries, real suspend age, Resume as primary when suspended, short names keep whole names, diff hunk headers (#200–#203, #208) | claude | qa-fixes-flux | done |
 | NAVBTN | visible per-pane back/forward controls, history menus and mouse navigation (#191) | claude | back-forward-buttons | done |
 | CHART | Persist seven days of utilization history and render every chart window (#193) | claude | utilization-history | done |
+| SETTINGS | Open Cluster settings on the cluster each link came from (#219) | claude | settings-cluster-context | done |
