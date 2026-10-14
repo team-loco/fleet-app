@@ -1,10 +1,13 @@
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow, bail};
 use flock::{Preset, Screen, WINDOW_HEIGHT, WINDOW_WIDTH, bind_keys, root_view};
 use flock_core::app_settings::Highlight;
+use flock_core::history::Location;
+use flock_core::tabs::{SavedPane, SavedWindow};
 use flock_core::{AppState, Backend, Command, Receiver, Sender, Update};
 use flock_demo::DemoBackend;
 use flock_ui::theme::Appearance;
@@ -55,15 +58,13 @@ fn setup(appearance: Appearance, highlights: Highlights, cx: &mut App) -> anyhow
     .map_err(|error| anyhow!("applying highlights: {error}"))
 }
 
-fn demo(state: Option<StateFixture>) -> (Receiver<Update>, Sender<Command>) {
-    if let Some(state) = state {
-        return fixture::backend(state);
-    }
-    let (update_tx, update_rx) = async_channel::unbounded();
-    let (command_tx, command_rx) = async_channel::unbounded();
-    let backend: Box<dyn Backend> = Box::new(DemoBackend);
-    backend.start(update_tx, command_rx);
-    (update_rx, command_tx)
+pub type BackendFactory = Rc<dyn Fn() -> anyhow::Result<Box<dyn Backend>>>;
+
+#[derive(Clone)]
+pub enum Source {
+    Demo,
+    Fixture(StateFixture),
+    Backend(BackendFactory),
 }
 
 type Feed = (Receiver<Update>, Sender<Command>);
@@ -79,9 +80,33 @@ fn scripted() -> anyhow::Result<(Feed, Sender<Update>)> {
     Ok(((update_rx, command_tx), update_tx))
 }
 
+fn start(backend: Box<dyn Backend>) -> Feed {
+    let (update_tx, update_rx) = async_channel::unbounded();
+    let (command_tx, command_rx) = async_channel::unbounded();
+    backend.start(update_tx, command_rx);
+    (update_rx, command_tx)
+}
+
+fn channels(source: &Source) -> anyhow::Result<Feed> {
+    match source {
+        Source::Demo => Ok(start(Box::new(DemoBackend))),
+        Source::Fixture(state) => Ok(fixture::backend(*state)),
+        Source::Backend(make) => Ok(start(make()?)),
+    }
+}
+
+fn sample_tabs(screen: Screen, preset: &Preset, source: &Source) -> Option<SavedWindow> {
+    match source {
+        Source::Demo => screen.tabs(preset),
+        Source::Fixture(_) => screen.tabs(preset),
+        Source::Backend(_) => None,
+    }
+}
+
 fn view(
     screen: Screen,
     preset: &Preset,
+    sample_tabs: Option<SavedWindow>,
     (updates, commands): Feed,
     window: &mut Window,
     cx: &mut App,
@@ -89,7 +114,7 @@ fn view(
     let store = cx.new(|cx| Store::new(updates, commands, cx));
     let view = root_view(screen, preset, store, window, cx);
     let shell = view.clone().downcast::<Shell>().ok();
-    if let Some((shell, tabs)) = shell.as_ref().zip(screen.tabs(preset)) {
+    if let Some((shell, tabs)) = shell.as_ref().zip(sample_tabs) {
         shell.update(cx, |shell, cx| shell.restore_tabs(&tabs, window, cx));
     }
     (view, shell)
@@ -245,8 +270,10 @@ impl Headless {
         preset: &Preset,
         appearance: Appearance,
         highlights: Highlights,
-        state: Option<StateFixture>,
+        source: &Source,
     ) -> anyhow::Result<Self> {
+        let backend = channels(source)?;
+        let tabs = sample_tabs(screen, preset, source);
         let mut cx = HeadlessAppContext::with_platform(
             text_system(),
             Arc::new(Assets),
@@ -255,7 +282,7 @@ impl Headless {
         cx.update(|cx| setup(appearance, highlights, cx))?;
         let mut shell = None;
         let window = cx.open_window(window_size(), |window, cx| {
-            let (view, built) = view(screen, preset, demo(state), window, cx);
+            let (view, built) = view(screen, preset, tabs, backend, window, cx);
             shell = built;
             cx.new(|cx| Root::new(view, window, cx))
         })?;
@@ -286,6 +313,38 @@ impl Headless {
     fn image(&mut self) -> anyhow::Result<RgbaImage> {
         self.cx.capture_screenshot(self.window)
     }
+
+    fn restore(&mut self, saved: &SavedWindow) -> anyhow::Result<()> {
+        let shell = self
+            .shell
+            .clone()
+            .ok_or_else(|| anyhow!("the screen has no shell to restore tabs into"))?;
+        self.cx.update_window(self.window, |_, window, cx| {
+            shell.update(cx, |shell, cx| shell.restore_tabs(saved, window, cx));
+        })?;
+        self.settle()
+    }
+
+    fn wait_until(
+        &mut self,
+        timeout: Duration,
+        done: &dyn Fn(&AppState) -> bool,
+    ) -> anyhow::Result<()> {
+        let shell = self
+            .shell
+            .clone()
+            .ok_or_else(|| anyhow!("the screen has no shell to wait on"))?;
+        let start = Instant::now();
+        loop {
+            self.settle()?;
+            if self.cx.read_entity(&shell, |shell, _| done(shell.state())) {
+                return Ok(());
+            }
+            if start.elapsed() > timeout {
+                bail!("the condition did not hold within {timeout:?}");
+            }
+        }
+    }
 }
 
 pub fn render(
@@ -293,7 +352,14 @@ pub fn render(
     preset: &Preset,
     appearance: Appearance,
 ) -> anyhow::Result<RgbaImage> {
-    Headless::open(screen, preset, appearance, Highlights::default(), None)?.image()
+    Headless::open(
+        screen,
+        preset,
+        appearance,
+        Highlights::default(),
+        &Source::Demo,
+    )?
+    .image()
 }
 
 pub fn render_state(
@@ -303,7 +369,49 @@ pub fn render_state(
     highlights: Highlights,
     state: Option<StateFixture>,
 ) -> anyhow::Result<RgbaImage> {
-    Headless::open(screen, preset, appearance, highlights, state)?.image()
+    let source = state.map_or(Source::Demo, Source::Fixture);
+    Headless::open(screen, preset, appearance, highlights, &source)?.image()
+}
+
+pub fn one_tab(location: Location) -> SavedWindow {
+    SavedWindow {
+        panes: vec![SavedPane {
+            tabs: vec![location],
+            active: 0,
+        }],
+        ..SavedWindow::default()
+    }
+}
+
+pub struct LiveShots<'a> {
+    pub appearance: Appearance,
+    pub highlights: Highlights,
+    pub timeout: Duration,
+    pub ready: &'a dyn Fn(&AppState, &Location) -> bool,
+}
+
+pub fn render_live(
+    make: &BackendFactory,
+    shots: &LiveShots<'_>,
+    locations: &[Location],
+    mut save: impl FnMut(&Location, RgbaImage) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let source = Source::Backend(make.clone());
+    let mut headless = Headless::open(
+        Screen::Flock,
+        &Preset::default(),
+        shots.appearance,
+        shots.highlights,
+        &source,
+    )?;
+    for location in locations {
+        headless.restore(&one_tab(location.clone()))?;
+        headless
+            .wait_until(shots.timeout, &|state| (shots.ready)(state, location))
+            .with_context(|| format!("waiting for {location:?}"))?;
+        save(location, headless.image()?)?;
+    }
+    Ok(())
 }
 
 pub fn save(image: &RgbaImage, path: &Path) -> anyhow::Result<()> {
@@ -322,7 +430,7 @@ pub struct Ui {
     screen: Screen,
     preset: Preset,
     appearance: Appearance,
-    state: Option<StateFixture>,
+    source: Source,
     steps: Vec<Step>,
 }
 
@@ -332,16 +440,31 @@ impl Ui {
     }
 
     pub fn with(screen: Screen, preset: Preset, appearance: Appearance) -> anyhow::Result<Self> {
-        Self::build(screen, preset, appearance, None)
+        Self::build(screen, preset, appearance, Source::Demo)
     }
 
     pub fn with_state(screen: Screen, state: StateFixture) -> anyhow::Result<Self> {
-        Self::build(screen, Preset::default(), Appearance::Dark, Some(state))
+        Self::build(
+            screen,
+            Preset::default(),
+            Appearance::Dark,
+            Source::Fixture(state),
+        )
+    }
+
+    pub fn live(screen: Screen, preset: Preset, make: BackendFactory) -> anyhow::Result<Self> {
+        Self::build(screen, preset, Appearance::Dark, Source::Backend(make))
     }
 
     pub fn scripted(screen: Screen) -> anyhow::Result<(Self, Sender<Update>)> {
         let (feed, updates) = scripted()?;
-        let ui = Self::build_from(screen, Preset::default(), Appearance::Dark, None, feed)?;
+        let ui = Self::build_from(
+            screen,
+            Preset::default(),
+            Appearance::Dark,
+            Source::Demo,
+            feed,
+        )?;
         Ok((ui, updates))
     }
 
@@ -349,24 +472,26 @@ impl Ui {
         screen: Screen,
         preset: Preset,
         appearance: Appearance,
-        state: Option<StateFixture>,
+        source: Source,
     ) -> anyhow::Result<Self> {
-        Self::build_from(screen, preset, appearance, state, demo(state))
+        let feed = channels(&source)?;
+        Self::build_from(screen, preset, appearance, source, feed)
     }
 
     fn build_from(
         screen: Screen,
         preset: Preset,
         appearance: Appearance,
-        state: Option<StateFixture>,
-        feed: Feed,
+        source: Source,
+        backend: Feed,
     ) -> anyhow::Result<Self> {
+        let tabs = sample_tabs(screen, &preset, &source);
         let mut app =
             TestAppContext::build_with_text_system(TestDispatcher::new(SEED), None, text_system());
         app.update(|cx| setup(appearance, Highlights::default(), cx))?;
         let mut shell = None;
         let window = app.open_window(window_size(), |window, cx| {
-            let (view, built) = view(screen, &preset, feed, window, cx);
+            let (view, built) = view(screen, &preset, tabs, backend, window, cx);
             shell = built;
             Root::new(view, window, cx)
         });
@@ -385,7 +510,7 @@ impl Ui {
             screen,
             preset,
             appearance,
-            state,
+            source,
             steps: Vec::new(),
         };
         ui.settle()?;
@@ -405,7 +530,7 @@ impl Ui {
         self.cx.read_entity(&self.shell, read)
     }
 
-    pub fn restore(&mut self, tabs: &flock_core::tabs::SavedWindow) -> anyhow::Result<()> {
+    pub fn restore(&mut self, tabs: &SavedWindow) -> anyhow::Result<()> {
         let shell = self.shell.clone();
         self.cx.update(|window, cx| {
             shell.update(cx, |shell, cx| shell.restore_tabs(tabs, window, cx));
@@ -532,7 +657,7 @@ impl Ui {
             &self.preset,
             self.appearance,
             Highlights::default(),
-            self.state,
+            &self.source,
         )?;
         for step in &self.steps {
             headless.run(step)?;
@@ -551,6 +676,31 @@ impl Ui {
         std::thread::sleep(by);
         self.cx.update(|window, _| window.refresh());
         self.settle()
+    }
+
+    pub fn wait_until(
+        &mut self,
+        timeout: Duration,
+        done: impl Fn(&AppState) -> bool,
+    ) -> anyhow::Result<()> {
+        let start = Instant::now();
+        loop {
+            self.settle()?;
+            if done(&self.state()) {
+                return Ok(());
+            }
+            if start.elapsed() > timeout {
+                bail!("the condition did not hold within {timeout:?}");
+            }
+        }
+    }
+
+    pub fn pause(&mut self, duration: Duration) -> anyhow::Result<()> {
+        let start = Instant::now();
+        while start.elapsed() < duration {
+            self.settle()?;
+        }
+        Ok(())
     }
 
     pub fn settle(&mut self) -> anyhow::Result<()> {

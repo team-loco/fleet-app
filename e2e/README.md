@@ -72,6 +72,18 @@ scenario problems to appear in a live snapshot (the app logs these when
 `FLOCK_LOG_SNAPSHOTS` is set). `--skip-up` requires existing clusters;
 `--no-teardown` keeps them (the default, except when `CI` is set).
 
+The live UI journeys in `apps/flock-shots/tests/journeys.rs` are part of that run. They open the
+headless Flock shell on a `LiveBackend` with both clusters added to a temporary data directory,
+then visit every page, tab, inspector, row menu and shortcut and check that counts, badges and
+pages stay loaded. Two of them change the clusters and put them back: one resumes and suspends
+`HelmRelease/search/search-indexer` on fleet-a, then uninstalls what Flux installed on resume and
+recreates the HelmRelease from its saved spec, so it is back to never-deployed (also when the test
+fails); the
+other creates and deletes the ConfigMap `default/flock-qa-live` on fleet-b. Render every live page
+for review with
+`FLOCK_E2E=1 mise exec -- cargo nextest run -p flock-shots --test journeys --run-ignored all live_pages_render_for_review`;
+the PNGs land in `target/qa/`.
+
 To remove both clusters when desktop testing is finished:
 
 ```sh

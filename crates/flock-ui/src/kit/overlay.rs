@@ -162,6 +162,12 @@ pub fn toast_titles(cx: &App) -> Vec<SharedString> {
         .collect()
 }
 
+pub fn toast_statuses(cx: &App) -> Vec<Status> {
+    let overlays = layer(cx);
+    let shown = &overlays.read(cx).toasts;
+    shown.iter().map(|shown| shown.toast.status).collect()
+}
+
 impl Overlays {
     fn open(&mut self, dialog: ConfirmDialog, window: &mut Window, cx: &mut Context<Self>) {
         self.next += 1;

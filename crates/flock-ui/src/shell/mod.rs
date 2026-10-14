@@ -299,6 +299,10 @@ impl Shell {
         });
     }
 
+    pub fn palette_open(&self, cx: &App) -> bool {
+        self.palette.read(cx).is_open()
+    }
+
     pub fn switcher_open(&self, cx: &App) -> bool {
         self.switcher.read(cx).is_open()
     }
