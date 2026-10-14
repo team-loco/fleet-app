@@ -4,6 +4,7 @@ use gpui::{
     RenderOnce, SharedString, Styled, Window, div, prelude::FluentBuilder, relative,
 };
 
+use super::selectable::SelectableText;
 use super::status::StatusText;
 use crate::theme::{
     ActiveTheme, FONT_MONO, LINE_PROSE, PAGE_HEADER, RULE, SPACE_4, SPACE_5, SPACE_7, SPACE_8,
@@ -74,7 +75,7 @@ impl RenderOnce for PageHeader {
             .font_weight(FontWeight::SEMIBOLD)
             .truncate()
             .when(self.mono, |title| title.font_family(FONT_MONO))
-            .child(self.title);
+            .child(SelectableText::new(self.title));
         let top = div()
             .flex()
             .items_center()

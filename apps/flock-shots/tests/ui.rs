@@ -1499,3 +1499,75 @@ fn split_panes_render_compact_logs_and_kustomization_views() -> anyhow::Result<(
     assert!(ui.bounds("flux-reconcile").is_some());
     Ok(())
 }
+
+fn bounds_of(ui: &mut Ui, selector: &'static str) -> anyhow::Result<gpui::Bounds<Pixels>> {
+    ui.bounds(selector)
+        .ok_or_else(|| anyhow::anyhow!("no element {selector:?}"))
+}
+
+#[test]
+fn dragging_across_yaml_selects_whole_lines_and_command_c_copies_them() -> anyhow::Result<()> {
+    use gpui::{point, px};
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    for (appearance, name) in [
+        (flock_ui::theme::Appearance::Dark, "selection-dark.png"),
+        (flock_ui::theme::Appearance::Light, "selection-light.png"),
+    ] {
+        let mut ui = Ui::with(
+            Screen::ResourceInspector,
+            flock::Preset::default(),
+            appearance,
+        )?;
+        let lines = bounds_of(&mut ui, "code-lines")?;
+        let first = lines.origin + point(px(1.), px(4.));
+        let third = lines.origin + point(px(60.), px(50.));
+        ui.drag_between(first, third)?;
+        ui.press("cmd-c")?;
+        assert_eq!(
+            ui.clipboard().as_deref(),
+            Some("apiVersion: v1\nkind: ConfigMap\nmetadata")
+        );
+        assert_eq!(ui.state().location().page, Page::ConfigMaps);
+        ui.save_png(&dir.join(name))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn clicks_select_a_word_or_a_line_and_command_a_selects_the_whole_block() -> anyhow::Result<()> {
+    use gpui::{point, px};
+    let mut ui = Ui::open(Screen::ResourceInspector)?;
+    let lines = bounds_of(&mut ui, "code-lines")?;
+    let kind = lines.origin + point(px(10.), px(30.));
+    ui.click_at(kind, 2)?;
+    ui.press("cmd-c")?;
+    assert_eq!(ui.clipboard().as_deref(), Some("kind"));
+    ui.click_at(kind, 3)?;
+    ui.press("cmd-c")?;
+    assert_eq!(ui.clipboard().as_deref(), Some("kind: ConfigMap"));
+    ui.click_at(kind, 1)?;
+    ui.press("cmd-a cmd-c")?;
+    let all = ui.clipboard().unwrap_or_default();
+    assert!(all.starts_with("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: "));
+    assert!(all.contains("\n    health:\n      path: /healthz\n"));
+    Ok(())
+}
+
+#[test]
+fn log_lines_select_across_lines() -> anyhow::Result<()> {
+    use gpui::{point, px};
+    let mut ui = Ui::open(Screen::Workload)?;
+    ui.click("pods-row-1")?;
+    let logs = bounds_of(&mut ui, "workload-logs")?;
+    let from = logs.origin + point(px(165.), px(20.));
+    let to = logs.origin + point(px(300.), px(80.));
+    ui.drag_between(from, to)?;
+    ui.press("cmd-c")?;
+    assert_eq!(
+        ui.clipboard().as_deref(),
+        Some(
+            "GET /healthz 200 0.3ms\nPOST /v1/cart/9312/items 201 18.2ms\nGET /v1/cart/9312 200 6.9ms\nslow query 412ms:"
+        )
+    );
+    Ok(())
+}

@@ -2,8 +2,8 @@ use std::rc::Rc;
 
 use gpui::{
     AnchoredPositionMode, AnyElement, App, ElementId, FocusHandle, FontWeight, InteractiveElement,
-    IntoElement, KeyDownEvent, MouseButton, ParentElement, Pixels, RenderOnce, SharedString,
-    Styled, Window, anchored, deferred, div, point, prelude::FluentBuilder,
+    IntoElement, KeyDownEvent, ParentElement, Pixels, RenderOnce, SharedString, Styled, Window,
+    anchored, deferred, div, point, prelude::FluentBuilder,
 };
 
 use super::button::IconButton;
@@ -119,7 +119,6 @@ impl RenderOnce for Modal {
                     close(window, cx);
                 }
             })
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(header)
             .children(self.children);
         let scrim = div()

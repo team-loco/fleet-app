@@ -1,12 +1,10 @@
 use std::ops::Range;
 use std::rc::Rc;
 
-use gpui::{
-    App, ElementId, HighlightStyle, InteractiveText, IntoElement, RenderOnce, SharedString,
-    StyledText, Window,
-};
+use gpui::{App, ElementId, HighlightStyle, IntoElement, RenderOnce, SharedString, Window};
 
-use crate::theme::{ActiveTheme, FONT_MONO};
+use super::selectable::SelectableText;
+use crate::theme::ActiveTheme;
 
 type LinkHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 
@@ -73,30 +71,26 @@ impl RenderOnce for Prose {
             Part::Link(text, _) => (text.as_ref(), true),
         });
         let (text, ranges) = link_ranges(pieces);
-        let handlers: Vec<Option<LinkHandler>> = self
-            .parts
-            .into_iter()
-            .filter_map(|part| match part {
-                Part::Text(_) => None,
-                Part::Link(_, handler) => Some(handler),
-            })
-            .collect();
+        let handlers = self.parts.into_iter().filter_map(|part| match part {
+            Part::Text(_) => None,
+            Part::Link(_, handler) => Some(handler),
+        });
         let link_style = HighlightStyle {
             color: Some(acc),
             ..HighlightStyle::default()
         };
         let highlights = ranges.iter().map(|range| (range.clone(), link_style));
-        let fonts = ranges
-            .iter()
-            .map(|range| (range.clone(), SharedString::from(FONT_MONO)));
-        let styled = StyledText::new(text)
-            .with_highlights(highlights)
-            .with_font_family_overrides(fonts);
-        InteractiveText::new(self.id, styled).on_click(ranges, move |ix, window, cx| {
-            if let Some(Some(handler)) = handlers.get(ix) {
-                handler(window, cx);
-            }
-        })
+        let selectable = ranges.iter().cloned().fold(
+            SelectableText::new(text).id(self.id).highlights(highlights),
+            SelectableText::mono,
+        );
+        ranges
+            .into_iter()
+            .zip(handlers)
+            .fold(selectable, |selectable, (range, handler)| match handler {
+                Some(handler) => selectable.link(range, move |window, cx| handler(window, cx)),
+                None => selectable,
+            })
     }
 }
 

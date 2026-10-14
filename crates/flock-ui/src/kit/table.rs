@@ -9,16 +9,17 @@ use flock_core::Status;
 use flock_core::filter::highlights;
 use gpui::{
     Animation, AnimationExt, AnyElement, App, AppContext as _, ClickEvent, Context, CursorStyle,
-    Div, ElementId, Entity, EventEmitter, FocusHandle, Focusable, Hsla, InteractiveElement,
-    IntoElement, KeyDownEvent, ListSizingBehavior, MouseButton, MouseDownEvent, MouseMoveEvent,
-    ParentElement, Pixels, Point, Render, ScrollStrategy, SharedString, StatefulInteractiveElement,
-    Styled, TextRun, UniformListScrollHandle, Window, div, ease_in_out, prelude::FluentBuilder,
-    uniform_list,
+    Div, ElementId, Entity, EventEmitter, FocusHandle, Focusable, HighlightStyle, Hsla,
+    InteractiveElement, IntoElement, KeyDownEvent, ListSizingBehavior, MouseButton, MouseDownEvent,
+    MouseMoveEvent, ParentElement, Pixels, Point, Render, ScrollStrategy, SharedString,
+    StatefulInteractiveElement, Styled, TextRun, UniformListScrollHandle, Window, div, ease_in_out,
+    prelude::FluentBuilder, uniform_list,
 };
 
 use super::button::IconButton;
 use super::list_keys::{Nav, TypeAhead, find, typed};
 use super::menu::{ActionMenu, MenuItem};
+use super::selectable::{SelectableText, is_text_drag};
 use super::status::StatusGlyph;
 use super::text::Highlighted;
 use super::tooltip::Tooltip;
@@ -56,10 +57,18 @@ struct TextCell<R> {
 }
 
 impl<R> TextCell<R> {
-    fn render(&self, row: &R, palette: &Palette, words: &[String]) -> AnyElement {
+    fn render(&self, row: &R, palette: &Palette, words: &[String], selectable: bool) -> AnyElement {
         let text = (self.text)(row);
         let ranges = highlights(words, &text);
-        let content = if ranges.is_empty() {
+        let content = if selectable {
+            let style = HighlightStyle {
+                color: Some(palette.acc),
+                ..HighlightStyle::default()
+            };
+            SelectableText::new(text)
+                .highlights(ranges.into_iter().map(|range| (range, style)))
+                .into_any_element()
+        } else if ranges.is_empty() {
             text.into_any_element()
         } else {
             Highlighted::new(text, ranges).into_any_element()
@@ -118,6 +127,7 @@ pub struct Column<R> {
     fit: Option<TextFn<R>>,
     fit_extra: Pixels,
     highlight: bool,
+    selectable: bool,
     tooltip: Option<TextFn<R>>,
 }
 
@@ -136,6 +146,7 @@ impl<R: 'static> Column<R> {
             fit: None,
             fit_extra: Pixels::ZERO,
             highlight: false,
+            selectable: false,
             tooltip: None,
         }
     }
@@ -198,6 +209,11 @@ impl<R: 'static> Column<R> {
         self
     }
 
+    pub fn selectable(mut self) -> Self {
+        self.selectable = true;
+        self
+    }
+
     pub fn fit_by(mut self, text: impl Fn(&R) -> SharedString + 'static, extra: Pixels) -> Self {
         self.fit = Some(Rc::new(text));
         self.fit_extra = extra;
@@ -212,8 +228,8 @@ impl<R: 'static> Column<R> {
     fn render_cell(&self, row: &R, palette: &Palette, words: &[String]) -> AnyElement {
         let content = match &self.cell {
             Cell::Custom(cell) => cell(row, palette),
-            Cell::Text(cell) if self.highlight => cell.render(row, palette, words),
-            Cell::Text(cell) => cell.render(row, palette, &[]),
+            Cell::Text(cell) if self.highlight => cell.render(row, palette, words, self.selectable),
+            Cell::Text(cell) => cell.render(row, palette, &[], self.selectable),
         };
         match &self.tooltip {
             Some(text) => {
@@ -821,6 +837,9 @@ impl<R: 'static> Table<R> {
             cx.emit(TableEvent::Opened(row));
         }
         if !event.standard_click() {
+            return;
+        }
+        if is_text_drag(event, window, cx) {
             return;
         }
         window.focus(&self.focus, cx);

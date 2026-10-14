@@ -2,13 +2,14 @@ use std::ops::Range;
 
 use flock_core::Status;
 use gpui::{
-    App, ClipboardItem, ElementId, Entity, FocusHandle, HighlightStyle, InteractiveElement,
-    IntoElement, ParentElement, Pixels, RenderOnce, SharedString, StatefulInteractiveElement,
-    Styled, StyledText, TextRun, Window, div, font,
+    AnyElement, App, ClipboardItem, ElementId, Entity, FocusHandle, HighlightStyle,
+    InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, SharedString,
+    StatefulInteractiveElement, Styled, StyledText, TextLayout, TextRun, Window, div, font,
 };
 
 use super::button::Button;
 use super::overlay::{Toast, toast};
+use super::selectable::Selectable;
 use crate::theme::{
     ActiveTheme, CODE_HEIGHT, CODE_LINE, CONTROL_SMALL, DIALOG_TOP, FONT_MONO, GUTTER_NUMBER,
     PAGE_HEADER, Palette, RADIUS, RULE, SPACE_2, SPACE_3, SPACE_4, SPACE_8, TEXT_MONO,
@@ -21,6 +22,7 @@ const COMMENT: char = '#';
 const KEY_END: &str = ": ";
 const KEY_END_LINE: char = ':';
 const LIST_ITEM: &str = "- ";
+const SELECTABLE_ID: &str = "code-text";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Token {
@@ -168,6 +170,16 @@ fn code_width(text: &str, palette: &Palette, window: &Window) -> Pixels {
         .unwrap_or(Pixels::ZERO)
 }
 
+fn selectable(content: impl IntoElement, layouts: Vec<(SharedString, TextLayout)>) -> AnyElement {
+    layouts
+        .into_iter()
+        .fold(
+            Selectable::new(SELECTABLE_ID, content).whole_rows(),
+            |selectable, (text, layout)| selectable.run(text, layout),
+        )
+        .into_any_element()
+}
+
 fn code_body(
     text: &str,
     language: Language,
@@ -176,6 +188,7 @@ fn code_body(
     height: Pixels,
     window: &Window,
 ) -> impl IntoElement + use<> {
+    let mut layouts = Vec::new();
     let body = if wrap {
         let rows = text.lines().enumerate().map(|(ix, line)| {
             let number = div()
@@ -187,6 +200,7 @@ fn code_body(
                 .text_color(palette.mute)
                 .child((ix + 1).to_string());
             let styled = styled_line(line, language, palette);
+            layouts.push((SharedString::from(line.to_owned()), styled.layout().clone()));
             let text = div().flex_1().min_w_0().child(styled);
             div()
                 .flex()
@@ -195,13 +209,13 @@ fn code_body(
                 .child(number)
                 .child(text)
         });
-        div()
+        let column = div()
             .id("code-wrapped")
             .debug_selector(|| "code-wrapped".to_owned())
             .flex()
             .flex_col()
-            .children(rows)
-            .into_any_element()
+            .children(rows.collect::<Vec<_>>());
+        selectable(column, layouts)
     } else {
         let width = code_width(text, palette, window);
         let numbers = text.lines().enumerate().map(|(ix, _)| {
@@ -214,6 +228,7 @@ fn code_body(
         });
         let lines = text.lines().map(|line| {
             let styled = styled_line(line, language, palette);
+            layouts.push((SharedString::from(line.to_owned()), styled.layout().clone()));
             div()
                 .h(CODE_LINE)
                 .line_height(CODE_LINE)
@@ -244,15 +259,16 @@ fn code_body(
                             cx.stop_propagation();
                         }
                     })
-                    .child(
+                    .child(selectable(
                         div()
                             .id("code-lines")
                             .debug_selector(|| "code-lines".to_owned())
                             .w(width)
                             .flex()
                             .flex_col()
-                            .children(lines),
-                    ),
+                            .children(lines.collect::<Vec<_>>()),
+                        layouts,
+                    )),
             )
             .into_any_element()
     };

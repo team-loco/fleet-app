@@ -466,6 +466,23 @@ impl Ui {
         })
     }
 
+    pub fn drag_between(&mut self, from: Point<Pixels>, to: Point<Pixels>) -> anyhow::Result<()> {
+        self.run(Step::Drag { from, to })
+    }
+
+    pub fn click_at(&mut self, at: Point<Pixels>, count: usize) -> anyhow::Result<()> {
+        self.run(Step::Click {
+            at,
+            button: MouseButton::Left,
+            count,
+            modifiers: Modifiers::none(),
+        })
+    }
+
+    pub fn clipboard(&self) -> Option<String> {
+        self.cx.read_from_clipboard().and_then(|item| item.text())
+    }
+
     pub fn scroll(&mut self, selector: &'static str, delta: Point<Pixels>) -> anyhow::Result<()> {
         let bounds = self
             .bounds(selector)

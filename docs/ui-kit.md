@@ -52,6 +52,32 @@ KeyValue::new()                           // inspector / spec grid, label column
     .label_width(px)                      // optional; `.sans()` for proportional values
 ```
 
+### Selectable text
+
+Text people read and copy is selectable as in a browser: drag selects by character, double click a
+word, triple click a line, ⇧-click extends, ⌘C copies, ⌘A selects the whole block last clicked.
+The selection is window-wide (gpui-base's `TextSelection`, mounted by `Root`), so a drag can cross
+lines and blocks; the highlight is the `sel` token and the cursor is an I-beam.
+
+```rust
+SelectableText::new(value)                      // plain text; id defaults to a hash of the text
+    .id(("log-line", ix))                       // explicit id when equal texts sit side by side
+    .highlights(ranges)                         // (Range<usize>, HighlightStyle), e.g. search hits
+    .mono(range)                                // Plex Mono for a range
+    .link(range, |window, cx| ..)               // clickable range; a drag over it still selects
+KeyValue::new().text("zone", node.zone.clone()) // selectable value cell
+Column::text("Object", ..).selectable()         // selectable table text cell
+Selectable::new("code-text", content)           // several laid-out lines as one block:
+    .run(line, styled.layout().clone())         // copy joins them with newlines, blank lines kept
+    .whole_rows()                               // a drag may start anywhere on a row
+```
+
+`PageHeader` and `Inspector` titles, `Prose`, `CodeView`, `LogView` messages and `KeyValue::text`
+values are selectable already. A drag that selects text in a table row does not select the row
+(`kit::selectable::is_text_drag`); plain clicks still do. Truncated text is not selectable. The
+terminal has its own cell-grid selection (drag, ⇧-click); ⌘C copies it, or the transcript when
+nothing is selected.
+
 `PageHeader` is the document header of a resource page (title, status, one primary action, the
 ⋯ menu, the one-sentence summary, a mono meta line):
 

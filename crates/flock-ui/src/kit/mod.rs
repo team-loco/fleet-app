@@ -18,6 +18,7 @@ mod popover;
 mod presence;
 mod prose;
 mod select;
+mod selectable;
 mod split;
 mod status;
 mod table;
@@ -49,6 +50,7 @@ pub(crate) use popover::{Dismissal, Step, above_right, appear, shadow, step, sur
 pub use presence::{Presence, slide_in, slide_out, swap_in};
 pub use prose::Prose;
 pub use select::{Select, SelectEvent};
+pub use selectable::{SelectAllText, Selectable, SelectableText};
 pub use split::Split;
 #[cfg(test)]
 pub(crate) use status::STATUSES;
@@ -59,11 +61,10 @@ pub use table::{
     min_row_width, resized,
 };
 pub use terminal::{SendBackTab, SendTab, TERMINAL_CONTEXT, Terminal, TerminalEvent};
-pub use text::{
-    BreakAnywhere, Highlighted, Kbd, KeyValue, Link, Rule, SectionHeader, SectionLabel,
-};
+pub use text::{Highlighted, Kbd, KeyValue, Link, Rule, SectionHeader, SectionLabel};
 pub use tooltip::Tooltip;
 
 pub(crate) fn init(cx: &mut gpui::App) {
     overlay::init(cx);
+    selectable::init(cx);
 }

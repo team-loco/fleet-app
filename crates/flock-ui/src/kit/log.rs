@@ -4,10 +4,10 @@ use std::ops::Range;
 use gpui::{
     AnyElement, Context, ElementId, HighlightStyle, Hsla, InteractiveElement, IntoElement,
     ListAlignment, ListState, ParentElement, Pixels, Render, ScrollStrategy, SharedString, Styled,
-    StyledText, UniformListScrollHandle, Window, div, list, prelude::FluentBuilder, px,
-    uniform_list,
+    UniformListScrollHandle, Window, div, list, prelude::FluentBuilder, px, uniform_list,
 };
 
+use super::selectable::SelectableText;
 use crate::theme::{
     ActiveTheme, FONT_MONO, LOG_LEVEL, LOG_LINE, LOG_TIMESTAMP, Palette, SPACE_3, SPACE_6,
     TEXT_MONO, TEXT_UI,
@@ -21,6 +21,7 @@ const CSI_FINAL: std::ops::RangeInclusive<char> = '\u{40}'..='\u{7e}';
 const TIMESTAMP_DATE_DASH: usize = 4;
 const TIMESTAMP_MIN_LEN: usize = 20;
 const WRAP_OVERDRAW: Pixels = px(200.);
+const LINE_ID: &str = "log-line";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
@@ -418,12 +419,12 @@ impl LogView {
             .filter_map(|ix| {
                 self.buffer
                     .get(ix)
-                    .map(|line| self.render_line(line, &palette))
+                    .map(|line| self.render_line(ix, line, &palette))
             })
             .collect()
     }
 
-    fn render_line(&self, line: &LogLine, palette: &Palette) -> AnyElement {
+    fn render_line(&self, ix: usize, line: &LogLine, palette: &Palette) -> AnyElement {
         let colors = line_colors(line.level, self.levels, palette);
         let highlight = HighlightStyle {
             background_color: Some(palette.accbg),
@@ -431,8 +432,10 @@ impl LogView {
             ..HighlightStyle::default()
         };
         let matches = find_matches(&line.message, &self.query);
-        let message = StyledText::new(line.message.clone())
-            .with_highlights(matches.into_iter().map(|range| (range, highlight)));
+        let id = ElementId::NamedInteger(LINE_ID.into(), ix as u64);
+        let message = SelectableText::new(line.message.clone())
+            .id(id)
+            .highlights(matches.into_iter().map(|range| (range, highlight)));
         div()
             .flex()
             .gap(SPACE_6)
@@ -480,7 +483,7 @@ impl Render for LogView {
                     let palette = *cx.palette();
                     this.buffer.get(ix).map_or_else(
                         || div().into_any_element(),
-                        |line| this.render_line(line, &palette),
+                        |line| this.render_line(ix, line, &palette),
                     )
                 }),
             )
@@ -500,8 +503,10 @@ impl Render for LogView {
             .py(SPACE_3)
             .into_any_element()
         };
+        let selector = self.id.to_string();
         div()
             .id(ElementId::NamedInteger(self.id.clone(), 0))
+            .debug_selector(|| selector)
             .size_full()
             .flex()
             .flex_col()
