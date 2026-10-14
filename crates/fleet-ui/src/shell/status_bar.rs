@@ -53,7 +53,7 @@ impl Shell {
             .flex_none()
             .gap(SPACE_8)
             .h(STATUS_BAR)
-            .px(SPACE_6)
+            .pl(SPACE_6)
             .border_t(RULE)
             .border_color(palette.line)
             .bg(palette.chrome)
@@ -62,7 +62,6 @@ impl Shell {
             .text_color(palette.mute)
             .whitespace_nowrap()
             .overflow_hidden()
-            .child(self.switcher.clone())
             .child(
                 div()
                     .id("status-problems")
@@ -83,10 +82,11 @@ impl Shell {
                         problems.warn
                     )))),
             )
-            .child(left)
+            .child(div().min_w_0().truncate().child(left))
             .child(div().flex_1())
             .children(self.forwards(cx))
             .children(self.loco_agent(&palette))
+            .child(self.switcher.clone())
             .into_any_element()
     }
 

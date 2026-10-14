@@ -69,9 +69,11 @@ pub const ROW_MATRIX: Pixels = px(38.);
 pub const ROW_CATALOG: Pixels = px(44.);
 
 pub const STRIP: Pixels = px(28.);
-pub const SIDEBAR: Pixels = px(196.);
+pub const SIDEBAR: Pixels = px(200.);
+pub const SIDEBAR_HEADER: Pixels = px(32.);
 pub const SIDEBAR_COLLAPSED: Pixels = px(76.);
-pub const SWITCHER_WIDTH: Pixels = px(340.);
+pub const SWITCHER_WIDTH: Pixels = px(290.);
+pub const SWITCHER_GEAR: Pixels = px(26.);
 pub const SWITCHER_LIST: Pixels = px(420.);
 pub const PAGE_HEADER: Pixels = px(44.);
 pub const TAB_STRIP: Pixels = px(32.);

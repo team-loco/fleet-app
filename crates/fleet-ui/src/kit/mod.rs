@@ -43,7 +43,7 @@ pub use matrix::{Matrix, MatrixCell};
 pub use menu::{ActionMenu, MenuItem};
 pub use modal::Modal;
 pub use overlay::{ConfirmDialog, Overlays, Toast, confirm, layer as overlay_layer, toast};
-pub(crate) use popover::{Dismissal, Step, above_left, appear, shadow, step, surface};
+pub(crate) use popover::{Dismissal, Step, above_right, appear, shadow, step, surface};
 pub use presence::{Presence, slide_in, slide_out, swap_in};
 pub use prose::Prose;
 pub use select::{Select, SelectEvent};

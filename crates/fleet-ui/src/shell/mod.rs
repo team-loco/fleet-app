@@ -17,7 +17,7 @@ use gpui::{
 
 use crate::Store;
 use crate::actions::{
-    CompareAcrossClusters, FocusFilter, FollowLogs, OpenSettings, ShowFluxOwner,
+    CompareAcrossClusters, FocusFilter, FollowLogs, OpenSettings, ShowAllClusters, ShowFluxOwner,
     ToggleClusterSwitcher, ToggleCommandPalette, ToggleSidebar,
 };
 use crate::kit::{FilterBar, Toast, toast};
@@ -219,7 +219,7 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> (Entity<ClusterSwitcher>, Subscription) {
-        let switcher = cx.new(|cx| ClusterSwitcher::new(window, cx));
+        let switcher = cx.new(ClusterSwitcher::new);
         let events = cx.subscribe_in(
             &switcher,
             window,
@@ -474,6 +474,15 @@ impl Shell {
         cx.notify();
     }
 
+    pub(super) fn retarget(
+        &mut self,
+        cluster: Option<&fleet_core::ClusterId>,
+        cx: &mut Context<Self>,
+    ) {
+        self.state.retarget(cluster);
+        self.show_active(cx);
+    }
+
     pub(super) fn close_tab(&mut self, id: fleet_core::tabs::TabId, cx: &mut Context<Self>) {
         let active = self.state.panes().active().id();
         if self.state.panes_mut().close(id) {
@@ -656,6 +665,9 @@ impl Render for Shell {
             }))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
                 this.dispatch(Command::ToggleSidebar, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ShowAllClusters, _, cx| {
+                this.retarget(None, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleClusterSwitcher, window, cx| {
                 this.switcher

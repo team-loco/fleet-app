@@ -1081,3 +1081,99 @@ fn the_workload_dock_opens_a_pods_logs_in_a_tab() -> anyhow::Result<()> {
     assert!(ui.bounds("tab-logs-follow").is_some());
     Ok(())
 }
+
+fn switcher_row(ui: &Ui, cluster: &str) -> anyhow::Result<&'static str> {
+    let ix = ui
+        .state()
+        .snapshot
+        .clusters
+        .iter()
+        .position(|c| c.id.as_str() == cluster)
+        .ok_or_else(|| anyhow::anyhow!("the demo has no cluster {cluster}"))?;
+    Ok(selector(format!("switcher-row-{}", ix + 1)))
+}
+
+#[test]
+fn picking_a_cluster_retargets_the_active_tab_to_the_same_page() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("nav-events")?;
+    ui.click("cluster-switcher")?;
+    let staging = switcher_row(&ui, "staging")?;
+    ui.click(staging)?;
+    let state = ui.state();
+    assert_eq!(state.location().cluster, Some(ClusterId::new("staging")));
+    assert_eq!(state.location().page, Page::Events);
+    assert_eq!(tab_pages(&ui), [Page::Events]);
+    ui.press("cmd-[")?;
+    assert_eq!(
+        ui.state().location().cluster,
+        Some(ClusterId::new("prod-us-east"))
+    );
+    Ok(())
+}
+
+#[test]
+fn a_workload_tab_follows_the_object_to_another_cluster_or_falls_back() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Workload)?;
+    let target = ui.state().workload().cloned();
+    ui.click("cluster-switcher")?;
+    let west = switcher_row(&ui, "prod-eu-west")?;
+    ui.click(west)?;
+    let moved = ui.state().workload().cloned();
+    assert_eq!(
+        moved
+            .as_ref()
+            .map(|r| (r.cluster.as_str(), r.name.as_str())),
+        target.as_ref().map(|r| ("prod-eu-west", r.name.as_str()))
+    );
+    ui.press("cmd-shift-c")?;
+    ui.type_text("edge")?;
+    ui.press("enter")?;
+    let state = ui.state();
+    assert_eq!(state.location().cluster, Some(ClusterId::new("edge-k3s")));
+    assert_eq!(state.location().page, Page::ClusterOverview);
+    assert_eq!(state.panes().focused().tabs().len(), 3);
+    Ok(())
+}
+
+#[test]
+fn command_zero_shows_all_clusters_in_the_active_tab() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("nav-nodes")?;
+    ui.press("cmd-0")?;
+    let state = ui.state();
+    assert_eq!(state.location().cluster, None);
+    assert_eq!(state.location().page, Page::Overview);
+    assert_eq!(tab_pages(&ui), [Page::Overview]);
+    Ok(())
+}
+
+#[test]
+fn the_switcher_gear_opens_settings_and_right_click_offers_connection_actions() -> anyhow::Result<()>
+{
+    let mut ui = Ui::open(Screen::Fleet)?;
+    ui.click("cluster-switcher")?;
+    let staging = switcher_row(&ui, "staging")?;
+    ui.right_click(staging)?;
+    assert!(ui.bounds("switcher-back").is_some());
+    assert!(ui.bounds("switcher-action-2").is_some());
+    ui.press("escape escape")?;
+    assert!(!ui.read(Shell::switcher_open));
+    ui.click("cluster-switcher")?;
+    ui.hover(staging)?;
+    let gear: &'static str = staging.replace("row", "gear").leak();
+    ui.click(gear)?;
+    assert_eq!(ui.state().location().page, Page::ClusterSettings);
+    assert!(!ui.read(Shell::switcher_open));
+    Ok(())
+}
+
+#[test]
+fn the_sidebar_names_its_scope_and_collapses_to_a_bare_chevron() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    assert!(ui.bounds("sidebar-scope").is_some());
+    ui.press("cmd-b")?;
+    assert!(ui.bounds("sidebar-scope").is_none());
+    assert!(ui.bounds("expand-sidebar").is_some());
+    Ok(())
+}
