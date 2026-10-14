@@ -170,6 +170,26 @@ fn the_loco_section_shows_only_for_clusters_running_loco() -> anyhow::Result<()>
 }
 
 #[test]
+fn a_suspended_flux_object_offers_resume_as_its_primary_action() -> anyhow::Result<()> {
+    for appearance in [
+        flock_ui::theme::Appearance::Dark,
+        flock_ui::theme::Appearance::Light,
+    ] {
+        let mut ui = Ui::with(Screen::Kustomization, flock::Preset::default(), appearance)?;
+        assert!(ui.bounds("flux-resume").is_none());
+        ui.click("flux-actions")?;
+        ui.click("flux-actions-item-1")?;
+        assert!(ui.bounds("flux-reconcile").is_none());
+        let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+        ui.save_png(&dir.join(format!("kustomization-suspended-{appearance:?}.png")))?;
+        ui.click("flux-resume")?;
+        assert!(ui.bounds("flux-resume").is_none());
+        assert!(ui.bounds("flux-reconcile").is_some());
+    }
+    Ok(())
+}
+
+#[test]
 fn cancelling_a_confirm_dialog_leaves_the_state_unchanged() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Workload)?;
     let before = ui.state();
@@ -1585,7 +1605,7 @@ fn split_panes_render_compact_logs_and_kustomization_views() -> anyhow::Result<(
     ui.save_png(&dir.join("split-logs-kustomization.png"))?;
     ui.click("flux-full-view")?;
     assert_eq!(pane_count(&ui), 1);
-    assert!(ui.bounds("flux-reconcile").is_some());
+    assert!(ui.bounds("flux-resume").is_some());
     Ok(())
 }
 

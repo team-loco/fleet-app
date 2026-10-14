@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use flock_core::gitops::Controller;
 use flock_core::{Page, Status, WatchState};
-use flock_flux::ObjectKind;
+use flock_flux::{Condition, ObjectKind};
 use futures::future::join_all;
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::core::v1::Namespace;
@@ -58,8 +58,11 @@ impl FluxInfo {
 pub struct ClusterFlux {
     pub handle: ClusterHandle,
     pub info: Arc<Mutex<FluxInfo>>,
+    pub failures: Mutex<Failures>,
     _task: TaskGuard,
 }
+
+pub type Failures = BTreeMap<String, Condition>;
 
 impl ClusterFlux {
     pub fn start(handle: ClusterHandle, changed: async_channel::Sender<()>) -> Self {
@@ -68,6 +71,7 @@ impl ClusterFlux {
         Self {
             handle,
             info,
+            failures: Mutex::new(Failures::new()),
             _task: task,
         }
     }

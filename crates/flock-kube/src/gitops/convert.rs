@@ -8,10 +8,12 @@ use flock_core::{ClusterId, FluxKey, FluxKind, FluxObject, Status, Uid};
 use flock_flux::revision::{self, short};
 use flock_flux::{GitOpsObject, InventoryEntry, ObjectKind, Summary, redact, summarize};
 use jiff::Timestamp;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::ManagedFieldsEntry;
 use kube::api::DynamicObject;
 use serde_json::Value;
 
 use crate::flux::FluxHealth;
+use crate::resources::owns_suspend;
 const API_VERSION: &str = "apiVersion";
 const KIND: &str = "kind";
 const READY: &str = "Ready";
@@ -23,6 +25,7 @@ const LATEST_VERSION: &str = "latest version";
 const DEPLOYED: &str = "deployed";
 const SUCCEEDED_SUFFIX: &str = "Succeeded";
 const UID_POINTER: &str = "/metadata/uid";
+const MANAGED_FIELDS: &str = "/metadata/managedFields";
 const SUSPENDED_SENTENCE: &str =
     "Reconciliation is suspended, so Flux applies nothing here until it is resumed.";
 
@@ -40,6 +43,10 @@ impl Parsed {
     pub fn is(&self, kind: &str, namespace: &str, name: &str) -> bool {
         let identity = &self.object.identity;
         identity.kind.as_str() == kind && identity.namespace == namespace && identity.name == name
+    }
+
+    pub fn uid(&self) -> Option<&str> {
+        self.raw.pointer(UID_POINTER).and_then(Value::as_str)
     }
 
     fn status(&self, pointer: &str) -> Option<&Value> {
@@ -60,12 +67,16 @@ impl Parsed {
             .and_then(|condition| timestamp(condition.get("lastTransitionTime")))
     }
 
-    fn changed_at(&self) -> Option<Timestamp> {
+    fn suspended_at(&self) -> Option<Timestamp> {
         self.raw
-            .pointer("/metadata/managedFields")
+            .pointer(MANAGED_FIELDS)
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
+            .filter(|field| {
+                serde_json::from_value::<ManagedFieldsEntry>((*field).clone())
+                    .is_ok_and(|entry| owns_suspend(&entry))
+            })
             .filter_map(|field| timestamp(field.get("time")))
             .max()
     }
@@ -153,7 +164,9 @@ pub fn health(parsed: &Parsed, objects: &[Parsed], now: Timestamp) -> FluxHealth
         suspended: parsed.object.suspended,
         revision: parsed.object.revision().map(str::to_owned),
         since: parsed
-            .ready_since()
+            .suspended_at()
+            .filter(|_| parsed.object.suspended)
+            .or_else(|| parsed.ready_since())
             .map(|then| elapsed(then, now))
             .unwrap_or_default(),
     }
@@ -201,12 +214,7 @@ pub fn flux_object(parsed: &Parsed, inputs: Inputs<'_>) -> Option<FluxObject> {
         .unwrap_or_else(|| reconcile_history(parsed, now));
     let sentence = sentence(parsed, &summary, applied.as_ref());
     let detail = detail(parsed, now, inputs.releases);
-    let uid = parsed
-        .raw
-        .pointer(UID_POINTER)
-        .and_then(Value::as_str)
-        .map(Uid::new)
-        .unwrap_or_default();
+    let uid = parsed.uid().map(Uid::new).unwrap_or_default();
     Some(FluxObject {
         key,
         uid,
@@ -232,10 +240,7 @@ fn phase(parsed: &Parsed, summary: &Summary, now: Timestamp) -> Phase {
         flock_flux::Status::Warn => Phase::Retrying,
         flock_flux::Status::Err => Phase::Failing,
         flock_flux::Status::Suspended => Phase::Suspended {
-            since: parsed
-                .changed_at()
-                .map(|then| elapsed(then, now))
-                .unwrap_or_default(),
+            since: parsed.suspended_at().map(|then| elapsed(then, now)),
         },
     }
 }
@@ -895,6 +900,25 @@ pub(super) mod tests {
         );
         assert_eq!(release(chart(Some("*")), Some("6.5.1")), "podinfo · 6.5.1");
         assert_eq!(release(chart(None), None), "podinfo");
+    }
+
+    #[test]
+    fn suspended_objects_age_from_whoever_last_wrote_spec_suspend() {
+        let mut value = kustomization("apps", "True", "3e0ff8ae123b");
+        value["spec"]["suspend"] = json!(true);
+        let unknown = convert(&value, &[]).map(|object| object.phase);
+        assert_eq!(unknown, Some(Phase::Suspended { since: None }));
+        value["metadata"]["managedFields"] = json!([
+            {"manager": "kubectl", "operation": "Update", "time": "2026-10-13T09:59:00Z",
+             "fieldsType": "FieldsV1", "fieldsV1": {"f:spec": {"f:interval": {}}}},
+            {"manager": "flux", "operation": "Update", "time": "2026-10-11T10:00:00Z",
+             "fieldsType": "FieldsV1", "fieldsV1": {"f:spec": {"f:suspend": {}}}}
+        ]);
+        let two_days = Some(Duration::from_hours(48));
+        let known = convert(&value, &[]).map(|object| object.phase);
+        assert_eq!(known, Some(Phase::Suspended { since: two_days }));
+        let health = health(&parsed(&value), &[], now());
+        assert_eq!(Some(health.since), two_days);
     }
 
     #[test]

@@ -459,24 +459,30 @@ pub fn parse_patch(text: &str) -> (Vec<FilePatch>, bool) {
         if skipping {
             continue;
         }
-        if let Some(start) = hunk_start(line) {
+        let (change, text, number) = if let Some(start) = hunk_start(line) {
+            let number = start.new;
             cursor = Some(start);
-            continue;
-        }
-        let (Some(at), Some(file)) = (cursor.as_mut(), files.last_mut()) else {
-            continue;
-        };
-        let (change, text, number) = if let Some(text) = line.strip_prefix('+') {
+            (LineChange::Hunk, line, number)
+        } else if let Some(at) = cursor.as_mut()
+            && let Some(text) = line.strip_prefix('+')
+        {
             at.new += 1;
             (LineChange::Added, text, at.new - 1)
-        } else if let Some(text) = line.strip_prefix('-') {
+        } else if let Some(at) = cursor.as_mut()
+            && let Some(text) = line.strip_prefix('-')
+        {
             at.old += 1;
             (LineChange::Removed, text, at.old - 1)
-        } else if let Some(text) = line.strip_prefix(' ') {
+        } else if let Some(at) = cursor.as_mut()
+            && let Some(text) = line.strip_prefix(' ')
+        {
             at.old += 1;
             at.new += 1;
             (LineChange::Context, text, at.new - 1)
         } else {
+            continue;
+        };
+        let Some(file) = files.last_mut() else {
             continue;
         };
         if file.lines.len() >= MAX_FILE_LINES {
@@ -581,6 +587,7 @@ mod tests {
         assert_eq!(
             lines,
             [
+                (LineChange::Hunk, 21, "@@ -21,3 +21,4 @@ spec:"),
                 (LineChange::Context, 21, "      containers:"),
                 (LineChange::Removed, 22, "        image: podinfo:6.14.0"),
                 (LineChange::Added, 22, "        image: podinfo:6.15.0"),
@@ -590,6 +597,32 @@ mod tests {
         );
         assert_eq!(commits[1].files[0].added(), 1);
         assert_eq!(commits[1].files[0].removed(), 1);
+    }
+
+    #[test]
+    fn every_hunk_keeps_its_header_so_skipped_lines_show() {
+        let patch = "diff --git a/w.yml b/w.yml\n@@ -26,3 +26,3 @@ jobs:\n       a\n-      b\n+      c\n@@ -48,2 +48,3 @@ jobs:\n       d\n+      e\n";
+        let (files, truncated) = parse_patch(patch);
+        assert!(!truncated);
+        let lines: Vec<(LineChange, u32, &str)> = files
+            .iter()
+            .flat_map(|file| &file.lines)
+            .map(|l| (l.change, l.number, l.text.as_str()))
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                (LineChange::Hunk, 26, "@@ -26,3 +26,3 @@ jobs:"),
+                (LineChange::Context, 26, "      a"),
+                (LineChange::Removed, 27, "      b"),
+                (LineChange::Added, 27, "      c"),
+                (LineChange::Hunk, 48, "@@ -48,2 +48,3 @@ jobs:"),
+                (LineChange::Context, 48, "      d"),
+                (LineChange::Added, 49, "      e"),
+            ]
+        );
+        assert_eq!(files.first().map(FilePatch::added), Some(2));
+        assert_eq!(files.first().map(FilePatch::removed), Some(1));
     }
 
     #[test]

@@ -112,7 +112,7 @@ pub enum Phase {
     Reconciling,
     Retrying,
     Failing,
-    Suspended { since: Duration },
+    Suspended { since: Option<Duration> },
 }
 
 impl Phase {
@@ -138,7 +138,8 @@ impl Phase {
 
     pub fn note(self) -> String {
         match self {
-            Self::Suspended { since } => format!("suspended {}", time::age(since)),
+            Self::Suspended { since: Some(since) } => format!("suspended {}", time::age(since)),
+            Self::Suspended { since: None } => self.label().to_lowercase(),
             Self::Ready => self.label().to_lowercase(),
             Self::Reconciling => self.label().to_lowercase(),
             Self::Retrying => self.label().to_lowercase(),
@@ -559,10 +560,12 @@ pub(crate) mod tests {
     #[test]
     fn phases_map_to_status_and_notes() {
         let suspended = Phase::Suspended {
-            since: Duration::from_secs(2 * DAY),
+            since: Some(Duration::from_secs(2 * DAY)),
         };
         assert_eq!(suspended.status(), Status::Suspended);
         assert_eq!(suspended.note(), "suspended 2d");
+        let unknown = Phase::Suspended { since: None };
+        assert_eq!(unknown.note(), "suspended");
         assert_eq!(Phase::Failing.status(), Status::Err);
         assert_eq!(Phase::Ready.note(), "ready");
         assert_eq!(Phase::Retrying.status(), Status::Warn);
@@ -591,7 +594,7 @@ pub(crate) mod tests {
         let mut ks = object("east", Phase::Failing, "a41e07c");
         assert_eq!(ks.inventory_empty(), NOTHING_APPLIED_FAILING);
         ks.phase = Phase::Suspended {
-            since: Duration::from_secs(DAY),
+            since: Some(Duration::from_secs(DAY)),
         };
         assert_eq!(ks.inventory_empty(), NOTHING_APPLIED_SUSPENDED);
         ks.phase = Phase::Ready;
@@ -647,7 +650,7 @@ pub(crate) mod tests {
             object(
                 "west",
                 Phase::Suspended {
-                    since: Duration::from_secs(2 * DAY),
+                    since: Some(Duration::from_secs(2 * DAY)),
                 },
                 "7c2d9e0",
             ),

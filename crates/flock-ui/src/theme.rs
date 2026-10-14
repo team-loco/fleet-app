@@ -42,6 +42,7 @@ const GREEN_SHIFT: u32 = 8;
 pub const FONT_SANS: &str = "IBM Plex Sans";
 pub const FONT_STATUS: &str = "Flock Status";
 pub const FONT_MONO: &str = "IBM Plex Mono";
+pub const MONO_ADVANCE: f32 = 0.6;
 
 pub const TEXT_UI: Pixels = px(13.);
 pub const TEXT_MONO: Pixels = px(12.);

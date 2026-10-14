@@ -421,6 +421,7 @@ fn diff_line(line: &flock_core::changes::PatchLine) -> DiffLine {
         LineChange::Context => LineKind::Context,
         LineChange::Added => LineKind::Added,
         LineChange::Removed => LineKind::Removed,
+        LineChange::Hunk => LineKind::Hunk,
     };
     DiffLine::new(kind, Some(line.number), line.text.clone())
 }

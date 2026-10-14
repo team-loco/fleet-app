@@ -1,8 +1,8 @@
 use crate::changes::{LineChange, PatchLine};
+use crate::tabs::short_name;
 use crate::workload::{ContainerSpec, EnvResolution, EnvSource, EnvVar, Resources, short_image};
 use crate::{ClusterId, ResourceRef, Seen, Status, Uid, Workload};
 
-const DASH: char = '-';
 const MISSING: &str = "—";
 const READY: &str = "Ready";
 const IMAGE: &str = "Image";
@@ -386,16 +386,9 @@ fn lowercase_first(text: &str) -> String {
     }
 }
 
-pub fn short_names<'a>(a: &'a str, b: &'a str) -> (&'a str, &'a str) {
-    let shared = a
-        .split_inclusive(DASH)
-        .zip(b.split_inclusive(DASH))
-        .take_while(|(x, y)| x == y && x.ends_with(DASH))
-        .map(|(x, _)| x.len())
-        .sum::<usize>();
-    let short_a = a.get(shared..).filter(|s| !s.is_empty()).unwrap_or(a);
-    let short_b = b.get(shared..).filter(|s| !s.is_empty()).unwrap_or(b);
-    (short_a, short_b)
+pub fn short_names(a: &str, b: &str) -> (String, String) {
+    let names = [a, b];
+    (short_name(a, &names), short_name(b, &names))
 }
 
 #[cfg(test)]
@@ -486,15 +479,23 @@ mod tests {
 
     #[test]
     fn short_names_drop_the_shared_prefix() {
+        let pair = |a: &str, b: &str| (a.to_owned(), b.to_owned());
         assert_eq!(
             short_names("prod-us-east", "prod-eu-west"),
-            ("us-east", "eu-west")
+            pair("us-east", "eu-west")
         );
         assert_eq!(
             short_names("staging", "prod-us-east"),
-            ("staging", "prod-us-east")
+            pair("staging", "prod-us-east")
         );
-        assert_eq!(short_names("prod-a", "prod-a"), ("a", "a"));
+        assert_eq!(
+            short_names("fleet-a", "fleet-b"),
+            pair("fleet-a", "fleet-b")
+        );
+        assert_eq!(
+            short_names("prod-us-east", "prod-us-east"),
+            pair("prod-us-east", "prod-us-east")
+        );
     }
 
     fn spec(image: &str, key: &str, resolution: EnvResolution) -> ContainerSpec {

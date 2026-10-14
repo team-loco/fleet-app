@@ -11,6 +11,7 @@ use k8s_openapi::api::core::v1::{
     ConfigMap, Event, Namespace, Node, PersistentVolumeClaim, Pod, Secret, Service, ServiceAccount,
 };
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::{FieldsV1, ManagedFieldsEntry};
 use kube::api::{DynamicObject, PartialObjectMeta};
 use kube::core::{ApiResource, GroupVersionKind};
 use kube::runtime::reflector::{self, ObjectRef, Store};
@@ -26,6 +27,9 @@ use crate::manager::lock;
 use crate::task::TaskGuard;
 
 const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
+const SPEC_FIELD: &str = "f:spec";
+const SUSPEND_KEY: &str = "f:suspend";
+const SUSPEND_FIELD: &str = "/f:spec/f:suspend";
 const LISTING_SLACK: usize = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -392,10 +396,34 @@ pub fn custom_snapshot(running: &RunningWatch) -> Vec<Arc<DynamicObject>> {
 
 fn trim_metadata<K: Resource>(object: &mut K) {
     let metadata = object.meta_mut();
-    metadata.managed_fields = None;
+    let suspenders: Vec<ManagedFieldsEntry> = metadata
+        .managed_fields
+        .take()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(owns_suspend)
+        .map(|entry| ManagedFieldsEntry {
+            fields_v1: Some(FieldsV1(suspend_fields())),
+            time: entry.time,
+            manager: entry.manager,
+            ..ManagedFieldsEntry::default()
+        })
+        .collect();
+    metadata.managed_fields = (!suspenders.is_empty()).then_some(suspenders);
     if let Some(annotations) = &mut metadata.annotations {
         annotations.remove(LAST_APPLIED);
     }
+}
+
+pub fn owns_suspend(entry: &ManagedFieldsEntry) -> bool {
+    entry
+        .fields_v1
+        .as_ref()
+        .is_some_and(|fields| fields.0.pointer(SUSPEND_FIELD).is_some())
+}
+
+fn suspend_fields() -> serde_json::Value {
+    serde_json::json!({ SPEC_FIELD: { SUSPEND_KEY: {} } })
 }
 
 #[cfg(test)]
@@ -439,6 +467,44 @@ mod tests {
             panic!("labels lost")
         };
         assert_eq!(labels.get("app").map(String::as_str), Some("scale"));
+    }
+
+    #[test]
+    fn cached_metadata_keeps_only_who_last_wrote_spec_suspend_and_when() {
+        let parsed = serde_json::from_value::<DynamicObject>(json!({
+            "apiVersion": "kustomize.toolkit.fluxcd.io/v1", "kind": "Kustomization",
+            "metadata": {
+                "name": "apps", "namespace": "flux-system",
+                "managedFields": [
+                    {"manager": "kubectl", "operation": "Update", "time": "2026-10-01T10:00:00Z",
+                     "fieldsType": "FieldsV1",
+                     "fieldsV1": {"f:spec": {"f:interval": {}, "f:path": {}}}},
+                    {"manager": "flux", "operation": "Update", "time": "2026-10-12T09:30:00Z",
+                     "fieldsType": "FieldsV1",
+                     "fieldsV1": {"f:spec": {"f:suspend": {}}}},
+                    {"manager": "kustomize-controller", "operation": "Update",
+                     "subresource": "status", "time": "2026-10-14T18:00:00Z",
+                     "fieldsType": "FieldsV1", "fieldsV1": {"f:status": {"f:conditions": {}}}}
+                ]
+            },
+            "spec": {"suspend": true}
+        }));
+        let Ok(mut object) = parsed else {
+            panic!("fixture failed")
+        };
+        trim_metadata(&mut object);
+        let kept = object.metadata.managed_fields.unwrap_or_default();
+        let summary: Vec<(Option<&str>, Option<String>, bool)> = kept
+            .iter()
+            .map(|entry| {
+                let time = entry.time.as_ref().map(|t| t.0.to_string());
+                (entry.manager.as_deref(), time, owns_suspend(entry))
+            })
+            .collect();
+        assert_eq!(
+            summary,
+            [(Some("flux"), Some("2026-10-12T09:30:00Z".to_owned()), true)]
+        );
     }
 
     fn event(name: &str, minute: u32) -> Event {

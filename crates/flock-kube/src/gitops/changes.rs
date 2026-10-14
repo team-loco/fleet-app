@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use flock_core::changes::{
     ChangesLog, Commit, Lane, Rendering, Rollout, Target, TargetKind, ViewKind,
 };
+use flock_core::tabs::short_name;
 use flock_core::{ClusterId, Status};
 use flock_flux::ObjectKind;
 use flock_flux::revision;
@@ -15,8 +16,6 @@ use super::git::{GitCommit, MirrorState, RepoKey};
 
 const AS_COMMITTED: &str = "Source change as committed.";
 const TRUNCATED: &str = "Source change as committed; the diff is too large to show in full.";
-const LANE_SHORT_MAX: usize = 4;
-const LANE_SEPARATOR: char = '-';
 const DEFAULT_BRANCH: &str = "master";
 const REPO_SEPARATOR: &str = ", ";
 const TODAY: &str = "today";
@@ -141,23 +140,16 @@ pub fn outcome(commits: &[&str], index: usize, progress: &Progress) -> (Status, 
     (Status::Offline, "not yet reached".to_owned())
 }
 
-pub fn lane(cluster: &ClusterId) -> Lane {
-    let name = cluster.as_str();
-    let short = if name.chars().count() <= LANE_SHORT_MAX {
-        name.to_owned()
-    } else {
-        name.rsplit(LANE_SEPARATOR)
-            .next()
-            .unwrap_or(name)
-            .chars()
-            .take(LANE_SHORT_MAX)
-            .collect()
-    };
-    Lane {
-        cluster: cluster.clone(),
-        short,
-        label: name.to_owned(),
-    }
+pub fn lanes(clusters: &[ClusterId]) -> Vec<Lane> {
+    let names: Vec<&str> = clusters.iter().map(ClusterId::as_str).collect();
+    clusters
+        .iter()
+        .map(|cluster| Lane {
+            cluster: cluster.clone(),
+            short: short_name(cluster.as_str(), &names),
+            label: cluster.to_string(),
+        })
+        .collect()
 }
 
 pub fn when(time: Timestamp, now: Timestamp) -> String {
@@ -265,7 +257,7 @@ pub fn changes_log(repos: &[Repo<'_>], clusters: &[ClusterId], now: Timestamp) -
         .iter()
         .flat_map(|repo| repo.consumers.iter().map(|consumer| consumer.cluster))
         .collect();
-    let lanes: Vec<ClusterId> = clusters
+    let consumed: Vec<ClusterId> = clusters
         .iter()
         .filter(|cluster| consuming.contains(cluster))
         .cloned()
@@ -285,7 +277,7 @@ pub fn changes_log(repos: &[Repo<'_>], clusters: &[ClusterId], now: Timestamp) -
                 let built = history
                     .iter()
                     .enumerate()
-                    .filter_map(|(ix, c)| commit(c, ix, &shas, repo, &lanes, now));
+                    .filter_map(|(ix, c)| commit(c, ix, &shas, repo, &consumed, now));
                 commits.extend(built);
             }
             Some(MirrorState::Unavailable(reason)) => {
@@ -305,7 +297,7 @@ pub fn changes_log(repos: &[Repo<'_>], clusters: &[ClusterId], now: Timestamp) -
             .collect::<Vec<_>>()
             .join(REPO_SEPARATOR),
         fetched: fetched.map(|at| elapsed(at, now)).unwrap_or_default(),
-        lanes: lanes.iter().map(lane).collect(),
+        lanes: lanes(&consumed),
         commits,
         unavailable: (!unavailable.is_empty()).then(|| unavailable.join(REPO_SEPARATOR)),
         pending,
@@ -413,11 +405,24 @@ mod tests {
     }
 
     #[test]
-    fn long_cluster_names_shorten_to_their_last_segment() {
-        assert_eq!(lane(&ClusterId::new("fleet-a")).short, "a");
-        assert_eq!(lane(&ClusterId::new("dev")).short, "dev");
-        assert_eq!(lane(&ClusterId::new("prod-us-east")).short, "east");
-        assert_eq!(lane(&ClusterId::new("prod-us-east")).label, "prod-us-east");
+    fn lanes_keep_whole_names_unless_an_environment_prefix_is_shared() {
+        let headers = |names: &[&str]| -> Vec<String> {
+            let clusters: Vec<ClusterId> = names.iter().map(|n| ClusterId::new(*n)).collect();
+            lanes(&clusters)
+                .into_iter()
+                .map(|lane| lane.short)
+                .collect()
+        };
+        assert_eq!(headers(&["fleet-a", "fleet-b"]), ["fleet-a", "fleet-b"]);
+        assert_eq!(
+            headers(&["prod-us-east", "prod-eu-west", "dev"]),
+            ["us-east", "eu-west", "dev"]
+        );
+        let clusters = [ClusterId::new("prod-us-east")];
+        assert_eq!(
+            lanes(&clusters).first().map(|lane| lane.label.as_str()),
+            Some("prod-us-east")
+        );
     }
 
     #[test]

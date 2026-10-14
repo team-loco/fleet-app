@@ -45,6 +45,7 @@ const VALUES_LABEL: Pixels = px(140.);
 
 const NO_VALUES: &str = "No values set.";
 const RECONCILE: &str = "Reconcile";
+const RESUME: &str = "Resume";
 const RECONCILE_KEYS: &str = "⌘R";
 const WITH_SOURCE_KEYS: &str = "⇧⌘R";
 const DIFF_KEYS: &str = "⌘D";
@@ -343,21 +344,24 @@ impl FluxObjectPage {
     }
 
     fn header(&self, object: &FluxObject, cx: &mut Context<Self>) -> AnyElement {
-        let suspended = object.phase.is_suspended();
         let this = cx.weak_entity();
-        let reconcile = Button::new("flux-reconcile", RECONCILE)
-            .primary()
-            .shortcut(RECONCILE_KEYS)
-            .disabled(suspended)
-            .when(suspended, |button| button.tooltip("Resume it first."))
-            .on_click(move |_, _, cx| {
-                this.update(cx, |page, cx| page.act(FluxAction::Reconcile, cx))
+        let primary = if object.phase.is_suspended() {
+            Button::new("flux-resume", RESUME).on_click(move |_, _, cx| {
+                this.update(cx, |page, cx| page.act(FluxAction::Resume, cx))
                     .ok();
-            });
+            })
+        } else {
+            Button::new("flux-reconcile", RECONCILE)
+                .shortcut(RECONCILE_KEYS)
+                .on_click(move |_, _, cx| {
+                    this.update(cx, |page, cx| page.act(FluxAction::Reconcile, cx))
+                        .ok();
+                })
+        };
         PageHeader::new(object.key.name.clone())
             .mono()
             .status(object.status(), object.phase.label())
-            .action(reconcile)
+            .action(primary.primary())
             .action(self.menu.clone())
             .sentence(Self::sentence(object, cx))
             .meta(Self::meta(object, cx))
@@ -712,7 +716,7 @@ fn suspend_item(this: &WeakEntity<FluxObjectPage>, object: &FluxObject) -> MenuI
             .source
             .as_ref()
             .map_or_else(|| "the latest revision".to_owned(), |s| s.name.clone());
-        item(this, "Resume", |page, _, cx| {
+        item(this, RESUME, |page, _, cx| {
             page.act(FluxAction::Resume, cx);
         })
         .description(format!(

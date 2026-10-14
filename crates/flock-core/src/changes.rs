@@ -126,6 +126,7 @@ pub enum LineChange {
     Context,
     Added,
     Removed,
+    Hunk,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
