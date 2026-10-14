@@ -1,3 +1,4 @@
+use crate::kit::SelectableText;
 use flock_core::changes::LineChange;
 use flock_core::compare::{Cell, Comparison, Field, SpecDiff};
 use flock_core::{ClusterId, Command, Page, ResourceRef, Snapshot, Status};
@@ -183,7 +184,7 @@ impl CompareScreen {
             .child(
                 PageHeader::new(comparison.name.clone())
                     .mono()
-                    .sentence(comparison.sentence())
+                    .sentence(SelectableText::new(comparison.sentence()))
                     .meta(meta),
             )
             .child(heads)

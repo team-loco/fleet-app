@@ -454,10 +454,10 @@ impl Gallery {
     fn inspector(palette: &Palette) -> impl IntoElement {
         div().w(INSPECTOR_WIDTH).px(SPACE_8).child(
             KeyValue::new()
-                .row("image", "ghcr.io/acme/checkout-api:2.14.0")
-                .row("ports", "8080/TCP http")
-                .row("requests", "cpu 500m · mem 512Mi")
-                .row("limits", "cpu 1 · mem 1Gi")
+                .text("image", "ghcr.io/acme/checkout-api:2.14.0")
+                .text("ports", "8080/TCP http")
+                .text("requests", "cpu 500m · mem 512Mi")
+                .text("limits", "cpu 1 · mem 1Gi")
                 .row(
                     "last exit",
                     div().text_color(palette.err).child("1 (Error) · 2m ago"),

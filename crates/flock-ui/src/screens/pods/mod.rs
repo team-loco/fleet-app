@@ -1,3 +1,4 @@
+use crate::kit::SelectableText;
 use flock_core::pods::{
     Container, Pod, PodFilter, PodQuery, filter_counts, namespaces, nav_counts,
 };
@@ -432,7 +433,7 @@ impl PodsScreen {
                 div()
                     .text_color(palette.fg2)
                     .line_height(gpui::relative(LINE_PROSE))
-                    .child(pod.sentence()),
+                    .child(SelectableText::new(pod.sentence())),
             );
         header.flex_none().into_any_element()
     }
@@ -469,13 +470,13 @@ impl PodsScreen {
         section(palette).child(
             KeyValue::new()
                 .label_width(INSPECTOR_LABEL)
-                .row("Namespace", pod.namespace.clone())
-                .row("Node", or_missing(pod.node.clone()))
-                .row("Pod IP", or_missing(pod.ip.clone()))
+                .text("Namespace", pod.namespace.clone())
+                .text("Node", or_missing(pod.node.clone()))
+                .text("Pod IP", or_missing(pod.ip.clone()))
                 .row("Ready", ready)
                 .row("Controlled by", owner)
-                .row("QoS", pod.qos.label())
-                .row("Created", created),
+                .text("QoS", pod.qos.label())
+                .text("Created", created),
         )
     }
 
@@ -632,7 +633,7 @@ fn conditions(pod: &Pod, palette: &Palette) -> impl IntoElement {
 fn volumes(pod: &Pod, palette: &Palette) -> impl IntoElement {
     let rows = pod.volumes.iter().fold(
         KeyValue::new().label_width(INSPECTOR_LABEL),
-        |grid, volume| grid.row(volume.name.clone(), volume.source.clone()),
+        |grid, volume| grid.text(volume.name.clone(), volume.source.clone()),
     );
     section(palette)
         .child(SectionLabel::new("Volumes"))

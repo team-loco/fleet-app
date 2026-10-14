@@ -1554,6 +1554,31 @@ fn clicks_select_a_word_or_a_line_and_command_a_selects_the_whole_block() -> any
 }
 
 #[test]
+fn a_row_click_still_selects_the_row_and_a_drag_in_a_cell_selects_its_text() -> anyhow::Result<()> {
+    use gpui::{point, px};
+    let mut ui = Ui::open(Screen::Events)?;
+    let row = bounds_of(&mut ui, "events-row-1")?;
+    let border = bounds_of(&mut ui, "events-resize-0")?;
+    let start = point(border.center().x + px(12.), row.center().y);
+    ui.drag_between(start, start + point(px(40.), px(0.)))?;
+    assert!(ui.bounds("close-event").is_none());
+    ui.press("cmd-c")?;
+    let copied = ui.clipboard().unwrap_or_default();
+    assert_eq!(copied, "deplo");
+    ui.click("events-row-0")?;
+    assert!(ui.bounds("close-event").is_some());
+    let message = bounds_of(&mut ui, "event-message")?;
+    let top_left = message.origin + point(px(1.), px(4.));
+    let end = point(message.right() - px(1.), message.bottom() - px(4.));
+    ui.drag_between(top_left, end)?;
+    ui.press("cmd-c")?;
+    let selected = ui.clipboard().unwrap_or_default();
+    assert!(selected.len() > copied.len(), "{selected:?}");
+    assert!(ui.bounds("close-event").is_some());
+    Ok(())
+}
+
+#[test]
 fn log_lines_select_across_lines() -> anyhow::Result<()> {
     use gpui::{point, px};
     let mut ui = Ui::open(Screen::Workload)?;

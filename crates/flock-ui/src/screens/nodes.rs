@@ -249,13 +249,13 @@ impl NodesScreen {
             .on_click(cx.listener(|this, _, _, cx| this.close(cx)));
         let facts = KeyValue::new()
             .label_width(INSPECTOR_LABEL)
-            .row("instance", node.instance_type.clone())
-            .row("zone", node.zone.clone())
-            .row("internal IP", node.internal_ip.clone())
-            .row("kubelet", node.version.clone())
-            .row("OS image", node.os_image.clone())
-            .row("runtime", node.runtime.clone())
-            .row("age", age(node.age));
+            .text("instance", node.instance_type.clone())
+            .text("zone", node.zone.clone())
+            .text("internal IP", node.internal_ip.clone())
+            .text("kubelet", node.version.clone())
+            .text("OS image", node.os_image.clone())
+            .text("runtime", node.runtime.clone())
+            .text("age", age(node.age));
         let capacity = node_capacity(node, palette);
         let conditions = node.conditions.iter().map(|c| {
             let status = if c.healthy { Status::Ok } else { Status::Err };

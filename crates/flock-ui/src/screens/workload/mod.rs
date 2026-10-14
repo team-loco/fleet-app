@@ -1,3 +1,4 @@
+use crate::kit::SelectableText;
 mod dock;
 
 pub(crate) use dock::kit_line;
@@ -216,7 +217,7 @@ impl WorkloadScreen {
             .mono()
             .status(workload.status(), workload.ready_label())
             .action(cluster)
-            .sentence(workload.sentence())
+            .sentence(SelectableText::new(workload.sentence()))
             .footer(full_view_link("workload-full-view", open));
         let fields: Vec<AnyElement> = workload
             .fields()
@@ -403,7 +404,7 @@ impl WorkloadScreen {
             .mono()
             .status(workload.status(), workload.ready_label())
             .action(self.menu.clone())
-            .sentence(workload.sentence())
+            .sentence(SelectableText::new(workload.sentence()))
             .meta(meta)
     }
 
@@ -626,15 +627,20 @@ impl WorkloadScreen {
             .as_ref()
             .map(flock_core::workload::Probe::label);
         let mut grid = KeyValue::new()
-            .row("image", div().child(spec.image.clone()))
-            .row("ports", div().child(ports.join(", ")))
-            .row("requests", div().child(spec.requests.label()))
-            .row("limits", div().child(spec.limits.label()));
+            .text("image", spec.image.clone())
+            .text("ports", ports.join(", "))
+            .text("requests", spec.requests.label())
+            .text("limits", spec.limits.label());
         if let Some(readiness) = readiness {
-            grid = grid.row("readiness", div().child(readiness));
+            grid = grid.text("readiness", readiness);
         }
         if let Some(exit) = last_exit {
-            grid = grid.row("last exit", div().text_color(palette.err).child(exit));
+            grid = grid.row(
+                "last exit",
+                div()
+                    .text_color(palette.err)
+                    .child(SelectableText::new(exit)),
+            );
         }
         div()
             .px(SPACE_6)

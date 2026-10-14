@@ -1,3 +1,4 @@
+use crate::kit::SelectableText;
 use flock_core::flux::{
     FluxDetail, HelmDetail, HelmRevision, HistoryEntry, InventoryFilter, ManagedObject, Span,
     SpecRow,
@@ -828,15 +829,7 @@ fn wrappable(value: &str) -> String {
 }
 
 fn spec_value(value: &str) -> AnyElement {
-    if !value.contains('/') {
-        return wrappable(value).into_any_element();
-    }
-    let segments: Vec<String> = value.split_inclusive('/').map(str::to_owned).collect();
-    div()
-        .flex()
-        .flex_wrap()
-        .children(segments)
-        .into_any_element()
+    SelectableText::new(wrappable(value)).into_any_element()
 }
 
 fn spec_list(rows: &[SpecRow], label_width: Pixels) -> impl IntoElement {
@@ -1009,6 +1002,7 @@ fn history_columns() -> Vec<Column<HistoryEntry>> {
             |_, p| p.acc,
         )
         .mono()
+        .selectable()
         .fixed(REVISION_COLUMN),
         Column::colored_text(
             "Message",
@@ -1016,6 +1010,7 @@ fn history_columns() -> Vec<Column<HistoryEntry>> {
             |_, p| p.fg2,
         )
         .mono()
+        .selectable()
         .flex(1., Pixels::ZERO),
         Column::colored_text(
             "Count",
