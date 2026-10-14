@@ -1810,3 +1810,48 @@ fn app_shortcuts_work_with_the_terminal_focused_and_after_the_dock_closes() -> a
     assert_eq!(ui.state().panes().focused().tabs().len(), 2);
     Ok(())
 }
+
+#[test]
+fn nav_badges_stay_after_leaving_their_page() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("nav-deployments")?;
+    assert_eq!(ui.state().location().page, Page::Deployments);
+    assert!(ui.bounds("nav-deployments-err").is_some());
+    ui.click("nav-overview")?;
+    assert_eq!(ui.state().location().page, Page::ClusterOverview);
+    assert!(ui.bounds("nav-deployments-err").is_some());
+    assert!(ui.bounds("nav-deployments-total").is_some());
+    Ok(())
+}
+
+fn without_detail(cluster: &ClusterId) -> flock_core::Update {
+    let mut snapshot = flock_demo::snapshot();
+    snapshot.details.remove(cluster);
+    snapshot.pages.remove(cluster);
+    flock_core::Update::Snapshot(Box::new(snapshot))
+}
+
+#[test]
+fn returning_to_a_tab_renders_its_data_without_a_skeleton() -> anyhow::Result<()> {
+    for (screen, shown) in [
+        (Screen::Resources, "resources-Deployment-row-0"),
+        (Screen::Cluster, "nav-overview"),
+    ] {
+        let (mut ui, updates) = Ui::scripted(screen)?;
+        let Some(cluster) = ui.state().location().cluster.clone() else {
+            anyhow::bail!("{screen:?} opens on a cluster page");
+        };
+        assert!(ui.bounds(shown).is_some());
+        ui.press("cmd-t")?;
+        updates.try_send(without_detail(&cluster))?;
+        ui.settle()?;
+        ui.press("cmd-1")?;
+        assert_eq!(ui.state().location().cluster.as_ref(), Some(&cluster));
+        assert!(
+            ui.bounds("loading-skeleton").is_none(),
+            "{screen:?} fell back to the skeleton"
+        );
+        assert!(ui.bounds(shown).is_some(), "{screen:?} lost {shown}");
+    }
+    Ok(())
+}

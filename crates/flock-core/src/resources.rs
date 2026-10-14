@@ -109,14 +109,6 @@ impl ResourceKind {
 pub const POD_LIST: &str = "Pod";
 pub const EVENT_LIST: &str = "Event";
 
-pub fn namespaced_list(page: Page) -> Option<&'static str> {
-    match page {
-        Page::Pods => Some(POD_LIST),
-        Page::Events => Some(EVENT_LIST),
-        other => ResourceKind::for_page(other).map(ResourceKind::name),
-    }
-}
-
 pub fn namespace_choices(
     known: impl IntoIterator<Item = String>,
     chosen: Option<&str>,
@@ -191,11 +183,6 @@ pub(crate) mod tests {
             assert_ne!(kind.columns().len(), 0);
         }
         assert_eq!(ResourceKind::for_page(Page::Nodes), None);
-        assert_eq!(namespaced_list(Page::Pods), Some(POD_LIST));
-        assert_eq!(namespaced_list(Page::Events), Some(EVENT_LIST));
-        assert_eq!(namespaced_list(Page::Secrets), Some("Secret"));
-        assert_eq!(namespaced_list(Page::Nodes), None);
-        assert_eq!(namespaced_list(Page::Namespaces), None);
     }
 
     #[test]

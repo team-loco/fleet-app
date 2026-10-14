@@ -78,18 +78,18 @@ Settled; change only with a new entry that says why.
     ⌘1 focuses the sidebar (arrows move a focus ring, Enter opens), ⌘2 the page's main list,
     and Tab / ⇧Tab walk gpui's tab stops. After any navigation the shell takes keyboard focus
     back so keys keep working when the focused list disappears.
-21. **Namespaced lists start in one namespace** (#117, #131): pods, events and every resource list
-    (Deployments through PVCs) open in the cluster's default namespace: the cluster settings
-    override, else the kubeconfig context's namespace, else `default`. "All namespaces" is an
-    explicit pick. The one store is the cluster's `Preferences::namespaces`, keyed by list
-    (`flock_core::resources::namespaced_list`: `Pod`, `Event`, the resource kind's name), saved with
-    the other cluster preferences in `clusters.json` through `Command::SetPreferences`. The live
-    backend reads the same preference when it subscribes a page and runs that page's reflector for
-    the one namespace (`WatchKey` = kind + namespace), plus the cluster-wide Namespace list for the
-    picker. A preference change resubscribes every window. Sidebar counts come only from
-    cluster-wide watches, so a scoped list shows no count instead of a partial one. Pods stay on the
-    always-on cluster-wide pod watch that problem detection needs, so for pods only the view is
-    scoped.
+21. **Namespaced lists start in one namespace** (#117, #131; the scoped watches are superseded by
+    32): pods, events and every resource list (Deployments through PVCs) open in the cluster's
+    default namespace: the cluster settings override, else the kubeconfig context's namespace, else
+    `default`. "All namespaces" is an explicit pick. The one store is the cluster's
+    `Preferences::namespaces`, keyed by list (`flock_core::resources::namespaced_list`: `Pod`,
+    `Event`, the resource kind's name), saved with the other cluster preferences in `clusters.json`
+    through `Command::SetPreferences`. The live backend reads the same preference when it subscribes
+    a page and runs that page's reflector for the one namespace (`WatchKey` = kind + namespace),
+    plus the cluster-wide Namespace list for the picker. A preference change resubscribes every
+    window. Sidebar counts come only from cluster-wide watches, so a scoped list shows no count
+    instead of a partial one. Pods stay on the always-on cluster-wide pod watch that problem
+    detection needs, so for pods only the view is scoped.
 22. **No summary sentence on list pages; actions live on rows** (#119, #120): requested by the
     product owner; supersedes HANDOFF's "one plain sentence first" for list pages (Cluster overview,
     Nodes, Namespaces, Events, Pods and every resource list), which now open on the FilterBar. The
@@ -225,3 +225,16 @@ Settled; change only with a new entry that says why.
     only the newest `KubeSettings::event_limit` per cluster (`resources::EventWindow`), the same
     window the Events page lists. ReplicaSets, YAML, Helm history, logs and workload history stay
     on demand.
+32. **Pages read the background stores; the namespace picker filters** (#177, #178, product owner;
+    supersedes the namespace-scoped watches in 21 and the #145 / #152 plumbing): a page no longer
+    subscribes its own watch, so `WatchKey`, `subscribe_in`, `page_watches` and the per-page
+    subscriptions are gone. Pods, Events and every resource list read the cluster-wide store of
+    decision 31, and the namespace picker (still one preference per cluster and list, still opening
+    on the default namespace) filters rows in the UI. One long-lived watch per kind is cheap for
+    the API server: an idle watch costs it a connection and nothing per object, while the old
+    scoped watches started a fresh list and watch on every page or namespace change. Filtering a
+    local store takes microseconds and makes switching namespace instant. A watch that fails after
+    its first sync reports `WatchState::Refreshing` and the page keeps its rows; `Pending` (skeleton)
+    is reserved for data that never loaded. `AppState` keeps a connected cluster's last detail and
+    pod rows until a snapshot rebuilds them, so returning to a tab, pane or cluster renders what was
+    in memory at once and the next snapshot refreshes it.

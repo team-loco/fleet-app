@@ -4,7 +4,7 @@ use std::sync::Arc;
 use flock_core::home::{ClusterMetrics, Problem, problem_counts};
 use flock_core::overview::{Overview, Utilization};
 use flock_core::{
-    ClusterDetail, ClusterId, ClusterSummary, Counts, Page, ResourceKind, ResourceRef, WatchState,
+    ClusterDetail, ClusterId, ClusterSummary, Counts, Page, ResourceKind, ResourceRef,
 };
 use jiff::Timestamp;
 use k8s_openapi::api::core::v1::{Event, Namespace, Node, Pod};
@@ -144,7 +144,7 @@ fn nav(
     events: &[Arc<Event>],
     index: &PodIndex,
 ) -> BTreeMap<Page, Counts> {
-    let synced = |kind: &WatchKind| handle.watch_state(kind) == WatchState::Synced;
+    let synced = |kind: &WatchKind| handle.watch_state(kind).is_loaded();
     let mut nav = BTreeMap::new();
     if synced(&WatchKind::Nodes) {
         nav.insert(Page::Nodes, node_counts(nodes));

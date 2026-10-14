@@ -88,3 +88,4 @@ Spec column points at `design/`.
 | SEL1 | selectable, copyable text: kit `Selectable`/`SelectableText` on the window text selection, ⌘C/⌘A, terminal drag-select (#127) | claude | selectable-text | done (#173, adoption PR) |
 | POL | Global shortcut focus recovery, selection without outlines, subtle skeletons, editable default namespace picker (#179–#182) | codex | polish-focus-skeleton | done |
 | BG1 | every nav kind watched in the background; nav counts and badges for every cluster at all times; bounded event window (#177) | claude | background-watches | done |
+| BG2 | pages read the background stores, namespace picker filters the view, no skeleton when data is in memory (#177, #178) | claude | pages-from-stores | done |

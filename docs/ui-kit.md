@@ -189,8 +189,9 @@ table.update(cx, |t, cx| t.set_highlight(query.words.clone(), cx));
 
 Screens expose `filter_bar()` so the shell can focus it. On namespaced lists the scope picker
 is the namespace: read it with `preferences.namespace_selection(list)`, and on a pick call
-`preferences.select_namespace(list, selection)` and emit `Command::SetPreferences`; the backend then
-watches only that namespace (decision 21). `StatusFilter` (All / Needs attention)
+`preferences.select_namespace(list, selection)` and emit `Command::SetPreferences`. The rows hold
+every namespace, so the picker only filters the view and the page's header note (decision 32).
+`StatusFilter` (All / Needs attention)
 covers lists whose only chip is "has a problem".
 
 ## ActionMenu (⋯ / Actions)
@@ -522,8 +523,11 @@ while keeping truncation, filtering highlights and automatic column sizing.
 ## Loading, empty and error states
 
 Every cluster page ends in one of loaded, empty or error. The backend reports
-`Snapshot::pages[cluster][page]` as `WatchState::Pending(step)`, `Synced` or `Failed(reason)`; a
-completed initial list with no objects is `Synced`. The shell renders:
+`Snapshot::pages[cluster][page]` as `WatchState::Pending(step)` (never loaded), `Synced`,
+`Refreshing(reason)` (loaded once, now retrying; the page keeps its data) or `Failed(reason)`; a
+completed initial list with no objects is `Synced`. `AppState` keeps the last detail and pod rows of
+a connected cluster while a snapshot carries none for it, so a page with data in memory never shows
+a skeleton again (decision 32). The shell renders:
 
 - `Skeleton::rows()` for tables and `Skeleton::blocks()` for meters and charts, shimmering over
   `theme::SKELETON_SHIMMER` (still under reduced motion)

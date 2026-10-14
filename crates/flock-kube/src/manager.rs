@@ -68,26 +68,12 @@ pub enum ClusterEvent {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct WatchKey {
-    pub kind: WatchKind,
-    pub namespace: Option<String>,
-}
-
-impl WatchKey {
-    fn all(kind: WatchKind) -> Self {
-        Self {
-            kind,
-            namespace: None,
-        }
-    }
-}
-
 struct WatchEntry {
     refs: usize,
     resource: Option<ApiResource>,
     running: Option<RunningWatch>,
     state: WatchState,
+    loaded: bool,
 }
 
 pub(crate) struct Shared {
@@ -99,7 +85,7 @@ pub(crate) struct Shared {
     step: Mutex<&'static str>,
     info: Mutex<ClusterInfo>,
     client: Mutex<Option<Client>>,
-    watches: Mutex<HashMap<WatchKey, WatchEntry>>,
+    watches: Mutex<HashMap<WatchKind, WatchEntry>>,
     signals: mpsc::UnboundedSender<Signal>,
     pub(crate) resources: Mutex<HashMap<(String, String), ApiResource>>,
     pub(crate) forwards: Mutex<BTreeMap<u64, crate::ops::ActiveForward>>,
@@ -119,10 +105,10 @@ impl Shared {
         lock(&self.client).clone()
     }
 
-    fn start(&self, key: &WatchKey, entry: &mut WatchEntry, client: &Client) {
-        entry.state = WatchState::pending(format!("Listing {}", key.kind.name()));
+    fn start(&self, kind: &WatchKind, entry: &mut WatchEntry, client: &Client) {
+        entry.state = WatchState::pending(format!("Listing {}", kind.name()));
+        entry.loaded = false;
         let signals = self.signals.clone();
-        let kind = &key.kind;
         entry.running = match (kind, &entry.resource) {
             (WatchKind::Custom(custom), Some(resource)) => Some(spawn_custom(
                 &self.runtime,
@@ -134,7 +120,6 @@ impl Shared {
             (WatchKind::Custom(_), None) => None,
             (builtin, _) => spawn_builtin(
                 builtin,
-                key.namespace.as_deref(),
                 self.settings.event_limit,
                 &self.runtime,
                 client.clone(),
@@ -149,10 +134,10 @@ impl Shared {
         }
         *lock(&self.client) = client.cloned();
         let mut watches = lock(&self.watches);
-        for (key, entry) in watches.iter_mut() {
+        for (kind, entry) in watches.iter_mut() {
             entry.running = None;
             if let Some(client) = client {
-                self.start(key, entry, client);
+                self.start(kind, entry, client);
             }
         }
     }
@@ -175,28 +160,38 @@ impl Shared {
         lock(&self.resources).clear();
     }
 
-    fn subscribe(&self, key: &WatchKey, resource: Option<ApiResource>) {
+    fn subscribe(&self, kind: &WatchKind, resource: Option<ApiResource>) {
         let client = lock(&self.client).clone();
         let mut watches = lock(&self.watches);
-        let entry = watches.entry(key.clone()).or_insert_with(|| WatchEntry {
+        let entry = watches.entry(kind.clone()).or_insert_with(|| WatchEntry {
             refs: 0,
             resource,
             running: None,
             state: WatchState::pending(NOT_STARTED),
+            loaded: false,
         });
         entry.refs += 1;
         if entry.running.is_none()
             && let Some(client) = client
         {
-            self.start(key, entry, &client);
+            self.start(kind, entry, &client);
         }
     }
 
-    fn record(&self, kind: &WatchKind, state: &WatchState) {
-        let mut watches = lock(&self.watches);
-        let entries = watches.iter_mut().filter(|(key, _)| &key.kind == kind);
-        for (_, entry) in entries {
-            entry.state = state.clone();
+    fn synced(&self, kind: &WatchKind) {
+        if let Some(entry) = lock(&self.watches).get_mut(kind) {
+            entry.state = WatchState::Synced;
+            entry.loaded = true;
+        }
+    }
+
+    fn failed(&self, kind: &WatchKind, reason: &str) {
+        if let Some(entry) = lock(&self.watches).get_mut(kind) {
+            entry.state = if entry.loaded {
+                WatchState::Refreshing(reason.to_owned())
+            } else {
+                WatchState::Failed(reason.to_owned())
+            };
         }
     }
 
@@ -204,37 +199,33 @@ impl Shared {
         *lock(&self.step) = step;
     }
 
-    fn unsubscribe(&self, key: &WatchKey) {
+    fn unsubscribe(&self, kind: &WatchKind) {
         let mut watches = lock(&self.watches);
-        let remove = watches.get_mut(key).is_some_and(|entry| {
+        let remove = watches.get_mut(kind).is_some_and(|entry| {
             entry.refs = entry.refs.saturating_sub(1);
             entry.refs == 0
         });
         if remove {
-            watches.remove(key);
+            watches.remove(kind);
         }
     }
 }
 
 pub struct Subscription {
     shared: Weak<Shared>,
-    key: WatchKey,
+    kind: WatchKind,
 }
 
 impl Subscription {
     pub fn kind(&self) -> &WatchKind {
-        &self.key.kind
-    }
-
-    pub fn namespace(&self) -> Option<&str> {
-        self.key.namespace.as_deref()
+        &self.kind
     }
 }
 
 impl Drop for Subscription {
     fn drop(&mut self) {
         if let Some(shared) = self.shared.upgrade() {
-            shared.unsubscribe(&self.key);
+            shared.unsubscribe(&self.kind);
         }
     }
 }
@@ -282,28 +273,20 @@ impl ClusterHandle {
     }
 
     pub fn subscribe(&self, kind: WatchKind) -> Subscription {
-        self.subscribe_key(WatchKey::all(kind))
-    }
-
-    pub fn subscribe_in(&self, kind: WatchKind, namespace: Option<String>) -> Subscription {
-        self.subscribe_key(WatchKey { kind, namespace })
-    }
-
-    fn subscribe_key(&self, key: WatchKey) -> Subscription {
-        self.shared.subscribe(&key, None);
+        self.shared.subscribe(&kind, None);
         Subscription {
             shared: Arc::downgrade(&self.shared),
-            key,
+            kind,
         }
     }
 
     pub async fn subscribe_custom(&self, kind: CustomKind) -> Result<Subscription> {
         let resource = self.resolve_custom(&kind).await?;
-        let key = WatchKey::all(WatchKind::Custom(kind));
-        self.shared.subscribe(&key, Some(resource));
+        let kind = WatchKind::Custom(kind);
+        self.shared.subscribe(&kind, Some(resource));
         Ok(Subscription {
             shared: Arc::downgrade(&self.shared),
-            key,
+            kind,
         })
     }
 
@@ -312,21 +295,17 @@ impl ClusterHandle {
         K::DynamicType: Eq + std::hash::Hash + Clone,
     {
         let watches = lock(&self.shared.watches);
-        if let Some(all) = watches.get(&WatchKey::all(K::KIND)) {
-            return all.running.as_ref().map(snapshot::<K>).unwrap_or_default();
-        }
         watches
-            .iter()
-            .filter(|(key, _)| key.kind == K::KIND)
-            .filter_map(|(_, entry)| entry.running.as_ref())
-            .flat_map(snapshot::<K>)
-            .collect()
+            .get(&K::KIND)
+            .and_then(|entry| entry.running.as_ref())
+            .map(snapshot::<K>)
+            .unwrap_or_default()
     }
 
     pub fn custom_objects(&self, kind: &CustomKind) -> Vec<Arc<DynamicObject>> {
         let watches = lock(&self.shared.watches);
         watches
-            .get(&WatchKey::all(WatchKind::Custom(kind.clone())))
+            .get(&WatchKind::Custom(kind.clone()))
             .and_then(|entry| entry.running.as_ref())
             .map(custom_snapshot)
             .unwrap_or_default()
@@ -345,39 +324,15 @@ impl ClusterHandle {
     }
 
     fn entry_state(&self, kind: &WatchKind) -> WatchState {
-        let watches = lock(&self.shared.watches);
-        if let Some(all) = watches.get(&WatchKey::all(kind.clone())) {
-            return all.state.clone();
-        }
-        let states: Vec<WatchState> = watches
-            .iter()
-            .filter(|(key, _)| &key.kind == kind)
-            .map(|(_, entry)| entry.state.clone())
-            .collect();
-        if states.is_empty() {
-            return WatchState::pending(NOT_STARTED);
-        }
-        WatchState::combine(states)
+        lock(&self.shared.watches).get(kind).map_or_else(
+            || WatchState::pending(NOT_STARTED),
+            |entry| entry.state.clone(),
+        )
     }
 
     pub fn watched_kinds(&self) -> Vec<WatchKind> {
-        let kinds: BTreeSet<WatchKind> = lock(&self.shared.watches)
-            .keys()
-            .map(|key| key.kind.clone())
-            .collect();
+        let kinds: BTreeSet<WatchKind> = lock(&self.shared.watches).keys().cloned().collect();
         kinds.into_iter().collect()
-    }
-
-    pub fn cluster_wide_kinds(&self) -> Vec<WatchKind> {
-        lock(&self.shared.watches)
-            .keys()
-            .filter(|key| key.namespace.is_none())
-            .map(|key| key.kind.clone())
-            .collect()
-    }
-
-    pub fn watched_keys(&self) -> Vec<WatchKey> {
-        lock(&self.shared.watches).keys().cloned().collect()
     }
 }
 
@@ -518,14 +473,13 @@ async fn supervise(
                 let Some(signal) = received else { return };
                 match signal.event {
                     SignalEvent::Changed => {
-                        shared.record(&signal.kind, &WatchState::Synced);
+                        shared.synced(&signal.kind);
                         health.kinds.remove(&signal.kind);
                         dirty.insert(signal.kind);
                     }
                     SignalEvent::Failed(err) => {
                         let failure = classify(&err, &shared.context);
-                        let failed = WatchState::Failed(failure.detail.clone());
-                        shared.record(&signal.kind, &failed);
+                        shared.failed(&signal.kind, &failure.detail);
                         dirty.insert(signal.kind.clone());
                         health.kinds.insert(signal.kind, failure);
                     }
@@ -649,46 +603,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn namespaced_watches_are_separate_from_cluster_wide_ones() {
-        let runtime = Handle::current();
-        let env = Arc::new(ShellEnv::from_process(String::new()));
-        let (manager, _) = ClusterManager::new(runtime, KubeSettings::default(), env);
-        let handle = manager.connect(KubeContext {
-            trust: crate::discovery::Fingerprint::default(),
-            credentials: crate::discovery::Fingerprint::default(),
-            id: ContextRef {
-                file: std::path::PathBuf::from("/missing/test-kubeconfig"),
-                context: "first".into(),
-            },
-            cluster: "first".into(),
-            user: None,
-            namespace: None,
-            server: None,
-            provider: Provider::Generic,
-            auth: crate::provider::AuthKind::None,
-            is_current: false,
-        });
-        let scoped = handle.subscribe_in(WatchKind::Events, Some("payments".into()));
-        let again = handle.subscribe_in(WatchKind::Events, Some("payments".into()));
-        let everywhere = handle.subscribe(WatchKind::Events);
-        let refs = |namespace: Option<&str>| {
-            lock(&handle.shared.watches)
-                .get(&WatchKey {
-                    kind: WatchKind::Events,
-                    namespace: namespace.map(str::to_owned),
-                })
-                .map(|entry| entry.refs)
-        };
-        assert_eq!(refs(Some("payments")), Some(2));
-        assert_eq!(refs(None), Some(1));
-        assert_eq!(scoped.namespace(), Some("payments"));
-        assert_eq!(handle.watched_kinds(), [WatchKind::Events]);
-        assert_eq!(handle.cluster_wide_kinds(), [WatchKind::Events]);
-        drop(everywhere);
-        assert_eq!(handle.cluster_wide_kinds(), Vec::<WatchKind>::new());
-        drop(scoped);
-        drop(again);
-        assert_eq!(handle.watched_kinds(), Vec::<WatchKind>::new());
+    async fn a_failure_after_the_first_sync_keeps_the_kind_loaded_until_the_store_restarts() {
+        let (client, _) = crate::fake::client(Duration::ZERO, |_, _| None);
+        let (_manager, handle) = crate::fake::handle(&client);
+        let _jobs = handle.subscribe(WatchKind::Jobs);
+        let _secrets = handle.subscribe(WatchKind::Secrets);
+        *lock(&handle.shared.status) = ConnectionStatus::Connected;
+        handle.shared.failed(&WatchKind::Secrets, "forbidden");
+        assert_eq!(
+            handle.watch_state(&WatchKind::Secrets),
+            WatchState::Failed("forbidden".into())
+        );
+        handle.shared.synced(&WatchKind::Jobs);
+        handle.shared.failed(&WatchKind::Jobs, "watch dropped");
+        assert_eq!(
+            handle.watch_state(&WatchKind::Jobs),
+            WatchState::Refreshing("watch dropped".into())
+        );
+        handle.shared.synced(&WatchKind::Jobs);
+        assert_eq!(handle.watch_state(&WatchKind::Jobs), WatchState::Synced);
+        handle.shared.set_client(Some(&client));
+        handle.shared.failed(&WatchKind::Jobs, "relist failed");
+        assert_eq!(
+            handle.watch_state(&WatchKind::Jobs),
+            WatchState::Failed("relist failed".into())
+        );
     }
 
     #[test]

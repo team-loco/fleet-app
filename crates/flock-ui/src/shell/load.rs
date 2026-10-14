@@ -100,13 +100,8 @@ impl Shell {
         let id = cluster.id.clone();
         let page = location.page;
         let element = match state {
-            WatchState::Synced => {
-                if self.state.snapshot.page_rows(&id, page) != Some(0) {
-                    return None;
-                }
-                let sentence = format!("No {} in {}.", page.label(), cluster.name);
-                EmptyState::new(sentence, empty_action(ix, id, page, cx)).into_any_element()
-            }
+            WatchState::Synced => return self.empty_view(ix, location, cx),
+            WatchState::Refreshing(_) => return self.empty_view(ix, location, cx),
             WatchState::Failed(reason) => {
                 let retry = Button::new("page-retry", RETRY)
                     .on_click(cx.listener(move |this, _, _, cx| this.retry(ix, id.clone(), cx)));
@@ -124,6 +119,22 @@ impl Shell {
             }
         };
         Some(element)
+    }
+
+    fn empty_view(
+        &self,
+        ix: usize,
+        location: &Location,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let cluster = self.cluster_of(location)?;
+        let page = location.page;
+        if self.state.snapshot.page_rows(&cluster.id, page) != Some(0) {
+            return None;
+        }
+        let sentence = format!("No {} in {}.", page.label(), cluster.name);
+        let action = empty_action(ix, cluster.id.clone(), page, cx);
+        Some(EmptyState::new(sentence, action).into_any_element())
     }
 
     fn retry(&mut self, ix: usize, cluster: ClusterId, cx: &mut Context<Self>) {

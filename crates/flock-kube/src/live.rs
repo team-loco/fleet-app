@@ -8,7 +8,6 @@ use flock_core::add_cluster::home_relative;
 use flock_core::app_settings::DEFAULT_SNAPSHOTS;
 use flock_core::home::problems_badge;
 use flock_core::resource::page_for_kind;
-use flock_core::resources::namespaced_list;
 use flock_core::settings::{Auth, ClusterSettings, Connection, ContextChange};
 use flock_core::stream::Sink;
 use flock_core::{
@@ -38,7 +37,7 @@ use crate::problems::order;
 use crate::provider::AuthKind;
 use crate::settings::KubeSettings;
 use crate::shell_env::{ShellEnv, capture, user_shell};
-use crate::snapshot::{BACKGROUND_KINDS, page_watches};
+use crate::snapshot::{BACKGROUND_KINDS, page_kinds};
 use crate::store::{ClusterStore, Pin, SavedCluster, SavedPreferences};
 use crate::task::TaskGuard;
 use crate::throttle::Throttle;
@@ -136,7 +135,6 @@ struct Inspecting {
 struct Navigation {
     selected: Option<ClusterId>,
     page: Page,
-    page_subscriptions: Vec<Subscription>,
     yaml: Option<(ResourceRef, String)>,
     inspecting: Option<Inspecting>,
     yaml_task: Option<TaskGuard>,
@@ -159,7 +157,6 @@ impl Navigation {
         Self {
             selected: None,
             page: Page::Overview,
-            page_subscriptions: Vec::new(),
             yaml: None,
             inspecting: None,
             yaml_task: None,
@@ -293,15 +290,7 @@ impl Live {
         }
         self.gitops
             .sync(self.clusters.values().map(|c| (&c.id, &c.handle)));
-        self.for_each_window(Self::resubscribe_page);
-    }
-
-    fn selected_handle(&self) -> Option<&ClusterHandle> {
-        let selected = self.navigation.selected.as_ref()?;
-        self.clusters
-            .values()
-            .find(|cluster| &cluster.id == selected)
-            .map(|cluster| &cluster.handle)
+        self.for_each_window(Self::page_changed);
     }
 
     fn selected_key(&self) -> Option<ContextRef> {
@@ -312,39 +301,7 @@ impl Live {
             .map(|(key, _)| key.clone())
     }
 
-    fn list_namespace(&self, handle: &ClusterHandle) -> Option<String> {
-        let list = namespaced_list(self.navigation.page)?;
-        let saved = self
-            .navigation
-            .selected
-            .as_ref()
-            .and_then(|id| self.store.get(id));
-        let mut preferences = saved
-            .map(|cluster| Preferences::from(&cluster.preferences))
-            .unwrap_or_default();
-        if preferences.default_namespace.is_none() {
-            preferences
-                .default_namespace
-                .clone_from(&handle.context().namespace);
-        }
-        preferences
-            .namespace_selection(list)
-            .namespace()
-            .map(str::to_owned)
-    }
-
-    fn resubscribe_page(&mut self) {
-        let subscriptions = self
-            .selected_handle()
-            .map(|handle| {
-                let namespace = self.list_namespace(handle);
-                page_watches(self.navigation.page, namespace.as_deref())
-                    .into_iter()
-                    .map(|(kind, namespace)| handle.subscribe_in(kind, namespace))
-                    .collect()
-            })
-            .unwrap_or_default();
-        self.navigation.page_subscriptions = subscriptions;
+    fn page_changed(&mut self) {
         self.poll_page();
         #[cfg(feature = "loco")]
         self.navigation.loco.sync(
@@ -499,7 +456,7 @@ impl Live {
         };
         self.navigation.selected = Some(target.cluster.clone());
         self.navigation.page = Page::Compare;
-        self.resubscribe_page();
+        self.page_changed();
         let same = self
             .navigation
             .comparing
@@ -704,24 +661,24 @@ impl Live {
                 } else {
                     Page::Overview
                 };
-                self.resubscribe_page();
+                self.page_changed();
             }
             Command::SelectPage(page) => {
                 if page.is_flock() {
                     self.navigation.selected = None;
                 }
                 self.navigation.page = *page;
-                self.resubscribe_page();
+                self.page_changed();
             }
             Command::OpenCommit(_) => {
                 self.navigation.selected = None;
                 self.navigation.page = Page::Changes;
-                self.resubscribe_page();
+                self.page_changed();
             }
             Command::OpenFluxObject(key) => {
                 self.navigation.selected = Some(key.cluster.clone());
                 self.navigation.page = key.kind.page();
-                self.resubscribe_page();
+                self.page_changed();
             }
             Command::Flux(..) => self.act(command),
             Command::ToggleSidebar => {}
@@ -854,12 +811,7 @@ impl Live {
 
     fn set_preferences(&mut self, id: &ClusterId, preferences: &Preferences) -> bool {
         match self.store.set_preferences(id, preferences) {
-            Ok(changed) => {
-                if changed {
-                    self.for_each_window(Self::resubscribe_page);
-                }
-                changed
-            }
+            Ok(changed) => changed,
             Err(error) => {
                 tracing::error!(%error, path = %self.store.path().display(), "saving preferences failed");
                 false
@@ -938,7 +890,7 @@ impl Live {
         self.navigation.selected = Some(resource.cluster.clone());
         self.navigation.page = page;
         if moved {
-            self.resubscribe_page();
+            self.page_changed();
         }
         self.inspect(resource);
     }
@@ -990,10 +942,7 @@ impl Live {
             };
             let page = navigation.page;
             let state = self.gitops.page_state(selected, page).or_else(|| {
-                let kinds: Vec<_> = page_watches(page, None)
-                    .into_iter()
-                    .map(|(kind, _)| kind)
-                    .collect();
+                let kinds = page_kinds(page);
                 let states = kinds.iter().map(|kind| cluster.handle.watch_state(kind));
                 (!kinds.is_empty()).then(|| WatchState::combine(states))
             });
@@ -1448,7 +1397,6 @@ mod tests {
 
     use super::*;
     use crate::provider::{ExecCommand, Provider};
-    use crate::resources::WatchKind;
 
     fn context(file: &str, name: &str) -> KubeContext {
         KubeContext {
@@ -1797,12 +1745,6 @@ mod tests {
             .unwrap_or_else(|| panic!("first navigation"));
         assert_eq!(first.selected, Some(ClusterId::new("a")));
         assert_eq!(first.page, Page::Secrets);
-        assert!(
-            first
-                .page_subscriptions
-                .iter()
-                .any(|subscription| subscription.kind() == &WatchKind::Secrets)
-        );
         let second = live
             .windows
             .get(&SECOND_WINDOW)
