@@ -10,6 +10,7 @@ use gpui::Pixels;
 
 const EXPECTED_WIDTH: u32 = 2880;
 const EXPECTED_HEIGHT: u32 = 1800;
+const TAB_STRIP_REWIND: f32 = 1000.;
 
 #[test]
 fn command_k_opens_the_palette_and_enter_runs_the_top_hit() -> anyhow::Result<()> {
@@ -155,7 +156,7 @@ fn cluster_actions_open_from_the_switcher() -> anyhow::Result<()> {
 #[cfg(feature = "loco")]
 #[test]
 fn the_loco_section_shows_only_for_clusters_running_loco() -> anyhow::Result<()> {
-    let platform: &'static str = format!("page-{}", Page::LocoPlatform as u64).leak();
+    let platform = "nav-platform";
     let mut ui = Ui::open(Screen::Cluster)?;
     assert!(ui.bounds(platform).is_some());
     ui.press("cmd-shift-c")?;
@@ -1521,6 +1522,10 @@ fn tabs_move_between_panes_by_menu_and_by_drag() -> anyhow::Result<()> {
     assert_eq!((pane_tabs(&ui, 0), pane_tabs(&ui, 1)), (2, 3));
     assert_eq!(focused_pane(&ui), 1);
     assert_eq!(ui.state().location().page, Page::Kustomizations);
+    ui.scroll(
+        "tab-strip-1",
+        gpui::point(gpui::px(TAB_STRIP_REWIND), gpui::px(0.)),
+    )?;
     let from = center(&mut ui, "pane-1-tab-0")?;
     let to = center(&mut ui, "tab-1")?;
     ui.drag("pane-1-tab-0", to - from)?;
