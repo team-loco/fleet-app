@@ -1,0 +1,49 @@
+[package]
+name = "flock"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[package.metadata.bundle]
+name = "Flock"
+identifier = "dev.flock.app"
+icon = ["apps/flock/resources/Flock.icns"]
+category = "Developer Tool"
+copyright = "Copyright © 2026 Flock contributors"
+short_description = "Watch many Kubernetes clusters at once"
+
+[package.metadata.bundle.osx]
+minimum_system_version = "13.0"
+
+[[bin]]
+name = "flock"
+path = "src/main.rs"
+
+[features]
+loco = ["dep:flock-loco", "flock-core/loco", "flock-demo/loco", "flock-kube/loco", "flock-ui/loco"]
+
+[dependencies]
+anyhow.workspace = true
+async-channel.workspace = true
+clap.workspace = true
+flock-core.workspace = true
+flock-demo.workspace = true
+flock-kube.workspace = true
+flock-loco = { workspace = true, optional = true }
+flock-ui.workspace = true
+flock-update.workspace = true
+gpui.workspace = true
+gpui-platform.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

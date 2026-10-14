@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-#MISE description="Remove Fleet's scale benchmark namespace from kind-fleet-b only"
+#MISE description="Remove Flock's scale benchmark namespace from kind-fleet-b only"
 set -euo pipefail
 work_dir="$(mktemp -d)"
 trap 'rm -rf "${work_dir}"' EXIT
 export KUBECONFIG="${work_dir}/kind.kubeconfig"
 mise exec -- kind get kubeconfig --name fleet-b >"${KUBECONFIG}"
-mise exec -- kubectl --context kind-fleet-b delete namespace fleet-scale --ignore-not-found --wait --timeout=300s
+mise exec -- kubectl --context kind-fleet-b delete namespace flock-scale --ignore-not-found --wait --timeout=300s

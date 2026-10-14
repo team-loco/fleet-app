@@ -12,7 +12,7 @@
 <style>body{margin:0}</style>
 </helmet>
 <footer style="{{vars}}position:relative;height:26px;width:100%;box-sizing:border-box;border-top:1px solid var(--line);background:var(--chrome);display:flex;align-items:center;gap:16px;padding:0 0 0 12px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute);white-space:nowrap">
-  <a href="Fleet.dc.html" style="display:flex;gap:10px;text-decoration:none"><span style="color:var(--err)">✕ 3</span><span style="color:var(--warn)">▲ 6</span></a>
+  <a href="Flock.dc.html" style="display:flex;gap:10px;text-decoration:none"><span style="color:var(--err)">✕ 3</span><span style="color:var(--warn)">▲ 6</span></a>
   <span style="overflow:hidden;text-overflow:ellipsis">{{left}}</span>
   <span style="flex:1"></span>
   <sc-if value="{{hasAgent}}" hint-placeholder-val="{{ false }}"><a href="LocoPlatform.dc.html" style="display:flex;align-items:center;gap:6px;text-decoration:none;color:var(--mute)"><span style="color:var(--ok)">●</span>loco agent · synced {{agent}}</a></sc-if>
@@ -23,7 +23,7 @@
 
   <sc-if value="{{open}}" hint-placeholder-val="{{ false }}">
     <div role="menu" aria-label="Clusters" style="position:absolute;right:6px;bottom:30px;width:290px;background:var(--panel);border:1px solid var(--line2);border-radius:4px;box-shadow:0 12px 32px var(--shadow);padding:4px;z-index:20;font-family:'IBM Plex Sans',sans-serif;font-size:13px;color:var(--fg)">
-      <a role="menuitem" href="Fleet.dc.html" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;border-radius:3px;text-decoration:none;color:var(--fg);{{fleetStyle}}"><span style="width:10px"></span>All clusters<span style="flex:1"></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">⌘0</span></a>
+      <a role="menuitem" href="Flock.dc.html" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;border-radius:3px;text-decoration:none;color:var(--fg);{{flockStyle}}"><span style="width:10px"></span>All clusters<span style="flex:1"></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">⌘0</span></a>
       <div style="height:1px;background:var(--line);margin:4px 2px"></div>
       <sc-for list="{{clusters}}" as="c" hint-placeholder-count="6">
         <div onMouseEnter="{{c.enter}}" style="display:flex;align-items:center;border-radius:3px;{{c.rowBg}}">
@@ -42,7 +42,7 @@
   </sc-if>
 </footer>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"left":{"editor":"text","default":"5 of 6 clusters connected"},"agent":{"editor":"text","default":""},"cluster":{"editor":"enum","options":["fleet","prod-us-east"],"default":"fleet"},"open":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":26}}'>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"left":{"editor":"text","default":"5 of 6 clusters connected"},"agent":{"editor":"text","default":""},"cluster":{"editor":"enum","options":["flock","prod-us-east"],"default":"flock"},"open":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":26}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
@@ -58,7 +58,7 @@ class Component extends DCLogic {
   renderVals() {
     const G = { ok: '●', err: '✕', warn: '▲', off: '○' };
     const C = { ok: 'var(--ok)', err: 'var(--err)', warn: 'var(--warn)', off: 'var(--mute)' };
-    const curId = this.props.cluster === 'prod-us-east' ? 'pe' : 'fleet';
+    const curId = this.props.cluster === 'prod-us-east' ? 'pe' : 'flock';
     const list = [
       { id: 'pe', name: 'prod-us-east', s: 'err', meta: '✕2 ▲3', mc: 'var(--err)' },
       { id: 'pw', name: 'prod-eu-west', s: 'ok', meta: '‖1', mc: 'var(--sus)' },
@@ -81,7 +81,7 @@ class Component extends DCLogic {
         enter: () => { if (this.state.hover !== c.id) this.setState({ hover: c.id }); }
       };
     });
-    const cur = curId === 'fleet' ? { name: 'All clusters', g: '', c: 'var(--mute)' } : { name: 'prod-us-east', g: '✕', c: 'var(--err)' };
+    const cur = curId === 'flock' ? { name: 'All clusters', g: '', c: 'var(--mute)' } : { name: 'prod-us-east', g: '✕', c: 'var(--err)' };
     const agent = this.props.agent ?? '';
     const open = this.state.open;
     return {
@@ -90,7 +90,7 @@ class Component extends DCLogic {
       agent, hasAgent: !!agent,
       open, cur, clusters,
       btnBg: open ? 'var(--sel)' : 'transparent',
-      fleetStyle: curId === 'fleet' ? 'background:var(--sel);' : '',
+      flockStyle: curId === 'flock' ? 'background:var(--sel);' : '',
       toggle: () => this.setState({ open: !open })
     };
   }

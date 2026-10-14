@@ -5,7 +5,7 @@ set -euo pipefail
 
 zip="${usage_zip:-${1:?zip}}"
 root="$(git rev-parse --show-toplevel)"
-signer="$root/target/release/fleet-sign"
+signer="$root/target/release/flock-sign"
 if [ -z "${FLOCK_UPDATE_SIGNING_KEY:-}" ]; then
   FLOCK_UPDATE_SIGNING_KEY="$(security find-generic-password -s dev.flock.app.update-signing -a team-loco -w)"
 fi

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Create Fleet's two local kind clusters and apply triage scenarios"
+#MISE description="Create Flock's two local kind clusters and apply triage scenarios"
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

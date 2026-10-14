@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Prove Fleet works against the kind scenario clusters: up, verify, run every FLEET_E2E test"
+#MISE description="Prove Flock works against the kind scenario clusters: up, verify, run every FLOCK_E2E test"
 #USAGE flag "--skip-up" help="Do not create or reapply the clusters; require them to exist"
 #USAGE flag "--no-teardown" help="Keep the clusters after the run (the default outside CI)"
 set -euo pipefail
@@ -29,10 +29,10 @@ for cluster in "${CLUSTERS[@]}"; do
 done
 KUBECONFIG="$(IFS=:; printf '%s' "${kubeconfigs[*]}")"
 export KUBECONFIG
-export FLEET_E2E=1
+export FLOCK_E2E=1
 
 "${ROOT}/e2e/verify"
 
 cd "${ROOT}"
 mise exec -- cargo nextest run --workspace --no-tests=pass
-mise exec -- cargo nextest run --workspace --no-tests=pass --features fleet/loco
+mise exec -- cargo nextest run --workspace --no-tests=pass --features flock/loco

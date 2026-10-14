@@ -3,9 +3,9 @@ name: e2e
 on:
   pull_request:
     paths:
-      - crates/fleet-kube/**
-      - crates/fleet-flux/**
-      - crates/fleet-loco/**
+      - crates/flock-kube/**
+      - crates/flock-flux/**
+      - crates/flock-loco/**
       - e2e/**
       - mise-tasks/e2e/**
       - .github/workflows/e2e.yml

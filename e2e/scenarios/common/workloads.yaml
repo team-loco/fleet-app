@@ -5,7 +5,7 @@ metadata:
   namespace: payments
 type: Opaque
 stringData:
-  webhook-secret: fleet-e2e-placeholder
+  webhook-secret: flock-e2e-placeholder
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -40,7 +40,7 @@ metadata:
   namespace: apps
 spec:
   nodeSelector:
-    fleet.dev/scenario: nonexistent-node
+    flock.dev/scenario: nonexistent-node
   containers:
     - name: podinfo
       image: ghcr.io/stefanprodan/podinfo:latest

@@ -61,6 +61,6 @@ jobs:
           gh release create "$TAG" "$zip" "$zip.sha256" "$zip.sig" \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
-            --title "Fleet $version" \
+            --title "Flock $version" \
             --notes-file dist/notes.md \
             $prerelease

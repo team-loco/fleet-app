@@ -15,18 +15,18 @@ body{margin:0}
 </style>
 </helmet>
 <div style="{{vars}}position:relative;width:100%;height:900px;overflow:hidden;font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--editor)">
-  <dc-import name="Fleet" theme="{{theme}}" hint-size="100%,900px"></dc-import>
+  <dc-import name="Flock" theme="{{theme}}" hint-size="100%,900px"></dc-import>
   <div style="position:absolute;inset:0;{{scrim}}"></div>
   <div role="dialog" aria-label="Add clusters" style="position:absolute;top:84px;left:50%;transform:translateX(-50%);width:720px;max-width:calc(100% - 32px);background:var(--panel);border:1px solid var(--line2);border-radius:4px;box-shadow:0 18px 48px var(--shadow);display:flex;flex-direction:column;overflow:hidden">
     <div style="display:flex;align-items:center;gap:10px;height:44px;padding:0 14px;border-bottom:1px solid var(--line)">
       <h1 style="margin:0;font-size:14px;font-weight:600">{{title}}</h1>
       <span style="flex:1"></span>
-      <a href="Fleet.dc.html" aria-label="Close" style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:3px;color:var(--mute);text-decoration:none;font-size:16px">×</a>
+      <a href="Flock.dc.html" aria-label="Close" style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:3px;color:var(--mute);text-decoration:none;font-size:16px">×</a>
     </div>
 
     <sc-if value="{{isPick}}" hint-placeholder-val="{{ true }}">
       <div style="display:flex;flex-direction:column">
-        <p style="margin:0;padding:12px 14px 4px;color:var(--fg2);font-size:12.5px">Contexts in your kubeconfig files that aren't in Shoal yet.</p>
+        <p style="margin:0;padding:12px 14px 4px;color:var(--fg2);font-size:12.5px">Contexts in your kubeconfig files that aren't in Flock yet.</p>
         <sc-for list="{{files}}" as="f" hint-placeholder-count="2">
           <div>
             <div style="padding:12px 14px 6px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{f.path}}</div>
@@ -48,7 +48,7 @@ body{margin:0}
           <button style="height:24px;padding:0 8px;border:0;background:transparent;color:var(--acc);font-family:inherit;font-size:12px;cursor:pointer">Paste kubeconfig…</button>
           <button style="height:24px;padding:0 8px;border:0;background:transparent;color:var(--acc);font-family:inherit;font-size:12px;cursor:pointer">Watch a folder…</button>
           <span style="flex:1"></span>
-          <a href="Fleet.dc.html" style="height:24px;box-sizing:border-box;padding:0 10px;border:1px solid var(--line2);border-radius:3px;color:var(--fg2);font-size:12px;display:flex;align-items:center;text-decoration:none">Cancel</a>
+          <a href="Flock.dc.html" style="height:24px;box-sizing:border-box;padding:0 10px;border:1px solid var(--line2);border-radius:3px;color:var(--fg2);font-size:12px;display:flex;align-items:center;text-decoration:none">Cancel</a>
           <button onClick="{{next}}" style="height:24px;padding:0 10px;border:1px solid var(--acc);border-radius:3px;background:var(--acc);color:var(--onacc);font-family:inherit;font-size:12px;font-weight:500;cursor:pointer">{{connectLabel}}</button>
         </div>
       </div>
@@ -75,7 +75,7 @@ body{margin:0}
         <div style="display:flex;align-items:center;gap:8px;padding:12px 14px;background:var(--chrome)">
           <button onClick="{{back}}" style="height:24px;padding:0 10px;border:1px solid var(--line2);border-radius:3px;background:transparent;color:var(--fg2);font-family:inherit;font-size:12px;cursor:pointer">Back</button>
           <span style="flex:1;font-size:12px;color:var(--mute)">sandbox stays here until it authenticates.</span>
-          <a href="Fleet.dc.html" style="height:24px;box-sizing:border-box;padding:0 10px;border:1px solid var(--acc);border-radius:3px;background:var(--acc);color:var(--onacc);font-size:12px;font-weight:500;display:flex;align-items:center;text-decoration:none">Add analytics</a>
+          <a href="Flock.dc.html" style="height:24px;box-sizing:border-box;padding:0 10px;border:1px solid var(--acc);border-radius:3px;background:var(--acc);color:var(--onacc);font-size:12px;font-weight:500;display:flex;align-items:center;text-decoration:none">Add analytics</a>
         </div>
       </div>
     </sc-if>

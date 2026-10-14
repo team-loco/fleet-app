@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fleet Architecture</title>
+<title>Flock Architecture</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -89,44 +89,44 @@ ul.plain li { margin-bottom: 6px; }
 <body>
 <button class="theme" type="button" aria-label="Toggle light or dark theme">theme</button>
 <main>
-  <h1>Fleet architecture</h1>
-  <div class="meta">team-loco/fleet-app · Rust 1.99 · gpui-component 0.7 on gpui-pre 0.3.9 · kube-rs 4.2 · as of 2026-10-13</div>
-  <p class="lede">Fleet is a native macOS app that watches many Kubernetes clusters at once, with Flux built in and Loco behind a cargo feature. The UI renders plain data models and sends commands. One backend, live or demo, owns all cluster I/O and pushes snapshots back over a channel. There is no server and no database.</p>
+  <h1>Flock architecture</h1>
+  <div class="meta">team-loco/flock-app · Rust 1.99 · gpui-component 0.7 on gpui-pre 0.3.9 · kube-rs 4.2 · as of 2026-10-13</div>
+  <p class="lede">Flock is a native macOS app that watches many Kubernetes clusters at once, with Flux built in and Loco behind a cargo feature. The UI renders plain data models and sends commands. One backend, live or demo, owns all cluster I/O and pushes snapshots back over a channel. There is no server and no database.</p>
 
   <h2>Layers</h2>
   <div class="diagram">
-    <div class="layer"><h3><code>apps/fleet</code> <span class="tag">binary → Fleet.app</span></h3>
+    <div class="layer"><h3><code>apps/flock</code> <span class="tag">binary → Flock.app</span></h3>
       <p class="what">CLI flags, windows (⌘N, ⌥↵ from the palette), key bindings. Picks the backend: live by default, <code>--demo</code> for the design's sample data. One backend serves every window.</p></div>
 
     <div class="row">
-      <div class="layer ui"><h3><code>crates/fleet-ui</code> <span class="tag">gpui views</span></h3>
+      <div class="layer ui"><h3><code>crates/flock-ui</code> <span class="tag">gpui views</span></h3>
         <p class="what">Renders snapshot models, sends <code>Command</code>s. Never imports kube or tokio.</p>
         <div class="mods"><span>store</span><span>shell/ panels · strips · status bar</span><span>screens/ one per page</span><span>kit/ table · dock · diff · logs · terminal · menus</span><span>theme tokens</span></div></div>
-      <div class="layer core"><h3><code>crates/fleet-core</code> <span class="tag">plain data contract</span></h3>
+      <div class="layer core"><h3><code>crates/flock-core</code> <span class="tag">plain data contract</span></h3>
         <p class="what">No async, no gpui. Everything else depends on it.</p>
         <div class="mods"><span>Snapshot</span><span>Command</span><span>AppState reducer</span><span>per-page models</span><span>palette + fuzzy</span><span>log / exec streams</span><span>loco/*</span></div></div>
     </div>
 
-    <div class="arrow">fleet-ui ⇄ backend: <b>Update(Snapshot)</b> ← async-channel → <b>Command</b></div>
+    <div class="arrow">flock-ui ⇄ backend: <b>Update(Snapshot)</b> ← async-channel → <b>Command</b></div>
 
     <div class="row">
-      <div class="layer kube"><h3><code>crates/fleet-kube</code> <span class="tag">LiveBackend · tokio on its own threads</span></h3>
+      <div class="layer kube"><h3><code>crates/flock-kube</code> <span class="tag">LiveBackend · tokio on its own threads</span></h3>
         <p class="what">Everything that talks to clusters, git and the filesystem.</p>
         <div class="mods"><span>discovery + file watch</span><span>shell_env (PATH for exec plugins)</span><span>store (clusters.json)</span><span>checks</span><span>manager (client per cluster, backoff)</span><span>watch (lazy reflectors)</span><span>live (dispatch + snapshot assembly)</span><span>problems · pods · workload · lists · usage</span><span>actions/ logs · exec · port-forward · scale · rollback · drain · delete</span><span>gitops/ Flux watches · sync grid · git mirrors</span><span>loco/ (feature)</span></div></div>
-      <div class="layer pure"><h3><code>crates/fleet-demo</code> <span class="tag">DemoBackend</span></h3>
+      <div class="layer pure"><h3><code>crates/flock-demo</code> <span class="tag">DemoBackend</span></h3>
         <p class="what">Serves the design's sample data through the same <code>Backend</code> trait and simulates actions (reconcile → in progress → outcome). Used for <code>--demo</code>, headless screenshots and UI tests.</p></div>
     </div>
 
     <div class="row three">
-      <div class="layer pure"><h3><code>crates/fleet-flux</code> <span class="tag">pure logic, fixture-tested</span></h3>
+      <div class="layer pure"><h3><code>crates/flock-flux</code> <span class="tag">pure logic, fixture-tested</span></h3>
         <div class="mods"><span>generated/ kopium Flux CRD types</span><span>GitOpsObject</span><span>summary (one sentence)</span><span>helm_storage (release history)</span><span>actions (merge patches)</span><span>matrix (cross-cluster grid)</span><span>revision</span></div></div>
-      <div class="layer loco"><h3><code>crates/fleet-loco</code> <span class="tag">feature loco</span></h3>
+      <div class="layer loco"><h3><code>crates/flock-loco</code> <span class="tag">feature loco</span></h3>
         <div class="mods"><span>generated/ Application, Build</span><span>applications</span><span>builds</span><span>routes</span><span>platform health</span></div></div>
-      <div class="layer dev"><h3><code>apps/fleet-shots</code> <span class="tag">dev only</span></h3>
+      <div class="layer dev"><h3><code>apps/flock-shots</code> <span class="tag">dev only</span></h3>
         <p class="what">Headless renderer and UI test harness. Renders PNGs and simulates clicks without opening a window.</p></div>
     </div>
 
-    <div class="arrow">fleet-kube → <b>Kubernetes API</b> (kube-rs) · <b>git</b> (system binary, your credentials)</div>
+    <div class="arrow">flock-kube → <b>Kubernetes API</b> (kube-rs) · <b>git</b> (system binary, your credentials)</div>
     <div class="k8s"><strong>Your clusters</strong><span>kind · EKS · DOKS · GKE · AKS · k3s</span><span>core/v1 · apps/v1 · Flux v2 CRDs · Helm storage secrets · infra.loco.io</span></div>
   </div>
 
@@ -143,7 +143,7 @@ ul.plain li { margin-bottom: 6px; }
   <h2>Flux</h2>
   <ul class="plain">
     <li>Flux kinds (HelmRelease, Kustomization, GitRepository, HelmRepository, OCIRepository, HelmChart) are watched dynamically wherever Flux is detected and converted to <code>GitOpsObject</code>.</li>
-    <li><code>fleet-flux::summary</code> turns each object into one plain sentence and a status. The home page, problems, object pages and grid all read from it.</li>
+    <li><code>flock-flux::summary</code> turns each object into one plain sentence and a status. The home page, problems, object pages and grid all read from it.</li>
     <li>HelmRelease history is decoded from <code>sh.helm.release.v1.*</code> secrets, only while that release's page is open.</li>
     <li>Changes: one bare git mirror per GitRepository URL and branch, fetched with your own credentials (never Flux's secrets). Each cluster's applied revision is mapped to commits to show per-cluster outcomes.</li>
     <li>Reconcile, suspend, resume and force are merge patches on Flux annotations or <code>spec.suspend</code>. "Reconciling" holds until <code>lastHandledReconcileAt</code> catches up.</li>
@@ -154,9 +154,9 @@ ul.plain li { margin-bottom: 6px; }
   <div class="scroll"><table>
     <thead><tr><th>Path</th><th>Holds</th><th>Lifetime</th></tr></thead>
     <tbody>
-      <tr><td class="mono">~/Library/Application Support/dev.fleet.app/clusters.json</td><td>Clusters you added (kubeconfig file + context), per-cluster preferences, watched folders</td><td>Kept; an unreadable file is set aside as <code>clusters.json.corrupt-&lt;time&gt;</code>, never overwritten</td></tr>
-      <tr><td class="mono">…/dev.fleet.app/kubeconfigs/*.yaml</td><td>Kubeconfigs pasted into Add cluster, mode 0600</td><td>Kept until removed</td></tr>
-      <tr><td class="mono">~/Library/Caches/dev.fleet.app/git/</td><td>Bare git mirrors for the Changes page</td><td>Cache; safe to delete</td></tr>
+      <tr><td class="mono">~/Library/Application Support/dev.flock.app/clusters.json</td><td>Clusters you added (kubeconfig file + context), per-cluster preferences, watched folders</td><td>Kept; an unreadable file is set aside as <code>clusters.json.corrupt-&lt;time&gt;</code>, never overwritten</td></tr>
+      <tr><td class="mono">…/dev.flock.app/kubeconfigs/*.yaml</td><td>Kubeconfigs pasted into Add cluster, mode 0600</td><td>Kept until removed</td></tr>
+      <tr><td class="mono">~/Library/Caches/dev.flock.app/git/</td><td>Bare git mirrors for the Changes page</td><td>Cache; safe to delete</td></tr>
       <tr><td class="mono">your kubeconfig files</td><td>Read and watched, never written</td><td>Yours</td></tr>
     </tbody>
   </table></div>
@@ -165,23 +165,23 @@ ul.plain li { margin-bottom: 6px; }
   <div class="scroll"><table>
     <thead><tr><th>Crate</th><th>Role</th><th>Depends on</th></tr></thead>
     <tbody>
-      <tr><td class="mono">fleet-core</td><td>Data contract: models, commands, reducer, stream types</td><td>—</td></tr>
-      <tr><td class="mono">fleet-ui</td><td>Views, shell, kit, theme</td><td>fleet-core, gpui-component</td></tr>
-      <tr><td class="mono">fleet-kube</td><td>LiveBackend: clusters, actions, Flux, git, Loco I/O</td><td>fleet-core, fleet-flux, fleet-loco (feature), kube, tokio</td></tr>
-      <tr><td class="mono">fleet-flux</td><td>Pure Flux interpretation</td><td>kube (types only)</td></tr>
-      <tr><td class="mono">fleet-loco</td><td>Pure Loco interpretation</td><td>kube (types only)</td></tr>
-      <tr><td class="mono">fleet-demo</td><td>DemoBackend on the design's data</td><td>fleet-core</td></tr>
-      <tr><td class="mono">apps/fleet</td><td>The app</td><td>all of the above</td></tr>
-      <tr><td class="mono">apps/fleet-shots</td><td>Headless screenshots and UI tests</td><td>apps/fleet, fleet-demo</td></tr>
+      <tr><td class="mono">flock-core</td><td>Data contract: models, commands, reducer, stream types</td><td>—</td></tr>
+      <tr><td class="mono">flock-ui</td><td>Views, shell, kit, theme</td><td>flock-core, gpui-component</td></tr>
+      <tr><td class="mono">flock-kube</td><td>LiveBackend: clusters, actions, Flux, git, Loco I/O</td><td>flock-core, flock-flux, flock-loco (feature), kube, tokio</td></tr>
+      <tr><td class="mono">flock-flux</td><td>Pure Flux interpretation</td><td>kube (types only)</td></tr>
+      <tr><td class="mono">flock-loco</td><td>Pure Loco interpretation</td><td>kube (types only)</td></tr>
+      <tr><td class="mono">flock-demo</td><td>DemoBackend on the design's data</td><td>flock-core</td></tr>
+      <tr><td class="mono">apps/flock</td><td>The app</td><td>all of the above</td></tr>
+      <tr><td class="mono">apps/flock-shots</td><td>Headless screenshots and UI tests</td><td>apps/flock, flock-demo</td></tr>
     </tbody>
   </table></div>
 
   <h2>Build, test, ship</h2>
   <ul class="plain">
     <li>Every tool is pinned in <code>mise.toml</code>. <code>mise run check</code> runs fmt, clippy <code>-D warnings</code> with and without <code>loco</code>, nextest, typos and cargo-deny.</li>
-    <li><code>mise run shot -- &lt;screen&gt; [dark|light]</code> renders a screen headlessly; <code>apps/fleet-shots/tests/ui.rs</code> drives clicks and keys in tests.</li>
+    <li><code>mise run shot -- &lt;screen&gt; [dark|light]</code> renders a screen headlessly; <code>apps/flock-shots/tests/ui.rs</code> drives clicks and keys in tests.</li>
     <li><code>mise run e2e:test</code> runs every live test against two kind clusters with Flux scenarios: a crashlooping release on one cluster only, a missing secret key, suspended and broken objects, a pending pod.</li>
-    <li><code>mise run bundle</code> / <code>bundle:loco</code> build a signed <code>dist/Fleet.app</code> with the squircle icon and the git sha in <code>fleet --version</code>.</li>
+    <li><code>mise run bundle</code> / <code>bundle:loco</code> build a signed <code>dist/Flock.app</code> with the squircle icon and the git sha in <code>flock --version</code>.</li>
   </ul>
 </main>
 <script>
@@ -193,11 +193,11 @@ ul.plain li { margin-bottom: 6px; }
     if (forced) return forced;
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
-  try { var saved = localStorage.getItem('fleet-arch-theme'); if (saved) root.setAttribute('data-theme', saved); } catch (e) {}
+  try { var saved = localStorage.getItem('flock-arch-theme'); if (saved) root.setAttribute('data-theme', saved); } catch (e) {}
   button.addEventListener('click', function () {
     var next = current() === 'dark' ? 'light' : 'dark';
     root.setAttribute('data-theme', next);
-    try { localStorage.setItem('fleet-arch-theme', next); } catch (e) {}
+    try { localStorage.setItem('flock-arch-theme', next); } catch (e) {}
   });
 })();
 </script>

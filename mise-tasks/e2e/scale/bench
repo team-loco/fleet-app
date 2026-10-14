@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-#MISE description="Measure Fleet's scale watcher heap, rebuilds and API-to-UI-state latency"
+#MISE description="Measure Flock's scale watcher heap, rebuilds and API-to-UI-state latency"
 set -euo pipefail
-export FLEET_E2E=1
+export FLOCK_E2E=1
 timing_status=0
-mise exec -- cargo test -p fleet-kube --release --test performance kind_scale -- --ignored --nocapture --test-threads=1 || timing_status=$?
-mise exec -- cargo test -p fleet-kube --release --test performance_heap kind_scale -- --ignored --nocapture --test-threads=1
+mise exec -- cargo test -p flock-kube --release --test performance kind_scale -- --ignored --nocapture --test-threads=1 || timing_status=$?
+mise exec -- cargo test -p flock-kube --release --test performance_heap kind_scale -- --ignored --nocapture --test-threads=1
 exit "${timing_status}"

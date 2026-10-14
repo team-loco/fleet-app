@@ -7,24 +7,24 @@ Spec column points at `design/`.
 
 | id | unit | spec | owner | branch | status |
 |---|---|---|---|---|---|
-| P0 | workspace, mise tasks, lefthook, CI, fleet-core contract, theme tokens, window shell (strip, two panels, page header, status bar) on demo data | HANDOFF.md, Nav, StatusBar | claude | p0-scaffold | done (#2) |
+| P0 | workspace, mise tasks, lefthook, CI, flock-core contract, theme tokens, window shell (strip, two panels, page header, status bar) on demo data | HANDOFF.md, Nav, StatusBar | claude | p0-scaffold | done (#2) |
 
 ## Phase 1 — foundations (parallel)
 
 | id | unit | spec | owner | branch | status |
 |---|---|---|---|---|---|
 | F1 | ui-kit: status glyph, section label, rule, buttons, ⋯ action menu with descriptions, table on uniform_list, dock, collapsible panel animation, code/diff view | HANDOFF visual rules | claude | f1-ui-kit, f1-ui-kit-2 | done (#3, #12) |
-| F2 | fleet-kube: kubeconfig discovery + watch, login-shell env capture, cluster connect + checks, per-cluster watchers → core snapshots | AddCluster, AddClusterCheck | claude | f2-fleet-kube, f2-fleet-kube-live | done (#7, #9) |
-| F3 | fleet-flux: CRD types (kopium, Flux 2.9.6), status summarizer, inventory, Helm storage decode, cross-cluster matrix | Kustomization, Flux | Codex | f3-fleet-flux | done |
-| F4 | fleet-loco: CRD types from crds/loco, app/build/route/platform models | Loco* | Codex | f4-fleet-loco | done |
-| F5 | e2e: kind clusters + Flux + scenario workloads (crashloop, missing secret key, failing HelmRelease, suspended, drift) | Fleet, Workload | codex | f5-e2e-scenarios | done (#1) |
-| F6 | folded into screen units: each S-unit owns its fleet-core model, fleet-demo data and fleet-ui screen | | | | dropped |
+| F2 | flock-kube: kubeconfig discovery + watch, login-shell env capture, cluster connect + checks, per-cluster watchers → core snapshots | AddCluster, AddClusterCheck | claude | f2-flock-kube, f2-flock-kube-live | done (#7, #9) |
+| F3 | flock-flux: CRD types (kopium, Flux 2.9.6), status summarizer, inventory, Helm storage decode, cross-cluster matrix | Kustomization, Flux | Codex | f3-flock-flux | done |
+| F4 | flock-loco: CRD types from crds/loco, app/build/route/platform models | Loco* | Codex | f4-flock-loco | done |
+| F5 | e2e: kind clusters + Flux + scenario workloads (crashloop, missing secret key, failing HelmRelease, suspended, drift) | Flock, Workload | codex | f5-e2e-scenarios | done (#1) |
+| F6 | folded into screen units: each S-unit owns its flock-core model, flock-demo data and flock-ui screen | | | | dropped |
 
 ## Phase 2 — screens (parallel)
 
 | id | unit | spec | owner | branch | status |
 |---|---|---|---|---|---|
-| S1 | Fleet home: clusters table, problems by cluster, recent GitOps commits | Fleet | claude | s1-fleet-home | done |
+| S1 | Flock home: clusters table, problems by cluster, recent GitOps commits | Flock | claude | s1-flock-home | done |
 | S2 | Command palette ⌘K | Command, v1/Palette | claude | s2-command-palette | done |
 | S3 | Workload (Deployment) page + logs / events / terminal dock | Workload | claude | s3-workload | done |
 | S4 | Flux object page (Kustomization + HelmRelease + sources) | Kustomization | claude | s4-flux-object | done |
@@ -44,17 +44,17 @@ Spec column points at `design/`.
 | I1c | live follow-ups: startup presets on live, YAML refresh, connection commands, one Flux summary, terminal resize, StatefulSet/DaemonSet rollback, live Compare | claude | i1c-presets-yaml, i1c-connection, i1c-flux-summary, i1c-terminal-rollback, i1c-compare-live | done (#81, #88, #92, #101, compare PR) |
 | I2 | actions: reconcile, suspend/resume, scale, restart, delete, port-forward, exec, with confirmation | claude | i2-live-actions | done (#29, #31) |
 | I3 | e2e run against kind scenarios | claude | i3-e2e-suite | done |
-| I4 | Fleet.app bundle, icon (squircle 22%), version stamping | claude | i4-app-bundle | done |
+| I4 | Flock.app bundle, icon (squircle 22%), version stamping | claude | i4-app-bundle | done |
 | I5 | animation polish + parity pass, dark and light, every screen | | | todo |
-| I6 | headless screenshots (`mise run shot`) and UI interaction test helper (`fleet_shots::Ui`), no on-screen window | claude | headless-shots | done |
+| I6 | headless screenshots (`mise run shot`) and UI interaction test helper (`flock_shots::Ui`), no on-screen window | claude | headless-shots | done |
 | CPERF | scale scenarios, snapshot benchmarks and performance fixes | claude | cperf-scale | done |
 
 ## Font repair
 
 | id | unit | owner | branch | status |
 |---|---|---|---|---|
-| GLYPH | restore upstream Plex and ship Fleet Status glyph font (#95) | Codex | status-glyph-font | done |
-| GLYPH2 | bundle the all-clusters bullseye in Fleet Status | Codex | all-clusters-glyph | done (#100) |
+| GLYPH | restore upstream Plex and ship Flock Status glyph font (#95) | Codex | status-glyph-font | done |
+| GLYPH2 | bundle the all-clusters bullseye in Flock Status | Codex | all-clusters-glyph | done (#100) |
 
 ## Follow-ups
 
@@ -81,3 +81,4 @@ Spec column points at `design/`.
 | UPD2 | in-app updater: check, verify, stage, restart to update; menu, palette, settings and status bar | claude | auto-update-app | done |
 | TABS1 | pane tabs (one pane), v3 sidebar and status-bar switcher, tabs persisted per window | claude | tabs-and-shell-v3, tabs-shell-v3-nav, tabs-persist | done (#158, #160, persistence PR) |
 | HL1 | primary and secondary highlight colours: presets or hex, derived for dark and light with WCAG checks | claude | themes | done |
+| NAME1 | rename the product to Flock: crates, binary, bundle id, env vars, docs; move the old data and cache dirs on launch | claude | rename-to-flock | done |
