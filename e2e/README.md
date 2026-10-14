@@ -67,12 +67,18 @@ The verification script catches changes that break the expected states.
 when its node selector predates the scenario (pod specs are immutable), then reapplies everything.
 
 `mise run e2e:test` is the one-command proof. It runs `e2e:up` (reusing existing
-clusters), `e2e/verify`, then every `FLOCK_E2E` test with and without
+clusters), then, with or without `--skip-up`, reapplies the scenario manifests, uncordons the
+control-plane nodes, requests a Flux reconcile of every Kustomization and HelmRelease and waits for
+`e2e/verify` (which includes `web/podinfo`) so a leftover mutation cannot fail a test. Then it runs every `FLOCK_E2E` test with and without
 Loco enabled, against a temporary kubeconfig that holds only
 `kind-fleet-a` and `kind-fleet-b`. Linux excludes the macOS app, headless renderer
 and UI crates; the live backend harness runs in `flock-kube` on both platforms.
 macOS also runs the headless UI tests. `--skip-up` requires existing clusters;
 `--no-teardown` keeps them (the default, except when `CI` is set).
+
+Tests that change shared scenario objects restore them even when they panic: `scale_up_then_back_down`
+(`web/podinfo` replicas), `cordon_then_uncordon_the_node` (the control-plane node) and the suspend
+journey below. Everything else uses its own scratch objects.
 
 The live UI journeys in `apps/flock-shots/tests/journeys.rs` are part of that run. They open the
 headless Flock shell on a `LiveBackend` with both clusters added to a temporary data directory,
