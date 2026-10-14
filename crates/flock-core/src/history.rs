@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{ClusterId, Command, FluxKey, Page, ResourceRef};
+use crate::{ClusterId, Command, FluxKey, Page, ResourceRef, WorkloadKind};
 
 pub const HISTORY_LIMIT: usize = 50;
 
@@ -38,6 +38,13 @@ impl Location {
             cluster: Some(cluster),
             ..Self::flock(page)
         }
+    }
+
+    pub fn workload(&self) -> Option<&ResourceRef> {
+        self.resource
+            .as_ref()
+            .filter(|_| self.page != Page::Compare && self.page != Page::Logs)
+            .filter(|target| WorkloadKind::from_kind(&target.kind).is_some())
     }
 
     pub fn commands(&self) -> Vec<Command> {

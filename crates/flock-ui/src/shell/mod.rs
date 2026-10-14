@@ -1,18 +1,22 @@
 mod keys;
 mod load;
 mod page;
+mod pane;
 mod sidebar;
 mod status_bar;
 pub(crate) mod switcher;
 mod tabs;
 
+use flock_core::history::Location;
 use flock_core::palette::{COMPARE_KEY, LOGS_KEY, OWNER_KEY, resource_commands};
 use flock_core::resource::short_kind;
-use flock_core::{AddClusterStep, AppState, Command, Page, Sender, Status, Update};
+use flock_core::{
+    AddClusterStep, AppState, ClusterSummary, Command, Page, Preferences, Sender, Status, Update,
+};
 use gpui::{
-    App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
-    KeyDownEvent, MouseButton, MouseDownEvent, ParentElement, Render, Styled, Subscription, Task,
-    Window, div,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement,
+    IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, ParentElement, Render, Styled,
+    Subscription, Task, Window, div, prelude::FluentBuilder,
 };
 
 use crate::Store;
@@ -21,20 +25,12 @@ use crate::actions::{
     ToggleClusterSwitcher, ToggleCommandPalette, ToggleSidebar,
 };
 use crate::kit::{FilterBar, Toast, toast};
+use crate::screens::ScreenEvent;
 use crate::screens::add_cluster::{AddClusterDialog, AddClusterEvent};
-use crate::screens::app_settings::AppSettingsScreen;
-use crate::screens::changes::ChangesScreen;
 use crate::screens::command::{CommandPalette, PaletteEvent};
-use crate::screens::compare::CompareScreen;
-use crate::screens::flock::FlockScreen;
-use crate::screens::flux_object::FluxObjectPage;
-use crate::screens::gitops::GitOpsScreen;
-use crate::screens::logs::LogsScreen;
-use crate::screens::pods::PodsScreen;
-use crate::screens::settings::SettingsScreen;
 use crate::screens::workload::WorkloadScreen;
-use crate::screens::{ClusterPages, ScreenEvent};
-use crate::theme::{self, ActiveTheme, TEXT_UI};
+use crate::theme::{self, ActiveTheme, RULE, TEXT_UI};
+use pane::PaneScreens;
 use switcher::{ClusterSwitcher, SwitcherEvent};
 
 pub(crate) const KEY_CONTEXT: &str = "Shell";
@@ -50,40 +46,22 @@ pub struct Shell {
     commands: Sender<Command>,
     pending: Vec<Command>,
     new_tab_gesture: bool,
-    tab_strip: tabs::TabStrip,
+    announce: bool,
+    saved: Option<flock_core::tabs::SavedWindow>,
     sidebar_generation: usize,
     focus: FocusHandle,
-    flock: Entity<FlockScreen>,
     palette: Entity<CommandPalette>,
-    changes: Entity<ChangesScreen>,
-    pages: ClusterPages,
+    panes: Vec<PaneScreens>,
     loaded: bool,
-    load: load::LoadClock,
     add_cluster: Option<(Entity<AddClusterDialog>, Subscription)>,
     switcher: Entity<ClusterSwitcher>,
     _switcher_events: Subscription,
-    workload: Option<(Entity<WorkloadScreen>, Subscription)>,
-    logs: Option<(Entity<LogsScreen>, Subscription)>,
-    flux_object: Entity<FluxObjectPage>,
-    #[cfg(feature = "loco")]
-    loco: Entity<crate::screens::loco::LocoScreens>,
-    #[cfg(feature = "loco")]
-    _loco_commands: Subscription,
-    compare: Entity<CompareScreen>,
-    settings: Entity<SettingsScreen>,
-    app_settings: Entity<AppSettingsScreen>,
     _updates: Task<()>,
     _store: Entity<Store>,
     _window_closed: Subscription,
     _appearance: Subscription,
-    _flock_commands: Subscription,
     _palette_events: Subscription,
-    gitops: Entity<GitOpsScreen>,
-    _gitops_commands: Subscription,
-    pods: Entity<PodsScreen>,
-    _pod_commands: Subscription,
-    _flux_object: Subscription,
-    _subscriptions: [Subscription; 4],
+    _updater: Subscription,
 }
 
 impl Shell {
@@ -96,8 +74,7 @@ impl Shell {
         let commands = store.read(cx).commands();
         let updates = store.update(cx, |store, _| store.subscribe());
         let window_id = cx.entity_id().as_u64();
-        let close_commands = commands.clone();
-        let window_closed = Self::watch_close(window, window_id, close_commands, cx);
+        let window_closed = Self::watch_close(window, window_id, cx);
         let listen = cx.spawn_in(window, async move |this, cx| {
             while let Ok(update) = updates.recv().await {
                 let applied = this.update_in(cx, |shell, window, cx| {
@@ -112,95 +89,38 @@ impl Shell {
             theme::follow_window(window, cx);
             cx.notify();
         });
-        let flock = cx.new(FlockScreen::new);
-        let flock_commands = cx.subscribe(&flock, |this, _, command: &Command, cx| {
-            this.dispatch(command.clone(), cx);
-        });
-        let changes = cx.new(|cx| ChangesScreen::new(window, cx));
-        let gitops = cx.new(|cx| GitOpsScreen::new(window, cx));
-        let gitops_commands = cx.subscribe(&gitops, |this, _, command: &Command, cx| {
-            this.dispatch(command.clone(), cx);
-        });
-        #[cfg(feature = "loco")]
-        let loco = cx.new(|cx| crate::screens::loco::LocoScreens::new(window, cx));
-        #[cfg(feature = "loco")]
-        let loco_commands = cx.subscribe(&loco, |this, _, command: &Command, cx| {
-            this.dispatch(command.clone(), cx);
-        });
-        let compare = cx.new(CompareScreen::new);
-        let settings = cx.new(|cx| SettingsScreen::new(window, cx));
-        let app_settings = cx.new(|cx| AppSettingsScreen::new(window, cx));
-        let subscriptions = [
-            Self::forward(&app_settings, cx),
-            Self::forward(&compare, cx),
-            Self::forward(&settings, cx),
-            cx.observe_global::<crate::updater::Updater>(|_, cx| cx.notify()),
-        ];
-        let pods = cx.new(|cx| PodsScreen::new(window, cx));
-        let pod_commands = cx.subscribe(&pods, |this, _, command: &Command, cx| {
-            this.dispatch(command.clone(), cx);
-        });
+        let updater_changes = cx.observe_global::<crate::updater::Updater>(|_, cx| cx.notify());
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         theme::follow_window(window, cx);
         let (palette, palette_events) = Self::new_palette(window, cx);
         let (switcher, switcher_events) = Self::new_switcher(window, cx);
-        let pages = ClusterPages::new(window, cx, Self::screen_event);
-        let flux_object = cx.new(FluxObjectPage::new);
-        let flux_commands = cx.subscribe(&flux_object, |shell, _, command: &Command, cx| {
-            shell.dispatch(command.clone(), cx);
-        });
+        let state = AppState::default();
+        let first = PaneScreens::new(state.panes().focused().id(), commands.clone(), window, cx);
         Self {
-            state: AppState::default(),
+            state,
             keys: keys::Keyboard::new(cx),
             window_id,
             commands,
             pending: initial,
             new_tab_gesture: false,
-            tab_strip: tabs::TabStrip::default(),
+            announce: false,
+            saved: None,
             sidebar_generation: 0,
             focus,
-            flock,
             palette,
-            changes,
-            pages,
+            panes: vec![first],
             loaded: false,
-            load: load::LoadClock::default(),
             add_cluster: None,
             switcher,
             _switcher_events: switcher_events,
-            workload: None,
-            logs: None,
-            flux_object,
-            #[cfg(feature = "loco")]
-            loco,
-            #[cfg(feature = "loco")]
-            _loco_commands: loco_commands,
-            compare,
-            settings,
-            app_settings,
             _updates: listen,
             _store: store,
             _window_closed: window_closed,
             _appearance: appearance,
-            _flock_commands: flock_commands,
             _palette_events: palette_events,
-            gitops,
-            _gitops_commands: gitops_commands,
-            pods,
-            _pod_commands: pod_commands,
-            _flux_object: flux_commands,
-            _subscriptions: subscriptions,
+            _updater: updater_changes,
         }
-    }
-
-    fn forward<T: gpui::EventEmitter<Command>>(
-        screen: &Entity<T>,
-        cx: &mut Context<Self>,
-    ) -> Subscription {
-        cx.subscribe(screen, |this, _, command: &Command, cx| {
-            this.dispatch(command.clone(), cx);
-        })
     }
 
     fn new_palette(
@@ -227,19 +147,22 @@ impl Shell {
         (switcher, events)
     }
 
-    fn watch_close(
-        window: &Window,
-        window_id: u64,
-        commands: Sender<Command>,
-        cx: &mut Context<Self>,
-    ) -> Subscription {
+    fn watch_close(window: &Window, window_id: u64, cx: &mut Context<Self>) -> Subscription {
         let handle = window.window_handle();
+        let shell = cx.entity().downgrade();
         cx.on_window_closed(move |cx, closed| {
-            if closed == handle.window_id() {
-                let _ = commands.try_send(Command::WindowClosed(window_id));
-                if !cx.windows().is_empty() {
-                    crate::session::forget(window_id, cx);
-                }
+            if closed != handle.window_id() {
+                return;
+            }
+            if let Some(shell) = shell.upgrade() {
+                shell.update(cx, |shell, _| {
+                    for screens in &mut shell.panes {
+                        screens.scope.close();
+                    }
+                });
+            }
+            if !cx.windows().is_empty() {
+                crate::session::forget(window_id, cx);
             }
         })
     }
@@ -280,23 +203,15 @@ impl Shell {
         }
         self.state.update(update);
         self.run_pending(window, cx);
-        if self.loaded && std::mem::take(&mut self.tab_strip.announce) {
-            self.show_active(cx);
+        if self.loaded && std::mem::take(&mut self.announce) {
+            self.show_all(cx);
         }
         if self.loaded {
             self.save_tabs(cx);
         }
-        let snapshot = &self.state.snapshot;
-        self.flock
-            .update(cx, |flock, cx| flock.set_snapshot(snapshot, cx));
-        self.changes
-            .update(cx, |changes, cx| changes.set_snapshot(snapshot, cx));
-        self.gitops
-            .update(cx, |gitops, cx| gitops.set_snapshot(snapshot, cx));
-        self.settings
-            .update(cx, |settings, cx| settings.set_snapshot(snapshot, cx));
-        self.pods
-            .update(cx, |pods, cx| pods.set_snapshot(snapshot, cx));
+        for screens in &self.panes {
+            screens.set_snapshot(&self.state.snapshot, cx);
+        }
         self.sync_page(cx);
         self.track_load(cx);
         self.sync_palette(cx);
@@ -319,12 +234,18 @@ impl Shell {
         }
     }
 
-    pub fn restore_tabs(&mut self, saved: &flock_core::tabs::SavedWindow, cx: &mut Context<Self>) {
+    pub fn restore_tabs(
+        &mut self,
+        saved: &flock_core::tabs::SavedWindow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.state.restore(saved);
+        self.sync_panes(window, cx);
         if self.loaded {
-            self.show_active(cx);
+            self.show_all(cx);
         } else {
-            self.tab_strip.announce = true;
+            self.announce = true;
         }
     }
 
@@ -371,27 +292,16 @@ impl Shell {
             .update(cx, |switcher, cx| switcher.show(window, cx));
     }
 
-    fn cluster_preferences(&self) -> flock_core::Preferences {
-        self.selected_cluster()
+    fn cluster_of(&self, location: &Location) -> Option<&ClusterSummary> {
+        let id = location.cluster.as_ref()?;
+        self.state.snapshot.cluster(id)
+    }
+
+    fn preferences_of(&self, location: &Location) -> Preferences {
+        self.cluster_of(location)
             .and_then(|cluster| self.state.snapshot.catalog.get(&cluster.id))
             .map(|settings| settings.preferences.clone())
             .unwrap_or_default()
-    }
-
-    fn sync_pages(&self, cx: &mut Context<Self>) {
-        let cluster = self.selected_cluster();
-        let confirm_destructive = cluster
-            .and_then(|c| self.state.snapshot.catalog.get(&c.id))
-            .is_none_or(|settings| settings.preferences.confirm_destructive);
-        let preferences = self.cluster_preferences();
-        self.pages.sync(
-            self.state.location().page,
-            cluster,
-            &self.state.snapshot,
-            confirm_destructive,
-            &preferences,
-            cx,
-        );
     }
 
     fn screen_event(&mut self, event: &ScreenEvent, cx: &mut Context<Self>) {
@@ -402,12 +312,7 @@ impl Shell {
     }
 
     fn send(&self, command: Command) {
-        if let Err(error) = self
-            .commands
-            .try_send(Command::ForWindow(self.window_id, Box::new(command)))
-        {
-            tracing::warn!(%error, "backend stopped accepting commands");
-        }
+        self.focused_screens().scope.send(command);
     }
 
     pub(super) fn open_add_cluster(
@@ -448,7 +353,7 @@ impl Shell {
         self.ui_effects(&command, cx);
         self.state.apply(&command);
         if let Command::OpenResource(target) = &command {
-            self.pages.reveal(target, cx);
+            self.focused_screens().pages.reveal(target, cx);
         }
         self.keys.refocus |= self.state.location() != &before;
         self.sync_page(cx);
@@ -468,14 +373,30 @@ impl Shell {
         command
     }
 
-    pub(super) fn show_active(&mut self, cx: &mut Context<Self>) {
-        let location = self.state.location().clone();
+    fn announce_pane(&self, ix: usize, cx: &mut Context<Self>) {
+        let location = self.location_at(ix);
+        let screens = self.screens(ix);
         for command in location.commands() {
-            self.send(command);
+            screens.scope.send(command);
         }
         if let Some(resource) = &location.resource {
-            self.pages.reveal(resource, cx);
+            screens.pages.reveal(resource, cx);
         }
+    }
+
+    pub(super) fn show_active(&mut self, cx: &mut Context<Self>) {
+        self.announce_pane(self.state.panes().focused_index(), cx);
+        self.shown(cx);
+    }
+
+    fn show_all(&mut self, cx: &mut Context<Self>) {
+        for ix in 0..self.panes.len() {
+            self.announce_pane(ix, cx);
+        }
+        self.shown(cx);
+    }
+
+    fn shown(&mut self, cx: &mut Context<Self>) {
         self.keys.refocus = true;
         self.sync_page(cx);
         self.track_load(cx);
@@ -486,10 +407,10 @@ impl Shell {
 
     pub(super) fn save_tabs(&mut self, cx: &mut Context<Self>) {
         let saved = self.state.panes().saved();
-        if self.tab_strip.saved.as_ref() == Some(&saved) {
+        if self.saved.as_ref() == Some(&saved) {
             return;
         }
-        self.tab_strip.saved = Some(saved.clone());
+        self.saved = Some(saved.clone());
         crate::session::record(self.window_id, saved, cx);
     }
 
@@ -502,15 +423,22 @@ impl Shell {
         self.show_active(cx);
     }
 
-    pub(super) fn close_tab(&mut self, id: flock_core::tabs::TabId, cx: &mut Context<Self>) {
+    pub(super) fn close_tab(
+        &mut self,
+        id: flock_core::tabs::TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let active = self.state.panes().active().id();
-        if self.state.panes_mut().close(id) {
-            if active == id {
-                self.show_active(cx);
-            } else {
-                self.save_tabs(cx);
-                cx.notify();
-            }
+        if !self.state.panes_mut().close(id) {
+            return;
+        }
+        self.sync_panes(window, cx);
+        if self.state.panes().active().id() == active {
+            self.save_tabs(cx);
+            cx.notify();
+        } else {
+            self.show_active(cx);
         }
     }
 
@@ -532,7 +460,8 @@ impl Shell {
             Command::NewTab(_) => {}
             Command::OpenLogs { .. } => {}
             Command::ShowClusterSettings(cluster) => {
-                self.settings
+                self.focused_screens()
+                    .settings
                     .update(cx, |settings, cx| settings.open(cluster, cx));
             }
             Command::SetPreferences(..) => {}
@@ -560,7 +489,9 @@ impl Shell {
             }
             Command::StopPortForward { .. } => {}
             Command::OpenCommit(sha) => {
-                self.changes.update(cx, |changes, cx| changes.open(sha, cx));
+                self.focused_screens()
+                    .changes
+                    .update(cx, |changes, cx| changes.open(sha, cx));
             }
             Command::Cordon(_) => {}
             Command::Uncordon(_) => {}
@@ -598,28 +529,52 @@ impl Shell {
     }
 
     fn sync_page(&self, cx: &mut Context<Self>) {
-        let page = self.state.location().page;
-        self.flock.update(cx, |flock, cx| flock.set_page(page, cx));
-        self.sync_pages(cx);
-        let flux = self.state.location().flux_object.as_ref();
-        let object = flux.and_then(|key| self.state.snapshot.flux_page(key));
-        self.flux_object
+        for ix in 0..self.panes.len() {
+            self.sync_pane(ix, cx);
+        }
+    }
+
+    fn sync_pane(&self, ix: usize, cx: &mut Context<Self>) {
+        let location = self.location_at(ix);
+        let screens = self.screens(ix);
+        let snapshot = &self.state.snapshot;
+        let page = location.page;
+        screens
+            .flock
+            .update(cx, |flock, cx| flock.set_page(page, cx));
+        let cluster = self.cluster_of(location);
+        let confirm_destructive = cluster
+            .and_then(|c| snapshot.catalog.get(&c.id))
+            .is_none_or(|settings| settings.preferences.confirm_destructive);
+        let preferences = self.preferences_of(location);
+        screens.pages.sync(
+            page,
+            cluster,
+            snapshot,
+            confirm_destructive,
+            &preferences,
+            cx,
+        );
+        let object = location
+            .flux_object
+            .as_ref()
+            .and_then(|key| snapshot.flux_page(key));
+        screens
+            .flux_object
             .update(cx, |screen, cx| screen.set_page(object, cx));
         #[cfg(feature = "loco")]
-        self.loco
-            .update(cx, |loco, cx| loco.set_context(&self.state, cx));
-        let snapshot = &self.state.snapshot;
-        let resource = self.state.location().resource.as_ref();
-        self.compare.update(cx, |compare, cx| {
+        screens
+            .loco
+            .update(cx, |loco, cx| loco.set_context(location, snapshot, cx));
+        let resource = location.resource.as_ref();
+        screens.compare.update(cx, |compare, cx| {
             compare.set_snapshot(snapshot, resource, cx);
         });
-        let cluster = self.state.location().cluster.as_ref();
-        let resource = self.state.location().resource.as_ref();
-        let preferences = self.cluster_preferences();
-        self.pods.update(cx, |pods, cx| {
+        let cluster = location.cluster.as_ref();
+        screens.pods.update(cx, |pods, cx| {
             pods.set_context(cluster, resource, &preferences, cx);
         });
-        if let Some((screen, _)) = &self.workload {
+        if let Some((screen, _)) = &screens.workload {
             self.sync_workload_yaml(screen, cx);
         }
     }
@@ -631,21 +586,20 @@ impl Shell {
     }
 
     pub fn filter_bar(&self, cx: &App) -> Option<Entity<FilterBar>> {
-        if self.state.workload().is_some() || self.state.location().flux_object.is_some() {
+        let location = self.state.location();
+        if location.workload().is_some() || location.flux_object.is_some() {
             return None;
         }
+        let screens = self.focused_screens();
         #[cfg(feature = "loco")]
-        if crate::screens::loco::owns(self.state.location().page) {
-            return self
-                .loco
-                .read(cx)
-                .filter_bar(self.state.location().page, cx);
+        if crate::screens::loco::owns(location.page) {
+            return screens.loco.read(cx).filter_bar(location.page, cx);
         }
-        match self.state.location().page {
-            Page::Pods => Some(self.pods.read(cx).filter_bar().clone()),
-            Page::Changes => Some(self.changes.read(cx).filter_bar().clone()),
-            Page::GitOps => Some(self.gitops.read(cx).filter_bar().clone()),
-            page => self.pages.filter_bar(page, cx),
+        match location.page {
+            Page::Pods => Some(screens.pods.read(cx).filter_bar().clone()),
+            Page::Changes => Some(screens.changes.read(cx).filter_bar().clone()),
+            Page::GitOps => Some(screens.gitops.read(cx).filter_bar().clone()),
+            page => screens.pages.filter_bar(page, cx),
         }
     }
 
@@ -656,8 +610,38 @@ impl Shell {
     }
 
     pub fn show_pod_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.pods
+        self.focused_screens()
+            .pods
             .update(cx, |pods, cx| pods.show_terminal(window, cx));
+    }
+
+    fn pane_views(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let palette = *cx.palette();
+        let mut views = Vec::new();
+        for ix in 0..self.panes.len() {
+            let leading = if ix == 0 {
+                self.window_controls(cx)
+            } else {
+                None
+            };
+            let strip = self.tab_strip(ix, leading, cx);
+            let page = self.page(ix, window, cx);
+            let view = div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w_0()
+                .when(ix > 0, |view| {
+                    view.border_l(RULE).border_color(palette.line2)
+                })
+                .capture_any_mouse_down(cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                    this.focus_pane(ix, cx);
+                }))
+                .child(strip)
+                .child(div().flex().flex_1().min_h_0().child(page));
+            views.push(view.into_any_element());
+        }
+        views
     }
 }
 
@@ -665,8 +649,7 @@ impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
         self.keep_keyboard_focus(window, cx);
-        let page = self.page(window, cx);
-        let controls = self.window_controls(cx);
+        let panes = self.pane_views(window, cx);
         let root = div()
             .id("shell")
             .key_context(KEY_CONTEXT)
@@ -720,15 +703,7 @@ impl Render for Shell {
                     .flex_1()
                     .min_h_0()
                     .child(self.sidebar(window, cx))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_w_0()
-                            .child(self.tab_strip(controls, cx))
-                            .child(div().flex().flex_1().min_h_0().child(page)),
-                    ),
+                    .child(div().flex().flex_1().min_w_0().children(panes)),
             )
             .child(self.status_bar(cx))
             .child(self.palette.clone())
@@ -874,6 +849,60 @@ mod tests {
         assert!(shell.read_with(cx, |shell, _| shell.state.sidebar_open));
     }
 
+    fn scope_of(sent: &[Command], wanted: &Command) -> Option<u64> {
+        sent.iter().find_map(|command| match command {
+            Command::ForWindow(scope, inner) if inner.as_ref() == wanted => Some(*scope),
+            _ => None,
+        })
+    }
+
+    #[gpui::test]
+    fn each_pane_reaches_the_backend_under_its_own_scope(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(Some(theme::Appearance::Dark), cx)
+                .unwrap_or_else(|error| panic!("UI init: {error}"));
+            cx.bind_keys(crate::keymap::key_bindings());
+        });
+        let (backend, updates) = async_channel::unbounded();
+        let (commands, received) = async_channel::unbounded();
+        let store = cx.new(|cx| Store::new(updates, commands, cx));
+        let (shell, window) = cx.update(|cx| open_window(&store, Vec::new(), cx));
+        assert!(backend.try_send(Update::Snapshot(Box::default())).is_ok());
+        cx.run_until_parked();
+        let saved = flock_core::tabs::SavedWindow {
+            panes: [Page::GitOps, Page::Changes]
+                .into_iter()
+                .map(|page| flock_core::tabs::SavedPane {
+                    tabs: vec![Location::flock(page)],
+                    active: 0,
+                })
+                .collect(),
+            focused: 1,
+        };
+        assert!(
+            window
+                .update(cx, |_, window, cx| {
+                    shell.update(cx, |shell, cx| shell.restore_tabs(&saved, window, cx));
+                })
+                .is_ok()
+        );
+        cx.run_until_parked();
+        let sent: Vec<_> = std::iter::from_fn(|| received.try_recv().ok()).collect();
+        let left = scope_of(&sent, &Command::SelectPage(Page::GitOps));
+        let right = scope_of(&sent, &Command::SelectPage(Page::Changes));
+        assert!(left.is_some() && right.is_some() && left != right);
+        cx.simulate_keystrokes(window, "cmd-w");
+        cx.run_until_parked();
+        let sent: Vec<_> = std::iter::from_fn(|| received.try_recv().ok()).collect();
+        let closed = right.map(Command::WindowClosed);
+        assert!(sent.iter().any(|command| Some(command) == closed.as_ref()));
+        assert_eq!(shell.read_with(cx, |shell, _| shell.panes.len()), 1);
+        assert_eq!(
+            shell.read_with(cx, |shell, _| shell.state.location().page),
+            Page::GitOps
+        );
+    }
+
     #[gpui::test]
     fn tabs_are_saved_per_window_and_restore_into_a_new_one(cx: &mut TestAppContext) {
         let saved = std::rc::Rc::new(std::cell::RefCell::new(flock_core::tabs::Session::default()));
@@ -903,7 +932,13 @@ mod tests {
         assert_eq!(expected.panes.first().map(|p| p.tabs.len()), Some(3));
         let (second, second_window) = cx.update(|cx| open_window(&store, Vec::new(), cx));
         cx.run_until_parked();
-        second.update(cx, |shell, cx| shell.restore_tabs(&expected, cx));
+        assert!(
+            second_window
+                .update(cx, |_, window, cx| {
+                    second.update(cx, |shell, cx| shell.restore_tabs(&expected, window, cx));
+                })
+                .is_ok()
+        );
         cx.run_until_parked();
         assert_eq!(
             second.read_with(cx, |shell, _| shell.state.panes().saved()),

@@ -370,7 +370,7 @@ fn open_flock_window(
     cx.open_window(options, |window, cx| {
         let shell = cx.new(|cx| Shell::new(store.clone(), initial, window, cx));
         if let Some(saved) = restored {
-            shell.update(cx, |shell, cx| shell.restore_tabs(saved, cx));
+            shell.update(cx, |shell, cx| shell.restore_tabs(saved, window, cx));
         }
         subscribe_windows(&shell, store, cx);
         cx.new(|cx| Root::new(shell, window, cx))

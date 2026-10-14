@@ -1,0 +1,247 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use flock_core::tabs::{PaneId, TabId};
+use flock_core::{Command, Sender, Snapshot};
+use gpui::{AppContext as _, Context, Entity, EventEmitter, ScrollHandle, Subscription, Window};
+
+use super::Shell;
+use super::load::LoadClock;
+use crate::screens::app_settings::AppSettingsScreen;
+use crate::screens::changes::ChangesScreen;
+use crate::screens::compare::CompareScreen;
+use crate::screens::flock::FlockScreen;
+use crate::screens::flux_object::FluxObjectPage;
+use crate::screens::gitops::GitOpsScreen;
+use crate::screens::logs::LogsScreen;
+use crate::screens::pods::PodsScreen;
+use crate::screens::settings::SettingsScreen;
+use crate::screens::workload::WorkloadScreen;
+use crate::screens::{ClusterPages, ScreenEvent};
+
+const FIRST_SCOPE: u64 = 1;
+
+static NEXT_SCOPE: AtomicU64 = AtomicU64::new(FIRST_SCOPE);
+
+pub(super) struct Scope {
+    id: u64,
+    commands: Sender<Command>,
+    closed: bool,
+}
+
+impl Scope {
+    fn new(commands: Sender<Command>) -> Self {
+        Self {
+            id: NEXT_SCOPE.fetch_add(1, Ordering::Relaxed),
+            commands,
+            closed: false,
+        }
+    }
+
+    pub(super) fn close(&mut self) {
+        if !std::mem::replace(&mut self.closed, true) {
+            let _ = self.commands.try_send(Command::WindowClosed(self.id));
+        }
+    }
+
+    pub(super) fn send(&self, command: Command) {
+        let scoped = Command::ForWindow(self.id, Box::new(command));
+        if let Err(error) = self.commands.try_send(scoped) {
+            tracing::warn!(%error, "backend stopped accepting commands");
+        }
+    }
+}
+
+impl Drop for Scope {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+pub(super) struct PaneScreens {
+    pub(super) pane: PaneId,
+    pub(super) scope: Scope,
+    pub(super) flock: Entity<FlockScreen>,
+    pub(super) changes: Entity<ChangesScreen>,
+    pub(super) gitops: Entity<GitOpsScreen>,
+    pub(super) pages: ClusterPages,
+    pub(super) flux_object: Entity<FluxObjectPage>,
+    #[cfg(feature = "loco")]
+    pub(super) loco: Entity<crate::screens::loco::LocoScreens>,
+    pub(super) compare: Entity<CompareScreen>,
+    pub(super) settings: Entity<SettingsScreen>,
+    pub(super) app_settings: Entity<AppSettingsScreen>,
+    pub(super) pods: Entity<PodsScreen>,
+    pub(super) workload: Option<(Entity<WorkloadScreen>, Subscription)>,
+    pub(super) logs: Option<(Entity<LogsScreen>, Subscription)>,
+    pub(super) load: LoadClock,
+    pub(super) strip: ScrollHandle,
+    pub(super) shown: Option<TabId>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl PaneScreens {
+    pub(super) fn new(
+        pane: PaneId,
+        commands: Sender<Command>,
+        window: &mut Window,
+        cx: &mut Context<Shell>,
+    ) -> Self {
+        let flock = cx.new(FlockScreen::new);
+        let changes = cx.new(|cx| ChangesScreen::new(window, cx));
+        let gitops = cx.new(|cx| GitOpsScreen::new(window, cx));
+        #[cfg(feature = "loco")]
+        let loco = cx.new(|cx| crate::screens::loco::LocoScreens::new(window, cx));
+        let compare = cx.new(CompareScreen::new);
+        let settings = cx.new(|cx| SettingsScreen::new(window, cx));
+        let app_settings = cx.new(|cx| AppSettingsScreen::new(window, cx));
+        let pods = cx.new(|cx| PodsScreen::new(window, cx));
+        let flux_object = cx.new(FluxObjectPage::new);
+        let pages = ClusterPages::new(window, cx, move |shell: &mut Shell, event, cx| {
+            shell.pane_screen_event(pane, event, cx);
+        });
+        #[cfg_attr(not(feature = "loco"), allow(unused_mut))]
+        let mut subscriptions = vec![
+            forward(pane, &flock, cx),
+            forward(pane, &gitops, cx),
+            forward(pane, &compare, cx),
+            forward(pane, &settings, cx),
+            forward(pane, &app_settings, cx),
+            forward(pane, &pods, cx),
+            forward(pane, &flux_object, cx),
+        ];
+        #[cfg(feature = "loco")]
+        subscriptions.push(forward(pane, &loco, cx));
+        Self {
+            pane,
+            scope: Scope::new(commands),
+            flock,
+            changes,
+            gitops,
+            pages,
+            flux_object,
+            #[cfg(feature = "loco")]
+            loco,
+            compare,
+            settings,
+            app_settings,
+            pods,
+            workload: None,
+            logs: None,
+            load: LoadClock::default(),
+            strip: ScrollHandle::default(),
+            shown: None,
+            _subscriptions: subscriptions,
+        }
+    }
+
+    pub(super) fn set_snapshot(&self, snapshot: &Snapshot, cx: &mut Context<Shell>) {
+        self.flock
+            .update(cx, |flock, cx| flock.set_snapshot(snapshot, cx));
+        self.changes
+            .update(cx, |changes, cx| changes.set_snapshot(snapshot, cx));
+        self.gitops
+            .update(cx, |gitops, cx| gitops.set_snapshot(snapshot, cx));
+        self.settings
+            .update(cx, |settings, cx| settings.set_snapshot(snapshot, cx));
+        self.pods
+            .update(cx, |pods, cx| pods.set_snapshot(snapshot, cx));
+    }
+}
+
+fn forward<T: EventEmitter<Command>>(
+    pane: PaneId,
+    screen: &Entity<T>,
+    cx: &mut Context<Shell>,
+) -> Subscription {
+    cx.subscribe(screen, move |shell, _, command: &Command, cx| {
+        shell.pane_command(pane, command.clone(), cx);
+    })
+}
+
+impl Shell {
+    pub(super) fn pane_command(&mut self, pane: PaneId, command: Command, cx: &mut Context<Self>) {
+        self.focus_pane_id(pane, cx);
+        self.dispatch(command, cx);
+    }
+
+    pub(super) fn pane_screen_event(
+        &mut self,
+        pane: PaneId,
+        event: &ScreenEvent,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus_pane_id(pane, cx);
+        self.screen_event(event, cx);
+    }
+
+    fn focus_pane_id(&mut self, pane: PaneId, cx: &mut Context<Self>) {
+        let ix = self.panes.iter().position(|screens| screens.pane == pane);
+        if let Some(ix) = ix {
+            self.focus_pane(ix, cx);
+        }
+    }
+
+    pub(super) fn focus_pane(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if self.state.panes_mut().focus(ix) {
+            self.sync_palette(cx);
+            self.save_tabs(cx);
+            cx.notify();
+        }
+    }
+
+    pub(super) fn sync_panes(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<usize> {
+        let ids: Vec<PaneId> = self
+            .state
+            .panes()
+            .panes()
+            .iter()
+            .map(flock_core::tabs::Pane::id)
+            .collect();
+        if self
+            .panes
+            .iter()
+            .map(|screens| screens.pane)
+            .eq(ids.iter().copied())
+        {
+            return Vec::new();
+        }
+        let mut previous = std::mem::take(&mut self.panes);
+        let mut created = Vec::new();
+        for (ix, id) in ids.into_iter().enumerate() {
+            if let Some(at) = previous.iter().position(|screens| screens.pane == id) {
+                self.panes.push(previous.remove(at));
+                continue;
+            }
+            created.push(ix);
+            let screens = PaneScreens::new(id, self.commands.clone(), window, cx);
+            screens.set_snapshot(&self.state.snapshot, cx);
+            self.panes.push(screens);
+        }
+        created
+    }
+
+    pub(super) fn screens(&self, ix: usize) -> &PaneScreens {
+        match self.panes.get(ix) {
+            Some(screens) => screens,
+            None => unreachable!("every pane has its screens"),
+        }
+    }
+
+    pub(super) fn screens_mut(&mut self, ix: usize) -> &mut PaneScreens {
+        match self.panes.get_mut(ix) {
+            Some(screens) => screens,
+            None => unreachable!("every pane has its screens"),
+        }
+    }
+
+    pub(super) fn focused_screens(&self) -> &PaneScreens {
+        self.screens(self.state.panes().focused_index())
+    }
+
+    pub(super) fn location_at(&self, ix: usize) -> &flock_core::history::Location {
+        match self.state.panes().panes().get(ix) {
+            Some(pane) => pane.active().location(),
+            None => unreachable!("every pane has its screens"),
+        }
+    }
+}

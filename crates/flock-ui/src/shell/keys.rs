@@ -41,9 +41,9 @@ impl Shell {
         root.on_action(cx.listener(|_, _: &CloseWindow, window, _| {
             window.remove_window();
         }))
-        .on_action(cx.listener(|this, _: &CloseTab, _, cx| {
+        .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
             let active = this.state.panes().active().id();
-            this.close_tab(active, cx);
+            this.close_tab(active, window, cx);
         }))
         .on_action(cx.listener(|this, _: &NewTab, _, cx| {
             this.state.new_tab();
@@ -105,10 +105,13 @@ impl Shell {
     }
 
     fn close_inspector(&mut self, cx: &mut Context<Self>) -> bool {
-        if let Some((screen, _)) = &self.workload {
+        let screens = self.focused_screens();
+        if let Some((screen, _)) = &screens.workload {
             return screen.update(cx, WorkloadScreen::close_inspector);
         }
-        self.pages.close_inspector(self.state.location().page, cx)
+        screens
+            .pages
+            .close_inspector(self.state.location().page, cx)
     }
 
     pub fn dock_open(&self, cx: &App) -> Option<bool> {
@@ -116,25 +119,28 @@ impl Shell {
     }
 
     fn dock(&self, cx: &App) -> Option<Entity<DockState>> {
-        if let Some((screen, _)) = &self.workload {
+        let screens = self.focused_screens();
+        if let Some((screen, _)) = &screens.workload {
             return Some(screen.read(cx).dock().clone());
         }
-        let pods = self.state.location().page == Page::Pods && self.has_detail();
-        pods.then(|| self.pods.read(cx).dock().clone())
+        let location = self.state.location();
+        let pods = location.page == Page::Pods && self.has_detail(location);
+        pods.then(|| screens.pods.read(cx).dock().clone())
     }
 
     fn list_focus(&self, cx: &mut Context<Self>) -> Option<FocusHandle> {
-        if let Some((screen, _)) = &self.workload {
+        let screens = self.focused_screens();
+        if let Some((screen, _)) = &screens.workload {
             return Some(screen.read(cx).list_focus(cx));
         }
         let page = self.state.location().page;
         match page {
-            Page::Overview => Some(self.flock.read(cx).list_focus(page, cx)),
-            Page::Problems => Some(self.flock.read(cx).list_focus(page, cx)),
-            Page::Changes => Some(self.changes.read(cx).list_focus(cx)),
-            Page::ClusterSettings => Some(self.settings.read(cx).list_focus(cx)),
-            Page::Pods => Some(self.pods.read(cx).list_focus(cx)),
-            page => self.pages.list_focus(page, cx),
+            Page::Overview => Some(screens.flock.read(cx).list_focus(page, cx)),
+            Page::Problems => Some(screens.flock.read(cx).list_focus(page, cx)),
+            Page::Changes => Some(screens.changes.read(cx).list_focus(cx)),
+            Page::ClusterSettings => Some(screens.settings.read(cx).list_focus(cx)),
+            Page::Pods => Some(screens.pods.read(cx).list_focus(cx)),
+            page => screens.pages.list_focus(page, cx),
         }
     }
 

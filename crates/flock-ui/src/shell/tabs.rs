@@ -1,8 +1,8 @@
 use flock_core::tabs::{Tab, TabId, TabTitle, title};
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, ElementId, Hsla, InteractiveElement,
-    IntoElement, MouseButton, ParentElement, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
+    IntoElement, MouseButton, ParentElement, Render, SharedString, StatefulInteractiveElement,
+    Styled, Window, div, prelude::FluentBuilder,
 };
 
 use super::Shell;
@@ -14,14 +14,6 @@ use crate::theme::{
 
 const CLOSE_GLYPH: &str = "×";
 const CLOSE_TOOLTIP: &str = "Close tab  ⌘W";
-
-#[derive(Default)]
-pub(super) struct TabStrip {
-    scroll: ScrollHandle,
-    shown: Option<TabId>,
-    pub(super) announce: bool,
-    pub(super) saved: Option<flock_core::tabs::SavedWindow>,
-}
 
 #[derive(Clone)]
 pub(super) struct DraggedTab {
@@ -46,48 +38,60 @@ impl Render for DraggedTab {
 impl Shell {
     pub(super) fn tab_strip(
         &mut self,
+        pane_ix: usize,
         leading: Option<AnyElement>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let palette = *cx.palette();
-        let pane = self.state.panes().focused();
+        let Some(pane) = self.state.panes().panes().get(pane_ix) else {
+            return div().into_any_element();
+        };
+        let focused = pane_ix == self.state.panes().focused_index();
         let active = pane.active_index();
         let active_id = pane.active().id();
-        if self.tab_strip.shown != Some(active_id) {
-            self.tab_strip.shown = Some(active_id);
-            self.tab_strip.scroll.scroll_to_item(active);
-        }
         let tabs: Vec<(usize, Tab)> = pane.tabs().iter().cloned().enumerate().collect();
-        let last = tabs.len().saturating_sub(1);
+        let screens = self.screens_mut(pane_ix);
+        if screens.shown != Some(active_id) {
+            screens.shown = Some(active_id);
+            screens.strip.scroll_to_item(active);
+        }
+        let scroll = screens.strip.clone();
+        let end = tabs.len();
         let mut children: Vec<AnyElement> = Vec::new();
         for (ix, tab) in tabs {
-            children.push(self.tab(ix, &tab, ix == active, &palette, cx));
+            let shown = Shown {
+                pane: pane_ix,
+                ix,
+                active: ix == active,
+                focused,
+            };
+            children.push(self.tab(shown, &tab, &palette, cx));
         }
         let rest = div()
-            .id("tab-strip-rest")
+            .id(("tab-strip-rest", pane_ix))
             .flex()
             .flex_col()
             .flex_1()
             .h_full()
             .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
             .drag_over::<DraggedTab>(move |style, _, _, _| style.bg(palette.hover))
-            .on_drop(cx.listener(move |this, dragged: &DraggedTab, _, cx| {
-                this.drop_tab(dragged.id, last, cx);
+            .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
+                this.drop_tab(dragged.id, pane_ix, end, window, cx);
             }))
             .child(div().flex_1())
             .child(div().h(RULE).bg(palette.line));
         let tabs = div()
-            .id("tab-strip-tabs")
+            .id(("tab-strip-tabs", pane_ix))
             .flex()
             .flex_1()
             .min_w_0()
             .h_full()
             .overflow_x_scroll()
-            .track_scroll(&self.tab_strip.scroll)
+            .track_scroll(&scroll)
             .children(children)
             .child(rest);
         div()
-            .debug_selector(|| "tab-strip".to_owned())
+            .debug_selector(move || strip_selector(pane_ix))
             .flex()
             .flex_none()
             .w_full()
@@ -100,16 +104,21 @@ impl Shell {
 
     fn tab(
         &self,
-        ix: usize,
+        shown: Shown,
         tab: &Tab,
-        active: bool,
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let Shown {
+            pane,
+            ix,
+            active,
+            focused,
+        } = shown;
         let id = tab.id();
         let title = title(tab.location(), &self.state.snapshot);
         let hover = palette.hover;
-        let top = if active {
+        let top = if active && focused {
             palette.acc
         } else {
             gpui::transparent_black()
@@ -119,9 +128,9 @@ impl Shell {
             id,
             title: title.clone(),
         };
-        let close = close_button(ix, id, active, palette, cx);
+        let close = close_button(shown, id, palette, cx);
         div()
-            .debug_selector(move || format!("tab-{ix}"))
+            .debug_selector(move || tab_selector(pane, ix))
             .id(ElementId::NamedInteger("tab".into(), id.as_u64()))
             .flex()
             .flex_none()
@@ -135,15 +144,15 @@ impl Shell {
                     this.show_active(cx);
                 }
             }))
-            .on_aux_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+            .on_aux_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 if event.is_middle_click() {
-                    this.close_tab(id, cx);
+                    this.close_tab(id, window, cx);
                 }
             }))
             .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
             .drag_over::<DraggedTab>(move |style, _, _, _| style.bg(hover))
-            .on_drop(cx.listener(move |this, dragged: &DraggedTab, _, cx| {
-                this.drop_tab(dragged.id, ix, cx);
+            .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
+                this.drop_tab(dragged.id, pane, ix, window, cx);
             }))
             .child(
                 div()
@@ -165,11 +174,49 @@ impl Shell {
             .into_any_element()
     }
 
-    fn drop_tab(&mut self, id: TabId, to: usize, cx: &mut Context<Self>) {
-        if self.state.panes_mut().move_tab(id, to) {
+    fn drop_tab(
+        &mut self,
+        id: TabId,
+        pane: usize,
+        to: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let active = self.state.panes().active().id();
+        if !self.state.panes_mut().move_tab(id, pane, to) {
+            return;
+        }
+        self.sync_panes(window, cx);
+        if self.state.panes().active().id() == active {
             self.save_tabs(cx);
             cx.notify();
+        } else {
+            self.show_active(cx);
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Shown {
+    pane: usize,
+    ix: usize,
+    active: bool,
+    focused: bool,
+}
+
+fn strip_selector(pane: usize) -> String {
+    if pane == 0 {
+        "tab-strip".to_owned()
+    } else {
+        format!("tab-strip-{pane}")
+    }
+}
+
+fn tab_selector(pane: usize, ix: usize) -> String {
+    if pane == 0 {
+        format!("tab-{ix}")
+    } else {
+        format!("pane-{pane}-tab-{ix}")
     }
 }
 
@@ -210,16 +257,18 @@ fn tab_content(title: &TabTitle, active: bool, palette: &Palette) -> impl IntoEl
         }))
 }
 
-fn close_button(
-    ix: usize,
-    id: TabId,
-    active: bool,
-    palette: &Palette,
-    cx: &mut Context<Shell>,
-) -> AnyElement {
+fn close_button(shown: Shown, id: TabId, palette: &Palette, cx: &mut Context<Shell>) -> AnyElement {
+    let Shown {
+        pane, ix, active, ..
+    } = shown;
     let fg = palette.fg;
+    let selector = if pane == 0 {
+        format!("tab-close-{ix}")
+    } else {
+        format!("pane-{pane}-tab-close-{ix}")
+    };
     div()
-        .debug_selector(move || format!("tab-close-{ix}"))
+        .debug_selector(move || selector.clone())
         .id(ElementId::NamedInteger("tab-close".into(), id.as_u64()))
         .flex()
         .items_center()
@@ -234,9 +283,9 @@ fn close_button(
         .on_mouse_down(MouseButton::Left, |_, _, cx: &mut App| {
             cx.stop_propagation();
         })
-        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
             cx.stop_propagation();
-            this.close_tab(id, cx);
+            this.close_tab(id, window, cx);
         }))
         .child(CLOSE_GLYPH)
         .into_any_element()

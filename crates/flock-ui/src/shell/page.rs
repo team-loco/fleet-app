@@ -1,3 +1,4 @@
+use flock_core::history::Location;
 use flock_core::{Command, Counts, Page};
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
@@ -23,15 +24,21 @@ const UNAVAILABLE_REASON: &str =
 const SHOW_ALL_CLUSTERS: &str = "Show all clusters";
 
 impl Shell {
-    pub(super) fn page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        if self.loaded && !self.state.cluster_available() {
-            return self.unavailable(cx);
+    pub(super) fn page(
+        &mut self,
+        ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let location = self.location_at(ix).clone();
+        if self.loaded && !self.state.available(&location) {
+            return self.unavailable(&location, cx);
         }
         #[cfg(feature = "loco")]
-        if crate::screens::loco::owns(self.state.location().page) {
-            return self.loco.clone().into_any_element();
+        if crate::screens::loco::owns(location.page) {
+            return self.screens(ix).loco.clone().into_any_element();
         }
-        if let Some(screen) = self.logs_screen(window, cx) {
+        if let Some(screen) = self.logs_screen(ix, &location, window, cx) {
             return div()
                 .flex_1()
                 .min_w_0()
@@ -39,7 +46,7 @@ impl Shell {
                 .child(screen)
                 .into_any_element();
         }
-        if let Some(screen) = self.workload_screen(window, cx) {
+        if let Some(screen) = self.workload_screen(ix, &location, window, cx) {
             return div()
                 .flex_1()
                 .min_w_0()
@@ -48,11 +55,12 @@ impl Shell {
                 .into_any_element();
         }
         let palette = *cx.palette();
-        let full_page: Option<AnyElement> = match self.state.location().page {
-            Page::Changes => Some(self.changes.clone().into_any_element()),
-            Page::Compare => Some(self.compare.clone().into_any_element()),
-            Page::ClusterSettings => Some(self.settings.clone().into_any_element()),
-            Page::Settings => Some(self.app_settings.clone().into_any_element()),
+        let screens = self.screens(ix);
+        let full_page: Option<AnyElement> = match location.page {
+            Page::Changes => Some(screens.changes.clone().into_any_element()),
+            Page::Compare => Some(screens.compare.clone().into_any_element()),
+            Page::ClusterSettings => Some(screens.settings.clone().into_any_element()),
+            Page::Settings => Some(screens.app_settings.clone().into_any_element()),
             _ => None,
         };
         if let Some(screen) = full_page {
@@ -64,10 +72,10 @@ impl Shell {
                 .child(screen)
                 .into_any_element();
         }
-        if self.state.location().flux_object.is_some() {
-            return self.flux_object.clone().into_any_element();
+        if location.flux_object.is_some() {
+            return screens.flux_object.clone().into_any_element();
         }
-        let loading = self.load_view(cx);
+        let loading = self.load_view(ix, &location, cx);
         let body = if let Some(view) = loading {
             div()
                 .id("page-content")
@@ -76,11 +84,11 @@ impl Shell {
                 .overflow_y_scroll()
                 .child(view)
                 .into_any_element()
-        } else if self.state.location().page == Page::Pods && self.has_detail() {
+        } else if location.page == Page::Pods && self.has_detail(&location) {
             div()
                 .flex_1()
                 .min_h_0()
-                .child(self.pods.clone())
+                .child(self.screens(ix).pods.clone())
                 .into_any_element()
         } else {
             div()
@@ -88,7 +96,7 @@ impl Shell {
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
-                .child(self.content(&palette, cx))
+                .child(self.content(ix, &location, &palette, cx))
                 .into_any_element()
         };
         div()
@@ -98,21 +106,25 @@ impl Shell {
             .min_w_0()
             .h_full()
             .bg(palette.editor)
-            .child(self.page_header(&palette, cx))
+            .child(self.page_header(ix, &location, &palette, cx))
             .child(body)
             .into_any_element()
     }
 
     fn workload_screen(
         &mut self,
+        ix: usize,
+        location: &Location,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Entity<WorkloadScreen>> {
-        let Some(target) = self.state.workload().cloned() else {
-            self.workload = None;
+        let pane = self.screens(ix).pane;
+        let Some(target) = location.workload().cloned() else {
+            self.screens_mut(ix).workload = None;
             return None;
         };
         let current = self
+            .screens(ix)
             .workload
             .as_ref()
             .filter(|(screen, _)| screen.read(cx).target() == &target)
@@ -121,31 +133,34 @@ impl Shell {
             return current;
         }
         let screen = cx.new(|cx| WorkloadScreen::new(target, window, cx));
-        let subscription = cx.subscribe(&screen, |shell, _, command: &Command, cx| {
-            shell.dispatch(command.clone(), cx);
+        let subscription = cx.subscribe(&screen, move |shell, _, command: &Command, cx| {
+            shell.pane_command(pane, command.clone(), cx);
         });
         screen.update(cx, WorkloadScreen::watch);
         self.sync_workload_yaml(&screen, cx);
-        self.workload = Some((screen.clone(), subscription));
+        self.screens_mut(ix).workload = Some((screen.clone(), subscription));
         Some(screen)
     }
 
     fn logs_screen(
         &mut self,
+        ix: usize,
+        location: &Location,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Entity<LogsScreen>> {
-        let location = self.state.location();
+        let pane = self.screens(ix).pane;
         let target = location
             .resource
             .clone()
             .zip(location.container.clone())
             .filter(|_| location.page == Page::Logs);
         let Some((pod, container)) = target else {
-            self.logs = None;
+            self.screens_mut(ix).logs = None;
             return None;
         };
         let current = self
+            .screens(ix)
             .logs
             .as_ref()
             .filter(|(screen, _)| screen.read(cx).shows(&pod, &container))
@@ -154,19 +169,17 @@ impl Shell {
             return current;
         }
         let screen = cx.new(|cx| LogsScreen::new(pod, container, window, cx));
-        let subscription = cx.subscribe(&screen, |shell, _, command: &Command, cx| {
-            shell.dispatch(command.clone(), cx);
+        let subscription = cx.subscribe(&screen, move |shell, _, command: &Command, cx| {
+            shell.pane_command(pane, command.clone(), cx);
         });
         screen.update(cx, LogsScreen::watch);
-        self.logs = Some((screen.clone(), subscription));
+        self.screens_mut(ix).logs = Some((screen.clone(), subscription));
         Some(screen)
     }
 
-    fn unavailable(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn unavailable(&self, location: &Location, cx: &mut Context<Self>) -> AnyElement {
         let palette = *cx.palette();
-        let name = self
-            .state
-            .location()
+        let name = location
             .cluster
             .as_ref()
             .map(|id| flock_core::tabs::cluster_name(id, &self.state.snapshot))
@@ -186,20 +199,28 @@ impl Shell {
             .into_any_element()
     }
 
-    fn page_header(&self, palette: &Palette, cx: &App) -> impl IntoElement {
-        let note = if self.state.location().page == Page::Pods {
-            Some(self.pods.read(cx).header_note())
+    fn page_header(
+        &self,
+        ix: usize,
+        location: &Location,
+        palette: &Palette,
+        cx: &App,
+    ) -> impl IntoElement {
+        let screens = self.screens(ix);
+        let has_detail = self.has_detail(location);
+        let note = if location.page == Page::Pods {
+            Some(screens.pods.read(cx).header_note())
         } else {
-            self.pages
-                .header_note(self.state.location().page, self.has_detail(), cx)
+            screens.pages.header_note(location.page, has_detail, cx)
         };
-        let status: Option<Vec<(String, gpui::Hsla)>> = match (self.selected_cluster(), note) {
+        let cluster = self.cluster_of(location);
+        let status: Option<Vec<(String, gpui::Hsla)>> = match (cluster, note) {
             (Some(_), Some((counts, text))) => Some(note_parts(&counts, text, palette)),
             (Some(cluster), None) => {
                 let text = format!("{} {}", cluster.status.glyph(), cluster.state);
                 Some(vec![(text, palette.status(cluster.status))])
             }
-            (None, _) if self.state.location().page == Page::GitOps => None,
+            (None, _) if location.page == Page::GitOps => None,
             (None, _) => Some(vec![(LIVE.to_owned(), palette.mute)]),
         };
         let status = status.map(|parts| {
@@ -214,9 +235,7 @@ impl Shell {
                         .map(|(text, color)| div().text_color(color).child(status_symbols(text))),
                 )
         });
-        let controls = self
-            .selected_cluster()
-            .and_then(|_| self.pages.header_controls(self.state.location().page, cx));
+        let controls = cluster.and_then(|_| screens.pages.header_controls(location.page, cx));
         div()
             .flex()
             .items_center()
@@ -231,41 +250,48 @@ impl Shell {
                 div()
                     .text_size(TEXT_TITLE)
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(self.state.location().page.title()),
+                    .child(location.page.title()),
             )
             .children(status)
             .child(div().flex_1())
             .children(controls)
     }
 
-    fn content(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn content(
+        &self,
+        ix: usize,
+        location: &Location,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let empty = self.loaded
             && self.state.snapshot.clusters.is_empty()
-            && self.state.location().page == Page::Overview;
+            && location.page == Page::Overview;
         if empty {
             let add = cx.listener(|this, _, window, cx| {
                 this.open_add_cluster(AddClusterStep::Pick, window, cx);
             });
             return empty_flock(palette, add).into_any_element();
         }
-        match self.state.location().page {
-            Page::Overview => self.flock.clone().into_any_element(),
-            Page::Problems => self.flock.clone().into_any_element(),
-            Page::GitOps => self.gitops.clone().into_any_element(),
-            page => self
+        let screens = self.screens(ix);
+        match location.page {
+            Page::Overview => screens.flock.clone().into_any_element(),
+            Page::Problems => screens.flock.clone().into_any_element(),
+            Page::GitOps => screens.gitops.clone().into_any_element(),
+            page => screens
                 .pages
-                .render(page, self.has_detail())
-                .unwrap_or_else(|| self.placeholder(palette)),
+                .render(page, self.has_detail(location))
+                .unwrap_or_else(|| self.placeholder(location, palette)),
         }
     }
 
-    pub(super) fn has_detail(&self) -> bool {
-        self.selected_cluster()
+    pub(super) fn has_detail(&self, location: &Location) -> bool {
+        self.cluster_of(location)
             .is_some_and(|c| self.state.snapshot.detail(&c.id).is_some())
     }
 
-    fn placeholder(&self, palette: &Palette) -> AnyElement {
-        if self.selected_cluster().is_some() {
+    fn placeholder(&self, location: &Location, palette: &Palette) -> AnyElement {
+        if self.cluster_of(location).is_some() {
             return Skeleton::rows().into_any_element();
         }
         let scope = format!("{} clusters", self.state.snapshot.clusters.len());
@@ -280,7 +306,7 @@ impl Shell {
                     .text_size(TEXT_LABEL)
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(palette.mute)
-                    .child(self.state.location().page.label().to_uppercase()),
+                    .child(location.page.label().to_uppercase()),
             )
             .child(div().text_color(palette.fg2).child(scope))
             .into_any_element()
