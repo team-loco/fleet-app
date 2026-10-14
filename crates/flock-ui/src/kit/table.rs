@@ -110,6 +110,7 @@ enum Cell<R> {
 pub enum Width {
     Fixed(Pixels),
     Flex { weight: f32, min: Pixels },
+    Auto { min: Pixels, max: Pixels },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -228,6 +229,10 @@ impl<R: 'static> Column<R> {
         self
     }
 
+    pub fn fit_status_by(self, text: impl Fn(&R) -> SharedString + 'static) -> Self {
+        self.fit_by(text, GLYPH_SLOT + SPACE_4)
+    }
+
     pub fn tooltip(mut self, text: impl Fn(&R) -> SharedString + 'static) -> Self {
         self.tooltip = Some(Rc::new(text));
         self
@@ -266,6 +271,7 @@ impl<R: 'static> Column<R> {
         match self.width {
             Width::Fixed(_) => COLUMN_MIN,
             Width::Flex { min, .. } => min.max(COLUMN_MIN),
+            Width::Auto { min, .. } => min.max(COLUMN_MIN),
         }
     }
 
@@ -276,6 +282,11 @@ impl<R: 'static> Column<R> {
 
     pub fn flex(mut self, weight: f32, min: Pixels) -> Self {
         self.width = Width::Flex { weight, min };
+        self
+    }
+
+    pub fn auto(mut self, min: Pixels, max: Pixels) -> Self {
+        self.width = Width::Auto { min, max };
         self
     }
 
@@ -313,6 +324,7 @@ fn cell_frame(width: Width, align: Align) -> Div {
     let cell = match width {
         Width::Fixed(width) => cell.w(width).flex_none(),
         Width::Flex { weight, min } => cell.flex_grow(weight).flex_basis(Pixels::ZERO).min_w(min),
+        Width::Auto { min, .. } => cell.w(min).flex_none(),
     };
     match align {
         Align::Start => cell,
@@ -329,10 +341,14 @@ pub fn min_row_width(widths: impl Iterator<Item = Width>, gap: Pixels, padding: 
         }
         total += match width {
             Width::Fixed(width) => width,
-            Width::Flex { min, .. } => min,
+            Width::Flex { min, .. } | Width::Auto { min, .. } => min,
         };
     }
     total
+}
+
+pub fn auto_width(content: Pixels, min: Pixels, max: Pixels) -> Pixels {
+    content.ceil().max(min).min(max.max(min))
 }
 
 pub fn resized(start: Pixels, delta: Pixels, min: Pixels) -> Pixels {
@@ -443,6 +459,7 @@ pub struct Table<R: 'static> {
     focus: FocusHandle,
     scope: SharedString,
     widths: HashMap<SharedString, Pixels>,
+    auto: Option<HashMap<SharedString, Pixels>>,
     measured: Rc<RefCell<Vec<Pixels>>>,
     drag: Option<Drag>,
     words: Vec<String>,
@@ -489,6 +506,7 @@ impl<R: 'static> Table<R> {
             type_ahead: TypeAhead::default(),
             scope: FLOCK_SCOPE.into(),
             widths,
+            auto: None,
             measured: Rc::default(),
             drag: None,
             words: Vec::new(),
@@ -538,9 +556,53 @@ impl<R: 'static> Table<R> {
     }
 
     fn width_of(&self, column: &Column<R>) -> Width {
-        self.widths
-            .get(&column.title)
-            .map_or(column.width, |width| Width::Fixed(*width))
+        if let Some(width) = self.widths.get(&column.title) {
+            return Width::Fixed(*width);
+        }
+        match column.width {
+            Width::Auto { min, .. } => {
+                let resolved = self.auto.as_ref().and_then(|auto| auto.get(&column.title));
+                Width::Fixed(resolved.copied().unwrap_or(min))
+            }
+            width @ (Width::Fixed(_) | Width::Flex { .. }) => width,
+        }
+    }
+
+    fn resolve_auto(&mut self, window: &Window) {
+        if self.auto.is_some() {
+            return;
+        }
+        let mut resolved = HashMap::new();
+        for column in self.columns.iter() {
+            let Width::Auto { min, max } = column.width else {
+                continue;
+            };
+            let content = self.content_width(column, window).unwrap_or(Pixels::ZERO);
+            resolved.insert(column.title.clone(), auto_width(content, min, max));
+        }
+        self.auto = Some(resolved);
+    }
+
+    fn content_width(&self, column: &Column<R>, window: &Window) -> Option<Pixels> {
+        let text = column.fit.as_ref()?;
+        let (family, size) = if column.mono {
+            (FONT_MONO, TEXT_MONO)
+        } else {
+            (FONT_SANS, TEXT_BODY)
+        };
+        let widest = self
+            .rows
+            .iter()
+            .map(|row| text_width(window, &text(row), family, size))
+            .fold(Pixels::ZERO, Pixels::max);
+        let (header_family, header_size) = match self.header {
+            Header::Mono => (FONT_MONO, TEXT_AXIS),
+            Header::Sans => (FONT_SANS, TEXT_SMALL),
+            Header::Hidden => (FONT_SANS, TEXT_SMALL),
+        };
+        let heading = text_width(window, &column.title, header_family, header_size)
+            + text_width(window, SORT_ASCENDING, header_family, header_size);
+        Some((widest + column.fit_extra).max(heading))
     }
 
     fn start_resize(
@@ -560,7 +622,7 @@ impl<R: 'static> Table<R> {
         let Some(start) = measured.or_else(|| {
             self.columns.get(column).map(|c| match self.width_of(c) {
                 Width::Fixed(width) => width,
-                Width::Flex { min, .. } => min,
+                Width::Flex { min, .. } | Width::Auto { min, .. } => min,
             })
         }) else {
             return;
@@ -602,26 +664,9 @@ impl<R: 'static> Table<R> {
             return;
         };
         let title = column.title.clone();
-        match &column.fit {
-            Some(text) => {
-                let (family, size) = if column.mono {
-                    (FONT_MONO, TEXT_MONO)
-                } else {
-                    (FONT_SANS, TEXT_BODY)
-                };
-                let widest = self
-                    .rows
-                    .iter()
-                    .map(|row| text_width(window, &text(row), family, size))
-                    .fold(Pixels::ZERO, Pixels::max);
-                let (header_family, header_size) = match self.header {
-                    Header::Mono => (FONT_MONO, TEXT_AXIS),
-                    Header::Sans => (FONT_SANS, TEXT_SMALL),
-                    Header::Hidden => (FONT_SANS, TEXT_SMALL),
-                };
-                let heading = text_width(window, &title, header_family, header_size)
-                    + text_width(window, SORT_ASCENDING, header_family, header_size);
-                let width = (widest + column.fit_extra).max(heading).max(column.min());
+        match self.content_width(column, window) {
+            Some(content) => {
+                let width = content.max(column.min());
                 self.widths.insert(title, width.ceil());
             }
             None => {
@@ -675,6 +720,7 @@ impl<R: 'static> Table<R> {
 
     pub fn rows(mut self, rows: Vec<R>) -> Self {
         self.rows = Rc::new(rows);
+        self.auto = None;
         self.resort();
         self
     }
@@ -732,6 +778,14 @@ impl<R: 'static> Table<R> {
         self
     }
 
+    pub fn set_empty(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
+        let text = text.into();
+        if self.empty != text {
+            self.empty = text;
+            cx.notify();
+        }
+    }
+
     pub fn row_status(mut self, status: impl Fn(&R) -> Option<Status> + 'static) -> Self {
         self.status = Some(Rc::new(status));
         self
@@ -776,6 +830,7 @@ impl<R: 'static> Table<R> {
 
     pub fn set_columns(&mut self, columns: Vec<Column<R>>, cx: &mut Context<Self>) {
         self.columns = Rc::new(columns);
+        self.auto = None;
         self.sort = None;
         self.resort();
         cx.notify();
@@ -785,6 +840,7 @@ impl<R: 'static> Table<R> {
         let selected_key = self.selected_key();
         self.record_flashes(&rows);
         self.rows = Rc::new(rows);
+        self.auto = None;
         self.hovered = self.hovered.filter(|&ix| ix < self.rows.len());
         self.selected = match (selected_key, &self.key) {
             (Some(wanted), Some(key)) => self.rows.iter().position(|row| key(row) == wanted),
@@ -1149,7 +1205,8 @@ impl<R: 'static> Focusable for Table<R> {
 }
 
 impl<R: 'static> Render for Table<R> {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.resolve_auto(window);
         let palette = *cx.palette();
         let header = (self.header != Header::Hidden).then(|| self.render_header(&palette, cx));
         let body = if self.rows.is_empty() {
@@ -1253,6 +1310,29 @@ mod tests {
             px(140. + 128. + 76. + 2. * 14. + 32.)
         );
         assert_eq!(min_row_width(std::iter::empty(), px(14.), px(32.)), px(32.));
+    }
+
+    #[test]
+    fn auto_width_follows_content_within_bounds() {
+        assert_eq!(auto_width(px(10.), px(40.), px(120.)), px(40.));
+        assert_eq!(auto_width(px(75.2), px(40.), px(120.)), px(76.));
+        assert_eq!(auto_width(px(300.), px(40.), px(120.)), px(120.));
+        assert_eq!(auto_width(px(300.), px(40.), px(20.)), px(40.));
+    }
+
+    #[test]
+    fn min_width_counts_auto_columns_at_their_minimum() {
+        let widths = [
+            Width::Auto {
+                min: px(40.),
+                max: px(200.),
+            },
+            Width::Fixed(px(60.)),
+        ];
+        assert_eq!(
+            min_row_width(widths.into_iter(), px(10.), px(0.)),
+            px(40. + 60. + 10.)
+        );
     }
 
     #[test]

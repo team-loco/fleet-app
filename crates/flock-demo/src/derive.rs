@@ -263,8 +263,8 @@ fn namespaces(template: &[Namespace], problems: &[&Problem], share: f32) -> Vec<
                 status: problems.status(),
                 pods: scaled_count(ns.pods, share),
                 problems,
-                cpu: ns.cpu * share,
-                memory: ns.memory * share,
+                cpu: ns.cpu.map(|cpu| cpu * share),
+                memory: ns.memory.map(|memory| memory * share),
                 ..ns.clone()
             }
         })

@@ -9,6 +9,8 @@ const ADDED: &str = "+";
 const REMOVED: &str = "−";
 const SEPARATOR: &str = " · ";
 const UNAVAILABLE: &str = "source unavailable";
+const NO_GIT_SOURCE: &str = "No Kustomization on a connected cluster builds from a git source.";
+const HISTORY_FAILED: &str = "Could not read the git history";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ChangesLog {
@@ -18,6 +20,7 @@ pub struct ChangesLog {
     pub lanes: Vec<Lane>,
     pub commits: Vec<Commit>,
     pub unavailable: Option<String>,
+    pub pending: bool,
 }
 
 impl ChangesLog {
@@ -29,6 +32,13 @@ impl ChangesLog {
         match &self.unavailable {
             Some(reason) => format!("{UNAVAILABLE}{SEPARATOR}{reason}"),
             None => format!("{} fetched {} ago", self.repository, age(self.fetched)),
+        }
+    }
+
+    pub fn empty_reason(&self) -> String {
+        match &self.unavailable {
+            Some(reason) => format!("{HISTORY_FAILED}{SEPARATOR}{reason}"),
+            None => NO_GIT_SOURCE.to_owned(),
         }
     }
 
@@ -259,6 +269,17 @@ pub fn change_counts(added: usize, removed: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_empty_log_names_its_reason() {
+        let mut log = ChangesLog::default();
+        assert_eq!(log.empty_reason(), NO_GIT_SOURCE);
+        log.unavailable = Some("podinfo: timed out".into());
+        assert_eq!(
+            log.empty_reason(),
+            "Could not read the git history · podinfo: timed out"
+        );
+    }
 
     fn line(change: LineChange, number: u32) -> PatchLine {
         PatchLine {

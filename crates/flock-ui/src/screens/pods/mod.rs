@@ -37,7 +37,8 @@ const NAMESPACE: Pixels = px(100.);
 const CONTAINERS: Pixels = px(72.);
 const RESTARTS: Pixels = px(64.);
 const AGE: Pixels = px(48.);
-const STATUS: Pixels = px(150.);
+const STATUS_MIN: Pixels = px(110.);
+const STATUS_MAX: Pixels = px(260.);
 const NAMESPACE_SELECT: Pixels = px(180.);
 const CONTAINER_SELECT: Pixels = px(160.);
 const INSPECTOR_LABEL: Pixels = px(96.);
@@ -831,7 +832,8 @@ fn columns() -> Vec<Column<Pod>> {
         Column::new("Status", |p: &Pod, _| {
             StatusText::new(p.status, p.reason.clone()).into_any_element()
         })
-        .fixed(STATUS)
+        .fit_status_by(|p: &Pod| p.reason.clone().into())
+        .auto(STATUS_MIN, STATUS_MAX)
         .sort_by_key(|p: &Pod| std::cmp::Reverse(p.status)),
     ]
 }

@@ -552,8 +552,8 @@ fn namespaces() -> Vec<Namespace> {
             phase: "Active".into(),
             pods: seed.pods,
             problems: seed.problems,
-            cpu: seed.cpu,
-            memory: seed.memory,
+            cpu: Some(seed.cpu),
+            memory: Some(seed.memory),
             age: days(seed.age_days),
         })
         .collect()

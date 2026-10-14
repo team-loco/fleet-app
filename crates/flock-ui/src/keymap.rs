@@ -281,7 +281,11 @@ pub const BINDINGS: &[Binding] = &[
         Group::Lists,
     ),
     Binding::built_in(&["enter"], "Open the selected row", Group::Lists),
-    Binding::built_in(&["escape"], "Close the inspector", Group::Lists),
+    Binding::built_in(
+        &["escape"],
+        "Close the inspector (not on Pods, where a pod is always selected)",
+        Group::Lists,
+    ),
     Binding::built_in(
         &["cmd-."],
         "Connect, disconnect or remove the highlighted cluster in the switcher",

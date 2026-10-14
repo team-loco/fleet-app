@@ -1,4 +1,5 @@
 use flock_core::history::Location;
+use flock_core::watch::WatchState;
 use flock_core::{Command, Counts, Page};
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
@@ -227,12 +228,16 @@ impl Shell {
     ) -> impl IntoElement {
         let screens = self.screens(ix);
         let has_detail = self.has_detail(location);
-        let note = if location.page == Page::Pods {
+        let loading = matches!(self.page_state(ix, location), Some(WatchState::Pending(_)));
+        let note = if loading {
+            None
+        } else if location.page == Page::Pods {
             Some(screens.pods.read(cx).header_note())
         } else {
             screens.pages.header_note(location.page, has_detail, cx)
         };
         let cluster = self.cluster_of(location);
+        let noted = note.is_some();
         let status: Option<Vec<(String, gpui::Hsla)>> = match (cluster, note) {
             (Some(_), Some((counts, text))) => Some(note_parts(&counts, text, palette)),
             (Some(cluster), None) => {
@@ -244,6 +249,14 @@ impl Shell {
         };
         let status = status.map(|parts| {
             div()
+                .debug_selector(move || {
+                    if noted {
+                        "page-note"
+                    } else {
+                        "page-cluster-state"
+                    }
+                    .to_owned()
+                })
                 .flex()
                 .gap(SPACE_4)
                 .font_family(FONT_MONO)

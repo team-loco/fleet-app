@@ -16,10 +16,10 @@ use gpui::{
 
 use crate::kit::status_symbols;
 use crate::kit::{
-    ActionMenu, Button, CodeView, Column, ConfirmDialog, DockState, ErrorState, InspectorPane,
-    KeyValue, Link, LogView, MenuItem, PageHeader, Rule, SectionHeader, SectionLabel, Segmented,
-    Skeleton, StatusText, Table, TableEvent, Terminal, TextFieldState, Toast, Width, confirm,
-    min_row_width, slide_in, toast,
+    ActionMenu, Button, CodeView, Column, ConfirmDialog, DockState, EmptyState, ErrorState,
+    InspectorPane, KeyValue, Link, LogView, MenuItem, PageHeader, Rule, SectionHeader,
+    SectionLabel, Segmented, Skeleton, StatusText, Table, TableEvent, Terminal, TextFieldState,
+    Toast, Width, confirm, min_row_width, slide_in, toast,
 };
 use crate::screens::{FullView, full_view_link};
 use crate::theme::{
@@ -35,6 +35,7 @@ gpui::actions!(workload, [ToggleActions, ShowLogs, ShowTerminal, ViewYaml]);
 const PODS: &str = "Pods";
 const PODS_HINT: &str = "click to follow logs";
 const ROLLOUT_HISTORY: &str = "Rollout history";
+const NO_HISTORY: &str = "No rollouts recorded for this workload.";
 const CONTAINER: &str = "Container";
 const ENVIRONMENT: &str = "Environment · resolved";
 const CURRENT: &str = "current";
@@ -48,7 +49,8 @@ const META_SEPARATOR: &str = " · ";
 const NAME_WEIGHT: f32 = 1.5;
 const NAME_MIN: Pixels = px(210.);
 const READY_WIDTH: Pixels = px(44.);
-const STATUS_WIDTH: Pixels = px(140.);
+const STATUS_MIN: Pixels = px(90.);
+const STATUS_MAX: Pixels = px(260.);
 const RESTARTS_WIDTH: Pixels = px(58.);
 const NODE_WIDTH: Pixels = px(178.);
 const CPU_WIDTH: Pixels = px(52.);
@@ -446,17 +448,25 @@ impl WorkloadScreen {
             .iter()
             .map(|revision| Self::revision_row(&workload.target.name, revision, &palette, cx))
             .collect();
+        let body: AnyElement = if workload.history_pending {
+            Skeleton::rows().into_any_element()
+        } else if rows.is_empty() {
+            EmptyState::new(NO_HISTORY)
+                .selector("workload-history-empty")
+                .into_any_element()
+        } else {
+            div()
+                .id("history-scroll")
+                .overflow_x_scroll()
+                .restrict_scroll_to_axis()
+                .child(div().min_w(history_min_width()).children(rows))
+                .into_any_element()
+        };
         div()
             .flex()
             .flex_col()
             .child(SectionHeader::new(ROLLOUT_HISTORY))
-            .child(
-                div()
-                    .id("history-scroll")
-                    .overflow_x_scroll()
-                    .restrict_scroll_to_axis()
-                    .child(div().min_w(history_min_width()).children(rows)),
-            )
+            .child(body)
     }
 
     fn revision_row(
@@ -798,7 +808,8 @@ fn compact_pod_columns() -> Vec<Column<Pod>> {
             StatusText::new(p.status, p.phase.clone()).into_any_element()
         })
         .mono()
-        .fixed(STATUS_WIDTH),
+        .fit_status_by(|p: &Pod| p.phase.clone().into())
+        .auto(STATUS_MIN, STATUS_MAX),
         Column::colored_text(
             "Restarts",
             |p: &Pod| p.restarts().to_string().into(),
@@ -826,7 +837,8 @@ fn pod_columns() -> Vec<Column<Pod>> {
             StatusText::new(p.status, p.phase.clone()).into_any_element()
         })
         .mono()
-        .fixed(STATUS_WIDTH),
+        .fit_status_by(|p: &Pod| p.phase.clone().into())
+        .auto(STATUS_MIN, STATUS_MAX),
         Column::colored_text(
             "Restarts",
             |p: &Pod| p.restarts().to_string().into(),

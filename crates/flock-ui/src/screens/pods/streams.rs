@@ -10,7 +10,8 @@ use gpui::{
 use super::PodsScreen;
 use crate::assets::DOWNLOAD;
 use crate::kit::{
-    Button, Dock, DockTab, IconButton, LogView, Terminal, TerminalEvent, TextField, Toast, toast,
+    Button, Dock, DockTab, EmptyState, IconButton, LogView, Terminal, TerminalEvent, TextField,
+    Toast, toast,
 };
 use crate::screens::workload::kit_line;
 use crate::theme::SPACE_3;
@@ -24,6 +25,9 @@ const TERMINAL_LABEL: &str = "Terminal";
 const FOLLOW: &str = "follow";
 const WRAP: &str = "wrap";
 const TIMESTAMPS: &str = "timestamps";
+const SELECT_FOR_LOGS: &str = "Select a pod to see its logs.";
+const SELECT_FOR_SHELL: &str = "Select a pod to open a shell.";
+const DOCK_EMPTY: &str = "pods-dock-empty";
 const DEBUG: &str = "debug";
 const DOWNLOAD_TOOLTIP: &str = "Download logs";
 const DOWNLOADS: &str = "Downloads";
@@ -371,6 +375,17 @@ impl PodsScreen {
         } else {
             detail.clone()
         };
+        if self.selected_pod().is_none() {
+            return Dock::new(&self.dock)
+                .tab(
+                    DockTab::new(LOGS_LABEL)
+                        .content(EmptyState::new(SELECT_FOR_LOGS).selector(DOCK_EMPTY)),
+                )
+                .tab(
+                    DockTab::new(TERMINAL_LABEL)
+                        .content(EmptyState::new(SELECT_FOR_SHELL).selector(DOCK_EMPTY)),
+                );
+        }
         Dock::new(&self.dock)
             .tab(
                 DockTab::new(LOGS_LABEL)

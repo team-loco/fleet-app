@@ -284,6 +284,7 @@ mod tests {
                     managed_by: None,
                     pods: Vec::new(),
                     revisions: Vec::new(),
+                    history_pending: false,
                     containers: Vec::new(),
                     events: Vec::new(),
                 },

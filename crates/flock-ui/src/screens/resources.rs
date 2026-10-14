@@ -20,8 +20,8 @@ use gpui::{
 use super::ScreenEvent;
 use crate::kit::{
     CodeView, Column, ConfirmDialog, EmptyState, FilterBar, FilterEvent, IconButton, Inspector,
-    MenuItem, Presence, Select, SelectEvent, ShowAll, Table, TableEvent, chip_label, confirm,
-    slide_in, slide_out,
+    MenuItem, Presence, Select, SelectEvent, ShowAll, Skeleton, Table, TableEvent, chip_label,
+    confirm, slide_in, slide_out,
 };
 use crate::screens::{ListShape, empty_list, new_tab_item};
 use crate::theme::SPACE_3;
@@ -455,15 +455,19 @@ impl ResourcesScreen {
             .on_click(cx.listener(|this, _, _, cx| this.close(cx)));
         let actions = div().flex().gap(SPACE_3).child(close);
         let subtitle = format!("{} · {}", self.kind.name(), row.namespace);
+        let yaml: AnyElement = if row.yaml.is_empty() {
+            Skeleton::rows().into_any_element()
+        } else {
+            CodeView::new("resource-yaml", row.yaml.clone())
+                .yaml()
+                .into_any_element()
+        };
         Inspector::new(INSPECTOR_ID, row.name.clone())
             .mono()
             .width(YAML_INSPECTOR)
             .status(row.status, subtitle)
             .actions(actions)
-            .section(
-                None,
-                CodeView::new("resource-yaml", row.yaml.clone()).yaml(),
-            )
+            .section(None, yaml)
             .into_any_element()
     }
 }

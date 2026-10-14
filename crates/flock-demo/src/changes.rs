@@ -38,6 +38,7 @@ pub fn log() -> ChangesLog {
             payments_pdb(),
         ],
         unavailable: None,
+        pending: false,
     }
 }
 

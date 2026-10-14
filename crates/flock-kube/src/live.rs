@@ -93,7 +93,7 @@ impl Backend for LiveBackend {
 
 enum Fetched {
     NodeUsage(ContextRef, Option<Vec<NodeUsage>>),
-    PodUsage(ContextRef, Vec<PodUsage>),
+    PodUsage(ContextRef, Option<Vec<PodUsage>>),
     Prometheus(ContextRef, Option<Prometheus>),
     Yaml(u64, ResourceRef, inspect::Inspected),
     Comparison(u64, Box<Comparison>),
@@ -354,7 +354,7 @@ impl Live {
         let handle = cluster.handle.clone();
         cluster.pod_usage_task = Some(TaskGuard::spawn(async move {
             let usage = tokio::time::timeout(timeout, handle.pod_usage(None)).await;
-            let usage = usage.ok().and_then(Result::ok).unwrap_or_default();
+            let usage = usage.ok().and_then(Result::ok);
             let _ = fetched.send(Fetched::PodUsage(key, usage)).await;
         }));
     }
