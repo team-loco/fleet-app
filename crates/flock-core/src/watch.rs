@@ -7,6 +7,7 @@ pub const NOT_STARTED: &str = "watch not started";
 pub enum WatchState {
     Pending(String),
     Synced,
+    Refreshing(String),
     Failed(String),
 }
 
@@ -15,18 +16,29 @@ impl WatchState {
         Self::Pending(step.into())
     }
 
+    pub fn is_loaded(&self) -> bool {
+        matches!(self, Self::Synced | Self::Refreshing(_))
+    }
+
     pub fn combine(states: impl IntoIterator<Item = Self>) -> Self {
         let mut pending = None;
+        let mut refreshing = None;
         for state in states {
             match state {
                 Self::Failed(reason) => return Self::Failed(reason),
                 Self::Pending(step) => {
                     pending.get_or_insert(step);
                 }
+                Self::Refreshing(reason) => {
+                    refreshing.get_or_insert(reason);
+                }
                 Self::Synced => {}
             }
         }
-        pending.map_or(Self::Synced, Self::Pending)
+        if let Some(step) = pending {
+            return Self::Pending(step);
+        }
+        refreshing.map_or(Self::Synced, Self::Refreshing)
     }
 
     pub fn expire(self, elapsed: Duration) -> Self {
@@ -64,6 +76,24 @@ mod tests {
             WatchState::combine(failed),
             WatchState::Failed("forbidden".into())
         );
+    }
+
+    #[test]
+    fn loaded_data_refreshing_ranks_below_a_page_that_never_loaded() {
+        let refreshing = WatchState::Refreshing("watch dropped".into());
+        assert!(refreshing.is_loaded());
+        assert!(WatchState::Synced.is_loaded());
+        assert!(!WatchState::pending(NOT_STARTED).is_loaded());
+        assert!(!WatchState::Failed("forbidden".into()).is_loaded());
+        assert_eq!(
+            WatchState::combine([WatchState::Synced, refreshing.clone()]),
+            refreshing
+        );
+        assert_eq!(
+            WatchState::combine([refreshing.clone(), WatchState::pending("Listing Pod")]),
+            WatchState::pending("Listing Pod")
+        );
+        assert_eq!(refreshing.clone().expire(WATCH_SYNC_TIMEOUT), refreshing);
     }
 
     #[test]

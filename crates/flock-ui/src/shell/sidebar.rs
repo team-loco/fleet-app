@@ -218,12 +218,12 @@ fn section_rows(
         .iter()
         .map(|&page| {
             let selected = page == cursor.unwrap_or(current);
+            let selector = format!("nav-{}", page.label().to_lowercase());
             let badges = counts
                 .get(&page)
-                .map(|c| badges(c, palette))
+                .map(|c| badges(c, &selector, palette))
                 .unwrap_or_default();
             let key = ElementId::NamedInteger("page".into(), page as u64);
-            let selector = format!("nav-{}", page.label().to_lowercase());
             nav_row(key, ROW_NAV, selected, palette)
                 .debug_selector(move || selector.clone())
                 .when(!selected, |row| row.text_color(palette.fg2))
@@ -242,17 +242,21 @@ fn section_rows(
         .collect()
 }
 
-fn badges(counts: &Counts, palette: &Palette) -> Vec<AnyElement> {
-    let flagged = counts
-        .badges()
-        .into_iter()
-        .map(|(status, n)| badge(format!("{} {n}", status.glyph()), palette.status(status)));
-    let total = counts.total.map(|n| badge(n.to_string(), palette.mute));
+fn badges(counts: &Counts, row: &str, palette: &Palette) -> Vec<AnyElement> {
+    let flagged = counts.badges().into_iter().map(|(status, n)| {
+        let selector = format!("{row}-{status:?}").to_lowercase();
+        let text = format!("{} {n}", status.glyph());
+        badge(selector, text, palette.status(status))
+    });
+    let total = counts
+        .total
+        .map(|n| badge(format!("{row}-total"), n.to_string(), palette.mute));
     flagged.chain(total).collect()
 }
 
-fn badge(text: String, color: Hsla) -> AnyElement {
+fn badge(selector: String, text: String, color: Hsla) -> AnyElement {
     div()
+        .debug_selector(move || selector)
         .ml(SPACE_4)
         .font_family(FONT_MONO)
         .text_size(TEXT_SMALL)

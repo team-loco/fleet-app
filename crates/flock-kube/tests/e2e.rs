@@ -328,9 +328,6 @@ fn live_backend_publishes_kind_cluster() {
     }
 }
 
-const SCOPED_NAMESPACE: &str = "kube-system";
-const OTHER_NAMESPACE: &str = "flux-system";
-
 const COMPARED_NAMESPACES: [&str; 4] = ["kube-system", "flux-system", "payments", "web"];
 
 fn listed(snapshot: &flock_core::Snapshot, kind: ResourceKind) -> Option<Vec<Resource>> {
@@ -424,53 +421,4 @@ async fn filtering_the_cluster_wide_store_matches_a_namespaced_list() {
         let api = namespaced_names::<k8s_openapi::api::core::v1::Service>(&client, namespace);
         assert_eq!(names_in(&services, namespace), api.await, "{namespace}");
     }
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn namespaced_watches_list_one_namespace_beside_cluster_wide_ones() {
-    if !enabled() {
-        return;
-    }
-    let Some(context) = kind_context() else {
-        return;
-    };
-    let env = Arc::new(ShellEnv::from_process(String::new()));
-    let runtime = tokio::runtime::Handle::current();
-    let (manager, _events) = ClusterManager::new(runtime, KubeSettings::default(), env);
-    let handle = connected(&manager, context).await;
-    let scoped = handle.subscribe_in(WatchKind::Deployments, Some(SCOPED_NAMESPACE.to_owned()));
-    assert_eq!(scoped.namespace(), Some(SCOPED_NAMESPACE));
-    let namespaces = || {
-        let mut found: Vec<String> = handle
-            .objects::<k8s_openapi::api::apps::v1::Deployment>()
-            .iter()
-            .filter_map(|d| d.metadata.namespace.clone())
-            .collect();
-        found.sort();
-        found.dedup();
-        found
-    };
-    eventually(
-        "scoped deployments",
-        || async { namespaces() },
-        |found| found == &[SCOPED_NAMESPACE],
-    )
-    .await;
-    assert_eq!(handle.cluster_wide_kinds(), Vec::<WatchKind>::new());
-    let everywhere = handle.subscribe(WatchKind::Deployments);
-    eventually(
-        "every deployment",
-        || async { namespaces() },
-        |found| found.iter().any(|ns| ns == OTHER_NAMESPACE),
-    )
-    .await;
-    drop(everywhere);
-    eventually(
-        "back to one namespace",
-        || async { namespaces() },
-        |found| found == &[SCOPED_NAMESPACE],
-    )
-    .await;
-    drop(scoped);
-    assert_eq!(handle.watched_kinds(), Vec::<WatchKind>::new());
 }

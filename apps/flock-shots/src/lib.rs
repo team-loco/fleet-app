@@ -66,14 +66,26 @@ fn demo(state: Option<StateFixture>) -> (Receiver<Update>, Sender<Command>) {
     (update_rx, command_tx)
 }
 
+type Feed = (Receiver<Update>, Sender<Command>);
+
+fn scripted() -> anyhow::Result<(Feed, Sender<Update>)> {
+    let (update_tx, update_rx) = async_channel::unbounded();
+    let (command_tx, command_rx) = async_channel::unbounded::<Command>();
+    std::thread::spawn(move || while command_rx.recv_blocking().is_ok() {});
+    let first = Update::Snapshot(Box::new(flock_demo::snapshot()));
+    update_tx
+        .try_send(first)
+        .map_err(|error| anyhow!("scripting the first snapshot: {error}"))?;
+    Ok(((update_rx, command_tx), update_tx))
+}
+
 fn view(
     screen: Screen,
     preset: &Preset,
-    state: Option<StateFixture>,
+    (updates, commands): Feed,
     window: &mut Window,
     cx: &mut App,
 ) -> (AnyView, Option<Entity<Shell>>) {
-    let (updates, commands) = demo(state);
     let store = cx.new(|cx| Store::new(updates, commands, cx));
     let view = root_view(screen, preset, store, window, cx);
     let shell = view.clone().downcast::<Shell>().ok();
@@ -243,7 +255,7 @@ impl Headless {
         cx.update(|cx| setup(appearance, highlights, cx))?;
         let mut shell = None;
         let window = cx.open_window(window_size(), |window, cx| {
-            let (view, built) = view(screen, preset, state, window, cx);
+            let (view, built) = view(screen, preset, demo(state), window, cx);
             shell = built;
             cx.new(|cx| Root::new(view, window, cx))
         })?;
@@ -327,18 +339,34 @@ impl Ui {
         Self::build(screen, Preset::default(), Appearance::Dark, Some(state))
     }
 
+    pub fn scripted(screen: Screen) -> anyhow::Result<(Self, Sender<Update>)> {
+        let (feed, updates) = scripted()?;
+        let ui = Self::build_from(screen, Preset::default(), Appearance::Dark, None, feed)?;
+        Ok((ui, updates))
+    }
+
     fn build(
         screen: Screen,
         preset: Preset,
         appearance: Appearance,
         state: Option<StateFixture>,
     ) -> anyhow::Result<Self> {
+        Self::build_from(screen, preset, appearance, state, demo(state))
+    }
+
+    fn build_from(
+        screen: Screen,
+        preset: Preset,
+        appearance: Appearance,
+        state: Option<StateFixture>,
+        feed: Feed,
+    ) -> anyhow::Result<Self> {
         let mut app =
             TestAppContext::build_with_text_system(TestDispatcher::new(SEED), None, text_system());
         app.update(|cx| setup(appearance, Highlights::default(), cx))?;
         let mut shell = None;
         let window = app.open_window(window_size(), |window, cx| {
-            let (view, built) = view(screen, &preset, state, window, cx);
+            let (view, built) = view(screen, &preset, feed, window, cx);
             shell = built;
             Root::new(view, window, cx)
         });

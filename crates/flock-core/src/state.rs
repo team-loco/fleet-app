@@ -249,6 +249,7 @@ impl AppState {
                         location.flux_object = None;
                     }
                 }
+                self.snapshot.keep_loaded(previous);
             }
             Update::Contexts(_) => {}
             Update::KubeconfigRejected(_) => {}

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::home::{ClusterMetrics, problems_badge};
 use crate::{
@@ -136,6 +136,31 @@ impl Snapshot {
         Status::worst(self.clusters.iter().map(|c| c.status))
     }
 
+    pub fn keep_loaded(&mut self, previous: Self) {
+        let Self { details, pods, .. } = previous;
+        for (id, detail) in details {
+            if self.connected_cluster(&id) && !self.details.contains_key(&id) {
+                self.details.insert(id, detail);
+            }
+        }
+        let unbuilt: BTreeSet<ClusterId> = self
+            .clusters
+            .iter()
+            .filter(|cluster| cluster.is_connected())
+            .filter(|cluster| cluster.nav.get(&Page::Pods).and_then(|c| c.total) > Some(0))
+            .filter(|cluster| !self.pods.iter().any(|pod| pod.cluster == cluster.id))
+            .map(|cluster| cluster.id.clone())
+            .collect();
+        let kept = pods
+            .into_iter()
+            .filter(|pod| unbuilt.contains(&pod.cluster));
+        self.pods.extend(kept);
+    }
+
+    fn connected_cluster(&self, id: &ClusterId) -> bool {
+        self.cluster(id).is_some_and(ClusterSummary::is_connected)
+    }
+
     pub fn remove_cluster(&mut self, id: &ClusterId) {
         self.clusters.retain(|c| &c.id != id);
         self.details.remove(id);
@@ -265,6 +290,54 @@ pub(crate) mod tests {
         );
         snapshot.remove_cluster(&id);
         assert_eq!(snapshot.page_state(&id, Page::Deployments), None);
+    }
+
+    fn pod_on(cluster: &str, name: &str) -> crate::pods::Pod {
+        crate::pods::Pod {
+            cluster: ClusterId::new(cluster),
+            name: name.into(),
+            ..crate::pods::Pod::default()
+        }
+    }
+
+    #[test]
+    fn data_a_snapshot_did_not_rebuild_stays_until_fresh_data_replaces_it() {
+        let mut previous = sample();
+        for id in ["a", "b", "c"] {
+            previous
+                .details
+                .insert(ClusterId::new(id), ClusterDetail::default());
+        }
+        previous.pods = vec![pod_on("a", "old-a"), pod_on("b", "old-b")];
+        let mut next = sample();
+        for cluster in &mut next.clusters {
+            cluster.nav.insert(Page::Pods, Counts::total(1));
+        }
+        let mut rebuilt = ClusterDetail::default();
+        let row = crate::resources::tests::resource("web", "podinfo", Status::Ok);
+        rebuilt
+            .resources
+            .insert(ResourceKind::Deployment, vec![row]);
+        next.details.insert(ClusterId::new("b"), rebuilt.clone());
+        next.pods = vec![pod_on("b", "new-b")];
+        next.keep_loaded(previous);
+        assert_eq!(
+            next.detail(&ClusterId::new("a")),
+            Some(&ClusterDetail::default())
+        );
+        assert_eq!(next.detail(&ClusterId::new("b")), Some(&rebuilt));
+        assert_eq!(next.detail(&ClusterId::new("c")), None);
+        let names: Vec<&str> = next.pods.iter().map(|pod| pod.name.as_str()).collect();
+        assert_eq!(names, ["new-b", "old-a"]);
+    }
+
+    #[test]
+    fn a_cluster_with_no_pods_drops_the_rows_it_had() {
+        let mut previous = sample();
+        previous.pods = vec![pod_on("a", "gone")];
+        let mut next = sample();
+        next.keep_loaded(previous);
+        assert_eq!(next.pods, Vec::new());
     }
 
     #[test]
