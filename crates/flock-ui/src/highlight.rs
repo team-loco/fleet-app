@@ -165,7 +165,6 @@ fn primary(palette: &mut Palette, seed: Seed, appearance: Appearance) {
             && contrast(on, acc) >= TEXT_CONTRAST
     });
     palette.acc = acc;
-    palette.focus = acc;
     palette.onacc = on;
     palette.accbg = acc.opacity(accbg);
 }
@@ -252,7 +251,6 @@ mod tests {
         check("acc on editor", p.acc, p.editor, TEXT_CONTRAST);
         check("acc on panel", p.acc, p.panel, TEXT_CONTRAST);
         check("onacc on acc", p.onacc, p.acc, TEXT_CONTRAST);
-        check("focus on editor", p.focus, p.editor, GLYPH_CONTRAST);
         check("acc glyph on chrome", p.acc, p.chrome, GLYPH_CONTRAST);
         check("acc glyph on hover", p.acc, p.hover, GLYPH_CONTRAST);
         check("selfg on sel", p.selfg, p.sel, TEXT_CONTRAST);
@@ -319,7 +317,6 @@ mod tests {
         let before = base(appearance);
         let accent = apply(before, appearance, Highlight::Orange, Highlight::Blue);
         assert_ne!(accent.acc, before.acc);
-        assert_eq!(accent.focus, accent.acc);
         assert_eq!((accent.sel, accent.selfg), (before.sel, before.selfg));
         assert_eq!((accent.fg, accent.editor), (before.fg, before.editor));
         let selection = apply(before, appearance, Highlight::Blue, Highlight::Green);

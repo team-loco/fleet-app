@@ -61,6 +61,7 @@ pub struct Shell {
     _updates: Task<()>,
     _store: Entity<Store>,
     _window_closed: Subscription,
+    _focus_recovery: Subscription,
     _appearance: Subscription,
     _palette_events: Subscription,
     _updater: Subscription,
@@ -94,6 +95,9 @@ impl Shell {
         let updater_changes = cx.observe_global::<crate::updater::Updater>(|_, cx| cx.notify());
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
+        let focus_recovery = cx.on_focus_lost(window, |this, window, cx| {
+            window.focus(&this.focus, cx);
+        });
         theme::follow_window(window, cx);
         let (palette, palette_events) = Self::new_palette(window, cx);
         let (switcher, switcher_events) = Self::new_switcher(window, cx);
@@ -121,6 +125,7 @@ impl Shell {
             _updates: listen,
             _store: store,
             _window_closed: window_closed,
+            _focus_recovery: focus_recovery,
             _appearance: appearance,
             _palette_events: palette_events,
             _updater: updater_changes,

@@ -217,7 +217,7 @@ fn section_rows(
         .pages
         .iter()
         .map(|&page| {
-            let selected = page == current;
+            let selected = page == cursor.unwrap_or(current);
             let badges = counts
                 .get(&page)
                 .map(|c| badges(c, palette))
@@ -227,12 +227,6 @@ fn section_rows(
             nav_row(key, ROW_NAV, selected, palette)
                 .debug_selector(move || selector.clone())
                 .when(!selected, |row| row.text_color(palette.fg2))
-                .border(RULE)
-                .border_color(if cursor == Some(page) {
-                    palette.focus
-                } else {
-                    gpui::transparent_black()
-                })
                 .child(div().flex_1().truncate().child(page.label()))
                 .children(badges)
                 .on_click(cx.listener(move |this, _, _, cx| {

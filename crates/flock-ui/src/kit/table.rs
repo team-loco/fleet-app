@@ -983,18 +983,17 @@ impl<R: 'static> Table<R> {
     fn render_rows(
         &mut self,
         range: Range<usize>,
-        window: &mut Window,
+        _: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let palette = *cx.palette();
-        let focused = self.focus.is_focused(window);
         let columns = self.columns.clone();
         let rows = self.rows.clone();
         range
             .filter_map(|position| {
                 let ix = *self.order.get(position)?;
                 let row = rows.get(ix)?;
-                Some(self.render_row(ix, row, &columns, focused, &palette, cx))
+                Some(self.render_row(ix, row, &columns, &palette, cx))
             })
             .collect()
     }
@@ -1004,7 +1003,6 @@ impl<R: 'static> Table<R> {
         ix: usize,
         row: &R,
         columns: &[Column<R>],
-        focused: bool,
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1020,11 +1018,6 @@ impl<R: 'static> Table<R> {
                 .into_any_element();
         }
         let selected = self.selected == Some(ix);
-        let outline = if focused {
-            palette.focus
-        } else {
-            palette.selline
-        };
         let status = self.status.as_ref().and_then(|status| status(row));
         let tint = status.and_then(|status| palette.tint(status));
         let hover = palette.hover;
@@ -1059,17 +1052,7 @@ impl<R: 'static> Table<R> {
             .text_color(palette.fg)
             .cursor_pointer()
             .when_some(tint, Styled::bg)
-            .when(selected, |row| {
-                row.bg(palette.sel).child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .size_full()
-                        .border(RULE)
-                        .border_color(outline),
-                )
-            })
+            .when(selected, |row| row.bg(palette.sel))
             .when(!selected, |row| row.hover(move |style| style.bg(hover)))
             .on_click(cx.listener(move |this, event, window, cx| {
                 this.click_row(ix, event, window, cx);
@@ -1166,17 +1149,8 @@ impl<R: 'static> Focusable for Table<R> {
 }
 
 impl<R: 'static> Render for Table<R> {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
-        let ring = (self.selected.is_none() && self.focus.is_focused(window)).then(|| {
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .border(RULE)
-                .border_color(palette.focus)
-        });
         let header = (self.header != Header::Hidden).then(|| self.render_header(&palette, cx));
         let body = if self.rows.is_empty() {
             div()
@@ -1241,7 +1215,6 @@ impl<R: 'static> Render for Table<R> {
             .when(self.fit, Styled::w_full)
             .child(content)
             .child(self.menu.clone())
-            .children(ring)
     }
 }
 

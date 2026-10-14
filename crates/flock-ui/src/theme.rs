@@ -198,8 +198,11 @@ pub const PALETTE_IN: Duration = Duration::from_millis(140);
 pub const PALETTE_OUT: Duration = Duration::from_millis(90);
 pub const FLASH: Duration = Duration::from_millis(900);
 pub const TOAST_TIMEOUT: Duration = Duration::from_secs(4);
-pub const SKELETON_SHIMMER: Duration = Duration::from_millis(1200);
-pub const SKELETON_SHIMMER_OPACITY: f32 = 0.6;
+pub const SKELETON_SHIMMER: Duration = Duration::from_millis(1800);
+pub const SKELETON_SHIMMER_OPACITY: f32 = 0.35;
+pub const SKELETON_GRADIENT_ANGLE: f32 = 90.;
+pub const SKELETON_GRADIENT_START: f32 = 0.;
+pub const SKELETON_GRADIENT_END: f32 = 1.;
 pub const SKELETON_SHIMMER_WIDTH: Pixels = px(80.);
 pub const SKELETON_ROWS: usize = 8;
 pub const SKELETON_NAME_WIDTH: Pixels = px(220.);
@@ -244,7 +247,6 @@ pub struct Palette {
     pub textsel_on_sel: Hsla,
     pub acc: Hsla,
     pub onacc: Hsla,
-    pub focus: Hsla,
     pub ok: Hsla,
     pub warn: Hsla,
     pub err: Hsla,
@@ -283,7 +285,6 @@ impl Palette {
             textsel_on_sel: rgb(0x002A_3F5F).into(),
             acc: rgb(0x0074_ADFF).into(),
             onacc: rgb(0x000C_1220).into(),
-            focus: rgb(0x0074_ADFF).into(),
             ok: rgb(0x0048_C78E).into(),
             warn: rgb(0x00E8_B04B).into(),
             err: rgb(0x00F2_6D6D).into(),
@@ -322,7 +323,6 @@ impl Palette {
             textsel_on_sel: rgb(0x00BC_D0F3).into(),
             acc: rgb(0x001F_5FD1).into(),
             onacc: rgb(0x00FF_FFFF).into(),
-            focus: rgb(0x001F_5FD1).into(),
             ok: rgb(0x0016_7A4C).into(),
             warn: rgb(0x0093_5800).into(),
             err: rgb(0x00C5_3030).into(),

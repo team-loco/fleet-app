@@ -1625,3 +1625,188 @@ fn text_selected_inside_a_selected_row_is_painted_with_its_own_colour() -> anyho
     }
     Ok(())
 }
+
+#[test]
+fn sidebar_shortcuts_survive_removing_the_focused_sidebar() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.press("cmd-shift-e")?;
+    for _ in 0..3 {
+        ui.press("cmd-b")?;
+        assert!(!ui.state().sidebar_open);
+        ui.press("cmd-b")?;
+        assert!(ui.state().sidebar_open);
+    }
+    ui.press("cmd-shift-e")?;
+    ui.click("collapse-sidebar")?;
+    ui.press("cmd-b")?;
+    assert!(ui.state().sidebar_open);
+    ui.press("cmd-k escape cmd-b cmd-b")?;
+    assert!(ui.state().sidebar_open);
+    Ok(())
+}
+
+#[test]
+fn app_shortcuts_work_with_content_and_inspector_fields_focused() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Resources)?;
+    ui.click("resources-Deployment-row-0")?;
+    ui.press("cmd-b")?;
+    assert!(!ui.state().sidebar_open);
+    ui.press("cmd-b")?;
+    assert!(ui.state().sidebar_open);
+    ui.press("cmd-t")?;
+    assert_eq!(ui.state().panes().focused().tabs().len(), 2);
+    ui.press("cmd-1")?;
+    assert_eq!(ui.state().location().page, Page::Deployments);
+    ui.press("cmd-2 cmd-w")?;
+    assert_eq!(ui.state().panes().focused().tabs().len(), 1);
+    ui.press("cmd-\\")?;
+    assert_eq!(ui.state().panes().panes().len(), 2);
+    ui.press("cmd-shift-c escape cmd-0")?;
+    assert!(ui.state().location().cluster.is_none());
+    ui.press("cmd-,")?;
+    ui.click("settings-clusters")?;
+    ui.click("default-namespace")?;
+    ui.type_text("future-namespace")?;
+    ui.press("cmd-b")?;
+    assert!(!ui.state().sidebar_open);
+    ui.press("cmd-b cmd-p escape cmd-shift-p escape cmd-k escape")?;
+    assert!(ui.state().sidebar_open);
+    Ok(())
+}
+
+#[test]
+fn default_namespace_picker_filters_cluster_namespaces_and_accepts_new_names() -> anyhow::Result<()>
+{
+    for (appearance, name) in [
+        (
+            flock_ui::theme::Appearance::Dark,
+            "namespace-picker-dark.png",
+        ),
+        (
+            flock_ui::theme::Appearance::Light,
+            "namespace-picker-light.png",
+        ),
+    ] {
+        let mut ui = Ui::with(Screen::Cluster, flock::Preset::default(), appearance)?;
+        let cluster = ui
+            .state()
+            .location()
+            .cluster
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("cluster"))?;
+        let names = ui
+            .state()
+            .snapshot
+            .details
+            .get(&cluster)
+            .ok_or_else(|| anyhow::anyhow!("details"))?
+            .namespaces
+            .clone();
+        let namespace = names
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("namespace"))?
+            .name
+            .clone();
+        ui.press("cmd-,")?;
+        ui.click("settings-clusters")?;
+        ui.click("default-namespace")?;
+        assert!(ui.bounds("default-namespace-option-0").is_some());
+        ui.type_text(&namespace)?;
+        ui.press("enter")?;
+        assert_eq!(
+            ui.state()
+                .snapshot
+                .catalog
+                .get(&cluster)
+                .and_then(|settings| settings.preferences.default_namespace.as_deref()),
+            Some(namespace.as_str())
+        );
+        ui.click("default-namespace")?;
+        ui.type_text("future-namespace")?;
+        let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+        ui.save_png(&dir.join(name))?;
+        ui.press("enter")?;
+        assert_eq!(
+            ui.state()
+                .snapshot
+                .catalog
+                .get(&cluster)
+                .and_then(|settings| settings.preferences.default_namespace.as_deref()),
+            Some("future-namespace")
+        );
+        ui.click("default-namespace")?;
+        ui.type_text("cancelled-namespace")?;
+        ui.press("escape")?;
+        assert_eq!(
+            ui.state()
+                .snapshot
+                .catalog
+                .get(&cluster)
+                .and_then(|settings| settings.preferences.default_namespace.as_deref()),
+            Some("future-namespace")
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn keyboard_selection_uses_the_row_fill_without_an_outline() -> anyhow::Result<()> {
+    const SCALE: f32 = 2.;
+    const EDGE: u32 = 1;
+    const INSIDE: u32 = 8;
+    for appearance in [
+        flock_ui::theme::Appearance::Dark,
+        flock_ui::theme::Appearance::Light,
+    ] {
+        let mut ui = Ui::with(Screen::Events, flock::Preset::default(), appearance)?;
+        ui.press("cmd-e home")?;
+        let bounds = ui
+            .bounds("events-row-0")
+            .ok_or_else(|| anyhow::anyhow!("selected event"))?;
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("focused.png");
+        ui.save_png(&path)?;
+        let pixels = image::open(path)?.to_rgba8();
+        let device = bounds.to_device_pixels(SCALE);
+        let raw_x = i32::from(device.origin.x);
+        let raw_y = i32::from(device.origin.y);
+        let x = u32::try_from(raw_x)?;
+        let y = u32::try_from(raw_y)?;
+        let sample = |dx: u32, dy: u32| pixels.get_pixel(x + dx, y + dy);
+        assert_eq!(sample(INSIDE, EDGE), sample(INSIDE, INSIDE));
+        assert_eq!(sample(EDGE, INSIDE), sample(INSIDE, INSIDE));
+        ui.press("down enter")?;
+        assert!(ui.bounds("close-event").is_some());
+        ui.press("cmd-shift-e home down")?;
+        let nodes = bounds_of(&mut ui, "nav-nodes")?.to_device_pixels(SCALE);
+        let events = bounds_of(&mut ui, "nav-events")?.to_device_pixels(SCALE);
+        let path = dir.path().join("sidebar.png");
+        ui.save_png(&path)?;
+        let pixels = image::open(path)?.to_rgba8();
+        let nodes_x = u32::try_from(i32::from(nodes.origin.x))?;
+        let nodes_y = u32::try_from(i32::from(nodes.origin.y))?;
+        let events_x = u32::try_from(i32::from(events.origin.x))?;
+        let events_y = u32::try_from(i32::from(events.origin.y))?;
+        let fill = pixels.get_pixel(nodes_x + INSIDE, nodes_y + INSIDE);
+        assert_eq!(pixels.get_pixel(nodes_x + INSIDE, nodes_y + EDGE), fill);
+        assert_ne!(pixels.get_pixel(events_x + INSIDE, events_y + INSIDE), fill);
+    }
+    Ok(())
+}
+
+#[test]
+fn app_shortcuts_work_with_the_terminal_focused_and_after_the_dock_closes() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::PodsShell)?;
+    ui.click("pod-open-shell")?;
+    ui.press("cmd-b")?;
+    assert!(!ui.state().sidebar_open);
+    ui.press("cmd-b")?;
+    assert!(ui.state().sidebar_open);
+    ui.press("cmd-j")?;
+    assert_eq!(ui.read(Shell::dock_open), Some(false));
+    ui.press("cmd-j")?;
+    assert_eq!(ui.read(Shell::dock_open), Some(true));
+    ui.press("cmd-k escape cmd-t")?;
+    assert_eq!(ui.state().panes().focused().tabs().len(), 2);
+    Ok(())
+}
