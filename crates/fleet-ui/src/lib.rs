@@ -9,6 +9,7 @@ pub mod settings;
 mod shell;
 mod store;
 pub mod theme;
+pub mod updater;
 
 pub use gallery::{Gallery, GalleryPage};
 pub use gpui_component::Root;
@@ -43,7 +44,9 @@ pub mod actions {
             FocusSidebar,
             FocusContent,
             Quit,
-            NewWindow
+            NewWindow,
+            CheckForUpdates,
+            RestartToUpdate
         ]
     );
 
@@ -60,6 +63,7 @@ pub fn init(
     assets::register_fonts(cx)?;
     theme::init(forced, cx);
     settings::init(cx);
+    updater::init(cx);
     kit::init(cx);
     screens::init(cx);
     Ok(())

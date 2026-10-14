@@ -84,7 +84,7 @@ pub struct Shell {
     pods: Entity<PodsScreen>,
     _pod_commands: Subscription,
     _flux_object: Subscription,
-    _screen_commands: [Subscription; 3],
+    _subscriptions: [Subscription; 4],
 }
 
 impl Shell {
@@ -131,10 +131,11 @@ impl Shell {
         let compare = cx.new(CompareScreen::new);
         let settings = cx.new(|cx| SettingsScreen::new(window, cx));
         let app_settings = cx.new(|cx| AppSettingsScreen::new(window, cx));
-        let screen_commands = [
+        let subscriptions = [
             Self::forward(&app_settings, cx),
             Self::forward(&compare, cx),
             Self::forward(&settings, cx),
+            cx.observe_global::<crate::updater::Updater>(|_, cx| cx.notify()),
         ];
         let pods = cx.new(|cx| PodsScreen::new(window, cx));
         let pod_commands = cx.subscribe(&pods, |this, _, command: &Command, cx| {
@@ -191,7 +192,7 @@ impl Shell {
             pods,
             _pod_commands: pod_commands,
             _flux_object: flux_commands,
-            _screen_commands: screen_commands,
+            _subscriptions: subscriptions,
         }
     }
 
@@ -560,6 +561,7 @@ impl Shell {
             Command::Rollback { .. } => {}
             Command::OpenFluxObject(_) => {}
             Command::Flux(..) => {}
+            Command::CheckForUpdates => crate::updater::check_now(cx),
         }
     }
 

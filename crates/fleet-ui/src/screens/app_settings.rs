@@ -1,4 +1,6 @@
-use fleet_core::app_settings::{Highlight, PollInterval, Rgb, SnapshotCap, ThemeChoice};
+use fleet_core::app_settings::{
+    CheckInterval, Highlight, PollInterval, Rgb, SnapshotCap, ThemeChoice,
+};
 use fleet_core::{AppSettings, Command, Page, Status};
 use gpui::{
     AnyElement, App, AppContext as _, Context, ElementId, Entity, EventEmitter, FontWeight, Hsla,
@@ -9,8 +11,8 @@ use gpui::{
 use crate::highlight;
 use crate::keymap;
 use crate::kit::{
-    InputEvent, Kbd, Link, SectionLabel, Segmented, TextField, TextFieldState, Toast, Toggle,
-    Tooltip, toast,
+    Button, InputEvent, Kbd, Link, SectionLabel, Segmented, TextField, TextFieldState, Toast,
+    Toggle, Tooltip, toast,
 };
 use crate::settings::{self, Settings};
 use crate::theme::{
@@ -18,6 +20,7 @@ use crate::theme::{
     ROW_DOCUMENT, RULE, SETTINGS_COLUMN, SPACE_1, SPACE_2, SPACE_4, SPACE_6, SPACE_7, SPACE_8,
     SWATCH, TEXT_SMALL, TEXT_TITLE, Theme,
 };
+use crate::updater::{self, Updater};
 
 const APPEARANCE: &str = "Appearance";
 const THEME: &str = "Theme";
@@ -51,6 +54,14 @@ const UNBUNDLED: &str =
     "Fleet is running outside Fleet.app, so macOS will not show notifications from this copy.";
 const SAVE_FAILED: &str = "Settings could not be saved";
 const SHORTCUTS: &str = "Keyboard shortcuts";
+const UPDATES: &str = "Updates";
+const AUTOMATIC: &str = "Check automatically";
+const AUTOMATIC_HINT: &str = "Look for a new release on GitHub at launch and then on an interval.";
+const INTERVAL: &str = "Check every";
+const INTERVAL_HINT: &str = "How often Fleet looks again while it runs.";
+const PRERELEASES: &str = "Include pre-releases";
+const PRERELEASES_HINT: &str = "Also offer beta and release-candidate builds.";
+const CHECK_NOW: &str = "Check now";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Slot {
@@ -104,6 +115,7 @@ pub struct AppSettingsScreen {
     invalid: [bool; 2],
     _settings: Subscription,
     _hex_events: [Subscription; 2],
+    _updater: Subscription,
 }
 
 impl EventEmitter<Command> for AppSettingsScreen {}
@@ -111,6 +123,7 @@ impl EventEmitter<Command> for AppSettingsScreen {}
 impl AppSettingsScreen {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let observe = cx.observe_global::<Settings>(|_, cx| cx.notify());
+        let updater = cx.observe_global::<Updater>(|_, cx| cx.notify());
         let current = settings::current(cx).clone();
         let hex = Slot::ALL.map(|slot| {
             let value = match slot.get(&current) {
@@ -137,6 +150,7 @@ impl AppSettingsScreen {
             invalid: [false; 2],
             _settings: observe,
             _hex_events: hex_events,
+            _updater: updater,
         }
     }
 
@@ -376,6 +390,69 @@ impl AppSettingsScreen {
     }
 }
 
+fn updates(current: &AppSettings, palette: &Palette, cx: &App) -> impl IntoElement {
+    let updates = current.updates;
+    let automatic =
+        Toggle::new("settings-update-automatic", updates.automatic).on_toggle(|on, _, cx| {
+            let on = *on;
+            change(cx, |s| s.updates.automatic = on);
+        });
+    let selected = CheckInterval::ALL
+        .iter()
+        .position(|interval| *interval == updates.interval)
+        .unwrap_or_default();
+    let interval = CheckInterval::ALL
+        .iter()
+        .fold(
+            Segmented::new("settings-update-interval"),
+            |control, interval| control.option(interval.label()),
+        )
+        .mono()
+        .selected(selected)
+        .on_select(|ix, _, cx| {
+            if let Some(interval) = CheckInterval::ALL.get(*ix).copied() {
+                change(cx, |s| s.updates.interval = interval);
+            }
+        });
+    let prereleases =
+        Toggle::new("settings-update-prereleases", updates.prereleases).on_toggle(|on, _, cx| {
+            let on = *on;
+            change(cx, |s| s.updates.prereleases = on);
+        });
+    let version = format!("Fleet {}", updater::version());
+    let state = updater::summary(&updater::status(cx).state);
+    let checked = updater::last_checked(cx);
+    let detail = state.map_or_else(|| checked.clone(), |state| format!("{state} · {checked}"));
+    let check = Button::new("settings-check-now", CHECK_NOW)
+        .small()
+        .on_click(|_, _, cx| updater::check_now(cx));
+    let about = div()
+        .flex()
+        .items_center()
+        .gap(SPACE_8)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w_0()
+                .gap(SPACE_1)
+                .child(div().text_color(palette.fg).child(version))
+                .child(
+                    div()
+                        .text_size(TEXT_SMALL)
+                        .text_color(palette.mute)
+                        .child(detail),
+                ),
+        )
+        .child(div().flex().flex_none().child(check));
+    section(UPDATES, palette)
+        .child(row(AUTOMATIC, AUTOMATIC_HINT, automatic, palette))
+        .child(row(INTERVAL, INTERVAL_HINT, interval, palette))
+        .child(row(PRERELEASES, PRERELEASES_HINT, prereleases, palette))
+        .child(about)
+}
+
 fn shortcuts(palette: &Palette) -> impl IntoElement {
     let groups = keymap::grouped().into_iter().map(|(group, bindings)| {
         let rows = bindings.into_iter().map(|binding| {
@@ -498,6 +575,7 @@ impl Render for AppSettingsScreen {
             .child(appearance.children(highlights))
             .child(Self::refresh(&current, &palette, cx))
             .child(Self::notifications(&current, &palette, cx))
+            .child(updates(&current, &palette, cx))
             .child(shortcuts(&palette));
         div()
             .flex()

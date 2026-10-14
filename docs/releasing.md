@@ -30,6 +30,15 @@ Pushing the tag starts `.github/workflows/release.yml` on `macos-latest`:
 The asset names already use the product's next name, Flock, so a later rename does not change what
 installed copies look for.
 
+## What installed copies do
+
+Fleet checks `releases/latest` (or the release list when "Include pre-releases" is on) 20 seconds
+after launch and then on the interval from Settings → Updates, and on Fleet → Check for Updates…,
+⌘⇧P "Fleet: Check for updates" or Settings → Check now. A newer release downloads in the background,
+is verified (signature and checksum) before anything is written, and is staged beside the running
+bundle; the status bar then offers "Restart to update". A copy run with `cargo run` or from a
+folder Fleet cannot write shows "Download Fleet <version>" linking to the release page instead.
+
 ## Build and sign locally
 
 ```sh

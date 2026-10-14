@@ -22,6 +22,7 @@ pub const LOGS_KEY: &str = "⌘L";
 pub const COMPARE_KEY: &str = "⌘⇧D";
 pub const OWNER_KEY: &str = "⌘⇧G";
 pub const STOP_FORWARD: &str = "Stop port-forward";
+pub const CHECK_FOR_UPDATES: &str = "Fleet: Check for updates";
 
 const GLOBAL_COMMANDS: &[(&str, &str, Command)] = &[
     ("Toggle sidebar", "⌘B", Command::ToggleSidebar),
@@ -450,8 +451,10 @@ fn command_mode_hits(snapshot: &Snapshot, query: &Query) -> Vec<Hit> {
         .into_iter()
         .flat_map(|summary| summary_commands(snapshot, summary));
     let global = global_commands(snapshot, "");
+    let updates = command_hit(CHECK_FOR_UPDATES.to_owned(), None, Command::CheckForUpdates);
     let mut scored: Vec<(i64, Hit)> = Vec::new();
-    for mut hit in global.into_iter().chain(contextual) {
+    let hits = global.into_iter().chain([updates]).chain(contextual);
+    for mut hit in hits {
         if scored.iter().any(|(_, kept)| kept.name == hit.name) {
             continue;
         }
@@ -704,7 +707,10 @@ mod tests {
             command_names(">owner cart"),
             ["Show Flux owner of deploy/cart"]
         );
-        assert_eq!(command_names(">"), ["Toggle sidebar", "Open settings"]);
+        assert_eq!(
+            command_names(">"),
+            ["Toggle sidebar", "Open settings", CHECK_FOR_UPDATES]
+        );
     }
 
     #[test]
@@ -818,6 +824,14 @@ mod tests {
         let results = search(&snapshot(), None, ">side");
         let names: Vec<_> = results.hits.iter().map(|hit| hit.name.as_str()).collect();
         assert_eq!(names, ["Toggle sidebar"]);
+    }
+
+    #[test]
+    fn command_mode_offers_the_update_check() {
+        let results = search(&snapshot(), None, ">check updates");
+        let hit = results.hits.first();
+        assert_eq!(hit.map(|hit| hit.name.as_str()), Some(CHECK_FOR_UPDATES));
+        assert_eq!(hit.map(|hit| &hit.command), Some(&Command::CheckForUpdates));
     }
 
     #[test]

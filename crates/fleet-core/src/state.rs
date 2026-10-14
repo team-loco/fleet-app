@@ -83,6 +83,7 @@ pub enum Command {
     Reauthenticate(ClusterId),
     ConfirmContext(ClusterId),
     Disconnect(ClusterId),
+    CheckForUpdates,
 }
 
 #[derive(Clone, Debug, PartialEq)]

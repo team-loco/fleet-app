@@ -149,3 +149,16 @@ Settled; change only with a new entry that says why.
     Picking a cluster retargets the active tab (decision 23) to the same page on that cluster,
     or the same object when it exists there, else that cluster's Overview; All clusters retargets
     it to Fleet home. The move is one history step, so ⌘[ returns to the previous cluster.
+26. **Self-update from GitHub Releases** (#157 and the updater PR): `fleet-update` owns checking,
+    downloading, verifying and installing; the UI talks to it only through `fleet_core::updater`
+    (`UpdaterRequest`, `UpdaterStatus`) and schedules checks itself (20 s after launch, then every
+    1, 6 or 24 hours; on by default; pre-releases opt-in). An update is installed only after its
+    ed25519 signature (key compiled in, `fleet_update::signature::PUBLIC_KEY`) and SHA-256 both
+    match; it is unzipped with `ditto` into `.fleet-update` beside the running bundle, its
+    `CFBundleIdentifier` and version are checked against the release, the quarantine attribute is
+    stripped and `codesign --verify` must pass. "Restart to update" moves the running bundle to
+    `.fleet-previous.app`, moves the staged one in (moving the old one back if that fails),
+    relaunches with `open -n` and quits; the next launch removes both leftovers. A copy that is not
+    a bundle (`cargo run`) or sits in a folder Fleet cannot write (App Translocation, a read-only
+    volume) links to the release page instead. Releases are arm64 only, assets
+    `Flock-<version>-arm64.zip` with `.sha256` and `.sig`.

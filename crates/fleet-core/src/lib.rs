@@ -30,6 +30,7 @@ pub mod stream;
 pub mod switcher;
 pub mod tabs;
 pub mod time;
+pub mod updater;
 pub mod watch;
 pub mod workload;
 
@@ -57,6 +58,7 @@ pub use status::{Counts, Status};
 pub use stream::{
     ExecEvent, ExecRequest, ExecTarget, LogLevel, LogLine, LogRequest, Sink, Source, TermSize,
 };
+pub use updater::{Trigger, UpdaterRequest, UpdaterState, UpdaterStatus};
 pub use watch::WatchState;
 pub use workload::{Workload, WorkloadKind};
 
