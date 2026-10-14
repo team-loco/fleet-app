@@ -121,7 +121,6 @@ struct Probe {
 }
 
 struct PageWatch {
-    cluster: ClusterId,
     handle: ClusterHandle,
     _builtin: Vec<Subscription>,
     _custom: TaskGuard,
@@ -131,15 +130,15 @@ struct PageWatch {
 
 struct Selection {
     cluster: ClusterId,
-    handle: ClusterHandle,
     page: Page,
 }
 
 pub struct LocoBackend {
     settings: LocoSettings,
     probes: BTreeMap<ClusterId, Probe>,
+    clusters: BTreeMap<ClusterId, ClusterHandle>,
     selection: Option<Selection>,
-    watch: Option<PageWatch>,
+    watches: BTreeMap<ClusterId, PageWatch>,
     pending: Arc<Mutex<BTreeMap<ResourceRef, Pending>>>,
     changed: Arc<AtomicBool>,
     updates: Sender<Update>,
@@ -151,8 +150,9 @@ impl LocoBackend {
             updates,
             settings,
             probes: BTreeMap::new(),
+            clusters: BTreeMap::new(),
             selection: None,
-            watch: None,
+            watches: BTreeMap::new(),
             pending: Arc::new(Mutex::new(BTreeMap::new())),
             changed: Arc::new(AtomicBool::new(false)),
         }
@@ -178,16 +178,19 @@ impl LocoBackend {
         }
         self.selection = selected
             .and_then(|id| clusters.iter().find(|(candidate, _)| *candidate == id))
-            .map(|(id, handle)| Selection {
+            .map(|(id, _)| Selection {
                 cluster: (*id).clone(),
-                handle: (*handle).clone(),
                 page,
             });
-        self.update_watch();
+        self.clusters = clusters
+            .into_iter()
+            .map(|(id, handle)| (id.clone(), handle.clone()))
+            .collect();
+        self.update_watches();
     }
 
     pub fn refresh(&mut self) -> bool {
-        self.update_watch();
+        self.update_watches();
         self.update_logs();
         self.changed.swap(false, Ordering::Relaxed)
     }
@@ -214,32 +217,39 @@ impl LocoBackend {
             .map(|probe| lock(&probe.observed).clone())
     }
 
-    fn update_watch(&mut self) {
-        let wanted = self.selection.as_ref().filter(|selection| {
-            is_loco_page(selection.page)
-                && self
-                    .observed(&selection.cluster)
-                    .is_some_and(|observed| observed.installed)
+    fn update_watches(&mut self) {
+        let installed: BTreeMap<&ClusterId, &ClusterHandle> = self
+            .clusters
+            .iter()
+            .filter(|(id, _)| self.observed(id).is_some_and(|observed| observed.installed))
+            .collect();
+        self.watches.retain(|id, watch| {
+            installed
+                .get(id)
+                .is_some_and(|handle| Arc::ptr_eq(&watch.handle.shared, &handle.shared))
         });
-        let Some(selection) = wanted else {
-            self.watch = None;
-            return;
-        };
-        let current = self.watch.as_ref().is_some_and(|watch| {
-            watch.cluster == selection.cluster
-                && Arc::ptr_eq(&watch.handle.shared, &selection.handle.shared)
-        });
-        if current {
-            return;
+        for (id, handle) in installed {
+            if !self.watches.contains_key(id) {
+                self.watches.insert(id.clone(), start_watch(handle));
+                self.changed.store(true, Ordering::Relaxed);
+            }
         }
-        let watch = start_watch(&selection.cluster, &selection.handle);
-        self.watch = Some(watch);
-        self.changed.store(true, Ordering::Relaxed);
     }
 
     fn update_logs(&mut self) {
-        let page = self.selection.as_ref().map(|selection| selection.page);
-        let Some(watch) = self.watch.as_mut() else {
+        let selected = self
+            .selection
+            .as_ref()
+            .filter(|selection| is_loco_page(selection.page));
+        let page = selected.map(|selection| selection.page);
+        let cluster = selected.map(|selection| selection.cluster.clone());
+        for (id, watch) in &mut self.watches {
+            if Some(id) != cluster.as_ref() {
+                watch.agent_log = None;
+                watch.container_logs.clear();
+            }
+        }
+        let Some(watch) = cluster.and_then(|id| self.watches.get_mut(&id)) else {
             return;
         };
         let settings = &self.settings;
@@ -296,17 +306,25 @@ impl LocoBackend {
         }
     }
 
-    pub fn snapshot(&self, clusters: &mut [ClusterSummary]) -> BTreeMap<ClusterId, LocoCluster> {
+    pub fn snapshot(
+        &self,
+        clusters: &mut [ClusterSummary],
+        only: Option<&ClusterId>,
+    ) -> BTreeMap<ClusterId, LocoCluster> {
         let now = Timestamp::now();
         let zone = TimeZone::system();
         let mut pending = lock(&self.pending);
         let mut loco = BTreeMap::new();
-        for (id, probe) in &self.probes {
+        let probes = self
+            .probes
+            .iter()
+            .filter(|(id, _)| only.is_none_or(|only| only == *id));
+        for (id, probe) in probes {
             let observed = lock(&probe.observed).clone();
             if !observed.installed {
                 continue;
             }
-            let watch = self.watch.as_ref().filter(|watch| &watch.cluster == id);
+            let watch = self.watches.get(id);
             let inputs = match watch {
                 Some(watch) => gather(id, watch, &observed),
                 None => Inputs {
@@ -515,7 +533,7 @@ async fn observe(client: &Client) -> Option<Observed> {
     })
 }
 
-fn start_watch(cluster: &ClusterId, handle: &ClusterHandle) -> PageWatch {
+fn start_watch(handle: &ClusterHandle) -> PageWatch {
     let builtin = BUILTIN_KINDS
         .iter()
         .map(|kind| handle.subscribe(kind.clone()))
@@ -541,7 +559,6 @@ fn start_watch(cluster: &ClusterId, handle: &ClusterHandle) -> PageWatch {
         drop(held);
     });
     PageWatch {
-        cluster: cluster.clone(),
         handle: handle.clone(),
         _builtin: builtin,
         _custom: custom,
@@ -736,6 +753,67 @@ mod tests {
         assert!(started.elapsed() < ROUND_TRIP * 2);
         assert_eq!(traffic.peak(), 2);
         assert_eq!(observed.map(|o| o.installed), Some(true));
+    }
+
+    fn installed_cluster() -> (crate::manager::ClusterManager, ClusterHandle) {
+        let group = format!("/apis/{API_VERSION}");
+        let listing = format!(
+            r#"{{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"{API_VERSION}","resources":[]}}"#
+        );
+        let (client, _) = crate::fake::client(Duration::ZERO, move |_, path| {
+            (path == group).then(|| (http::StatusCode::OK, listing.clone()))
+        });
+        crate::fake::handle(&client)
+    }
+
+    fn summary(id: &ClusterId) -> ClusterSummary {
+        ClusterSummary {
+            id: id.clone(),
+            name: id.to_string(),
+            status: flock_core::Status::Ok,
+            state: String::new(),
+            distro: String::new(),
+            region: String::new(),
+            version: None,
+            nodes: None,
+            problems: flock_core::Counts::default(),
+            nav: BTreeMap::new(),
+            metrics: None,
+        }
+    }
+
+    const PROBE_PATIENCE: Duration = Duration::from_secs(10);
+    const PROBE_POLL: Duration = Duration::from_millis(10);
+
+    #[tokio::test]
+    async fn every_cluster_with_loco_keeps_its_counts_off_the_loco_pages() {
+        let ids = [ClusterId::new("a"), ClusterId::new("b")];
+        let clusters = [installed_cluster(), installed_cluster()];
+        let (updates, _) = async_channel::unbounded();
+        let mut backend = LocoBackend::new(LocoSettings::default(), updates);
+        let handles = ids.iter().zip(clusters.iter().map(|(_, handle)| handle));
+        backend.sync(handles, ids.first(), Page::ClusterOverview);
+        let deadline = Instant::now() + PROBE_PATIENCE;
+        while ids
+            .iter()
+            .any(|id| !backend.observed(id).is_some_and(|o| o.installed))
+        {
+            assert!(Instant::now() < deadline, "Loco was never detected");
+            tokio::time::sleep(PROBE_POLL).await;
+        }
+        backend.refresh();
+        assert_eq!(backend.watches.len(), ids.len());
+        let mut summaries: Vec<ClusterSummary> = ids.iter().map(summary).collect();
+        let loco = backend.snapshot(&mut summaries, None);
+        assert_eq!(loco.len(), ids.len());
+        for summary in &summaries {
+            assert!(
+                summary.nav.contains_key(&Page::LocoApplications),
+                "{summary:?}"
+            );
+        }
+        let only = backend.snapshot(&mut summaries, ids.last());
+        assert_eq!(only.keys().collect::<Vec<_>>(), [&ids[1]]);
     }
 
     fn target(kind: &str, api_version: &str) -> ObjectRef {

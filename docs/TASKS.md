@@ -87,3 +87,4 @@ Spec column points at `design/`.
 | SPLIT1 | split right: pane-owned screens and backend scopes, two panes, compact pane views (#77) | claude | split-panes | done (#170, split UI PR) |
 | SEL1 | selectable, copyable text: kit `Selectable`/`SelectableText` on the window text selection, ⌘C/⌘A, terminal drag-select (#127) | claude | selectable-text | done (#173, adoption PR) |
 | POL | Global shortcut focus recovery, selection without outlines, subtle skeletons, editable default namespace picker (#179–#182) | codex | polish-focus-skeleton | done |
+| BG1 | every nav kind watched in the background; nav counts and badges for every cluster at all times; bounded event window (#177) | claude | background-watches | done |

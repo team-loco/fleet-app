@@ -212,3 +212,16 @@ Settled; change only with a new entry that says why.
     fields (`Workload::fields`) and pods; a Flux object its status block; logs only the lines. The
     first two end with "Open full view →", which joins both panes into one with that tab active, so
     no tab is lost. Every other page renders its full page.
+31. **Every nav kind is watched in the background** (#177, product owner; amends 21): from connect to
+    disconnect every connected cluster runs one cluster-wide watch per kind the sidebar shows
+    (`snapshot::BACKGROUND_KINDS`: nodes, namespaces, events, pods, the five workload kinds,
+    services, ingresses, ConfigMaps, Secrets, PVCs), the Flux kinds where Flux is served and the
+    Loco kinds on every cluster where `infra.loco.io` is detected, whatever page is open. Sidebar
+    counts and error and warning badges for every cluster come from these stores on every snapshot,
+    through status-only helpers the list rows share (`lists::counts`), and a kind shows a count once
+    its watch has synced. ConfigMaps and Secrets stay metadata-only and every store drops
+    `managedFields` and the last-applied annotation; workloads, services and PVCs keep spec and
+    status because their rows, their health, Compare and the workload page read them. Events keep
+    only the newest `KubeSettings::event_limit` per cluster (`resources::EventWindow`), the same
+    window the Events page lists. ReplicaSets, YAML, Helm history, logs and workload history stay
+    on demand.

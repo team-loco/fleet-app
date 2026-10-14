@@ -19,17 +19,25 @@ const CLUSTERS: [&str; 2] = ["kind-fleet-a", "kind-fleet-b"];
 const WINDOW: u64 = 7;
 const WAIT: Duration = Duration::from_secs(120);
 const DATA_DIR: &str = "data";
+const UNVISITED: [Page; 6] = [
+    Page::Namespaces,
+    Page::StatefulSets,
+    Page::Jobs,
+    Page::Services,
+    Page::ConfigMaps,
+    Page::Secrets,
+];
 
 fn settled(snapshot: &Snapshot, id: &ClusterId, page: Page) -> bool {
     let synced = snapshot.page_state(id, page) == Some(&WatchState::Synced);
     synced && snapshot.page_rows(id, page).is_some_and(|rows| rows > 0)
 }
 
-#[test]
-fn flux_pages_of_both_kind_clusters_settle_with_their_objects() {
-    if std::env::var(E2E_VAR).as_deref() != Ok("1") {
-        return;
-    }
+fn start_both() -> (
+    tempfile::TempDir,
+    async_channel::Receiver<Update>,
+    async_channel::Sender<Command>,
+) {
     let sources = DiscoverySources {
         kubeconfig_env: std::env::var_os("KUBECONFIG"),
         home: None,
@@ -68,6 +76,49 @@ fn flux_pages_of_both_kind_clusters_settle_with_their_objects() {
     let (updates_tx, updates) = async_channel::unbounded();
     let (commands, commands_rx) = async_channel::unbounded();
     Box::new(backend).start(updates_tx, commands_rx);
+    (home, updates, commands)
+}
+
+fn flagged_without_a_visit(snapshot: &Snapshot, id: &ClusterId) -> bool {
+    let Some(nav) = snapshot.cluster(id).map(|cluster| &cluster.nav) else {
+        return false;
+    };
+    let deployments = nav.get(&Page::Deployments).is_some_and(|c| c.err > 0);
+    let pods = nav.get(&Page::Pods).is_some_and(|c| c.err > 0);
+    let events = nav.get(&Page::Events).is_some_and(|c| c.warn + c.err > 0);
+    let listed = UNVISITED.iter().all(|page| nav.contains_key(page));
+    deployments && pods && events && listed
+}
+
+#[test]
+fn nav_counts_and_badges_arrive_for_kinds_nobody_opened() {
+    if std::env::var(E2E_VAR).as_deref() != Ok("1") {
+        return;
+    }
+    let (_home, updates, _commands) = start_both();
+    let ids: Vec<ClusterId> = CLUSTERS.into_iter().map(ClusterId::new).collect();
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "nav counts for unvisited kinds never arrived"
+        );
+        let Ok(Update::Snapshot(snapshot)) = updates.recv_blocking() else {
+            continue;
+        };
+        assert!(snapshot.details.is_empty(), "nothing was opened");
+        if ids.iter().all(|id| flagged_without_a_visit(&snapshot, id)) {
+            break;
+        }
+    }
+}
+
+#[test]
+fn flux_pages_of_both_kind_clusters_settle_with_their_objects() {
+    if std::env::var(E2E_VAR).as_deref() != Ok("1") {
+        return;
+    }
+    let (_home, updates, commands) = start_both();
     for name in CLUSTERS {
         let id = ClusterId::new(name);
         for page in [Page::Kustomizations, Page::HelmReleases, Page::Sources] {

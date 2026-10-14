@@ -1,8 +1,10 @@
 use std::any::Any;
+use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
+use jiff::Timestamp;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{
@@ -11,17 +13,20 @@ use k8s_openapi::api::core::v1::{
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use kube::api::{DynamicObject, PartialObjectMeta};
 use kube::core::{ApiResource, GroupVersionKind, NamespaceResourceScope};
-use kube::runtime::reflector::{self, Store};
+use kube::runtime::reflector::{self, ObjectRef, Store};
 use kube::runtime::{WatchStreamExt, watcher};
 use kube::{Api, Client, Resource};
 use serde::de::DeserializeOwned;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::detail::last_seen;
 use crate::error::Error;
+use crate::manager::lock;
 use crate::task::TaskGuard;
 
 const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
+const LISTING_SLACK: usize = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CustomKind {
@@ -241,6 +246,7 @@ pub fn spawn_custom(
 pub fn spawn_builtin(
     kind: &WatchKind,
     namespace: Option<&str>,
+    event_window: usize,
     runtime: &Handle,
     client: Client,
     signals: UnboundedSender<Signal>,
@@ -270,7 +276,7 @@ pub fn spawn_builtin(
         WatchKind::NetworkPolicies => {
             spawn_scoped::<PartialObjectMeta<NetworkPolicy>>(runtime, client, ns, signals)
         }
-        WatchKind::Events => spawn_scoped::<Event>(runtime, client, ns, signals),
+        WatchKind::Events => spawn_events(runtime, client, ns, event_window, signals),
         WatchKind::PersistentVolumeClaims => {
             spawn_scoped::<PersistentVolumeClaim>(runtime, client, ns, signals)
         }
@@ -283,11 +289,121 @@ pub fn snapshot<K: Watched>(running: &RunningWatch) -> Vec<Arc<K>>
 where
     K::DynamicType: Eq + std::hash::Hash + Clone,
 {
-    running
-        .store
-        .downcast_ref::<Store<K>>()
-        .map(Store::state)
+    if let Some(store) = running.store.downcast_ref::<Store<K>>() {
+        return store.state();
+    }
+    let Some(window) = running.store.downcast_ref::<EventWindow>() else {
+        return Vec::new();
+    };
+    let events: Box<dyn Any> = Box::new(window.state());
+    events
+        .downcast::<Vec<Arc<K>>>()
+        .map(|events| *events)
         .unwrap_or_default()
+}
+
+#[derive(Default)]
+struct WindowState {
+    live: Events,
+    listing: Option<Events>,
+}
+
+pub struct EventWindow {
+    limit: usize,
+    state: Mutex<WindowState>,
+}
+
+impl EventWindow {
+    pub fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            state: Mutex::new(WindowState::default()),
+        }
+    }
+
+    pub fn state(&self) -> Vec<Arc<Event>> {
+        lock(&self.state).live.values().cloned().collect()
+    }
+
+    pub fn apply(&self, event: &watcher::Event<Event>) {
+        let mut state = lock(&self.state);
+        match event {
+            watcher::Event::Init => state.listing = Some(HashMap::new()),
+            watcher::Event::InitApply(object) => {
+                let listing = state.listing.get_or_insert_default();
+                listing.insert(ObjectRef::from_obj(object), Arc::new(object.clone()));
+                if listing.len() > self.limit.saturating_mul(LISTING_SLACK) {
+                    keep_newest(listing, self.limit);
+                }
+            }
+            watcher::Event::InitDone => {
+                if let Some(mut listed) = state.listing.take() {
+                    keep_newest(&mut listed, self.limit);
+                    state.live = listed;
+                }
+            }
+            watcher::Event::Apply(object) => {
+                let live = &mut state.live;
+                live.insert(ObjectRef::from_obj(object), Arc::new(object.clone()));
+                if live.len() > self.limit {
+                    drop_oldest(live);
+                }
+            }
+            watcher::Event::Delete(object) => {
+                state.live.remove(&ObjectRef::from_obj(object));
+            }
+        }
+    }
+}
+
+type Events = HashMap<ObjectRef<Event>, Arc<Event>>;
+
+fn keep_newest(events: &mut Events, limit: usize) {
+    if events.len() <= limit {
+        return;
+    }
+    let mut ranked: Vec<(Option<Timestamp>, ObjectRef<Event>)> = events
+        .iter()
+        .map(|(key, event)| (last_seen(event), key.clone()))
+        .collect();
+    ranked.sort_unstable_by_key(|ranked| std::cmp::Reverse(ranked.0));
+    for (_, key) in ranked.into_iter().skip(limit) {
+        events.remove(&key);
+    }
+}
+
+fn drop_oldest(events: &mut Events) {
+    let oldest = events
+        .iter()
+        .min_by_key(|(_, event)| last_seen(event))
+        .map(|(key, _)| key.clone());
+    if let Some(oldest) = oldest {
+        events.remove(&oldest);
+    }
+}
+
+fn spawn_events(
+    runtime: &Handle,
+    client: Client,
+    namespace: Option<&str>,
+    limit: usize,
+    signals: UnboundedSender<Signal>,
+) -> RunningWatch {
+    let api: Api<Event> = match namespace {
+        Some(namespace) => Api::namespaced(client, namespace),
+        None => Api::all(client),
+    };
+    let window = Arc::new(EventWindow::new(limit));
+    let writer = window.clone();
+    let stream = watcher(api, watcher::Config::default())
+        .default_backoff()
+        .modify(trim_metadata)
+        .inspect_ok(move |event| writer.apply(event));
+    let _guard = runtime.enter();
+    RunningWatch {
+        store: window,
+        _task: TaskGuard::spawn(forward(stream, WatchKind::Events, signals)),
+    }
 }
 
 pub fn custom_snapshot(running: &RunningWatch) -> Vec<Arc<DynamicObject>> {
@@ -347,5 +463,56 @@ mod tests {
             panic!("labels lost")
         };
         assert_eq!(labels.get("app").map(String::as_str), Some("scale"));
+    }
+
+    fn event(name: &str, minute: u32) -> Event {
+        let parsed = serde_json::from_value(json!({
+            "metadata": { "name": name, "namespace": "apps" },
+            "involvedObject": {},
+            "lastTimestamp": format!("2026-10-14T10:{minute:02}:00Z")
+        }));
+        let Ok(event) = parsed else {
+            panic!("event fixture")
+        };
+        event
+    }
+
+    fn names(window: &EventWindow) -> Vec<String> {
+        let mut names: Vec<String> = window
+            .state()
+            .iter()
+            .filter_map(|event| event.metadata.name.clone())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn the_event_window_keeps_only_the_newest_events() {
+        let window = EventWindow::new(2);
+        window.apply(&watcher::Event::Init);
+        for (name, minute) in [("old", 1), ("newer", 5), ("newest", 9), ("older", 2)] {
+            window.apply(&watcher::Event::InitApply(event(name, minute)));
+        }
+        assert_eq!(names(&window), Vec::<String>::new());
+        window.apply(&watcher::Event::InitDone);
+        assert_eq!(names(&window), ["newer", "newest"]);
+        window.apply(&watcher::Event::Apply(event("latest", 12)));
+        assert_eq!(names(&window), ["latest", "newest"]);
+        window.apply(&watcher::Event::Apply(event("newest", 13)));
+        assert_eq!(names(&window), ["latest", "newest"]);
+        window.apply(&watcher::Event::Delete(event("latest", 12)));
+        assert_eq!(names(&window), ["newest"]);
+    }
+
+    #[test]
+    fn a_relist_replaces_the_window_only_when_it_completes() {
+        let window = EventWindow::new(3);
+        window.apply(&watcher::Event::Apply(event("kept", 1)));
+        window.apply(&watcher::Event::Init);
+        window.apply(&watcher::Event::InitApply(event("relisted", 2)));
+        assert_eq!(names(&window), ["kept"]);
+        window.apply(&watcher::Event::InitDone);
+        assert_eq!(names(&window), ["relisted"]);
     }
 }

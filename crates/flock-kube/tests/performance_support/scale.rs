@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 
 use flock_kube::discovery::{DiscoverySources, KubeContext, discover};
 use flock_kube::manager::{ClusterHandle, ClusterManager};
-use flock_kube::resources::WatchKind;
 use flock_kube::settings::KubeSettings;
 use flock_kube::shell_env::ShellEnv;
 use flock_kube::snapshot;
@@ -14,9 +13,9 @@ use kube::api::PartialObjectMeta;
 const CONTEXT: &str = "kind-fleet-b";
 pub const SCALE_NAMESPACE: &str = "flock-scale";
 pub const LIVE_CONFIGMAPS: usize = 3000;
-const LIVE_SERVICES: usize = 1500;
+pub const LIVE_SERVICES: usize = 1500;
 pub const LIVE_PODS: usize = 200;
-const LIVE_DEPLOYMENTS: usize = 400;
+pub const LIVE_DEPLOYMENTS: usize = 400;
 const LIVE_EVENTS: usize = 2000;
 pub const WAIT: Duration = Duration::from_secs(120);
 const POLL: Duration = Duration::from_millis(100);
@@ -52,7 +51,7 @@ pub fn context() -> (tempfile::TempDir, DiscoverySources, KubeContext) {
     (directory, sources, context)
 }
 
-async fn wait_for_stores(handle: &ClusterHandle) {
+async fn wait_for_stores(handle: &ClusterHandle, event_window: usize) {
     let deadline = Instant::now() + WAIT;
     loop {
         let maps = handle.objects::<PartialObjectMeta<ConfigMap>>();
@@ -87,17 +86,7 @@ async fn wait_for_stores(handle: &ClusterHandle) {
                 .filter(|d| count(d.metadata.namespace.as_deref()))
                 .count()
                 == LIVE_DEPLOYMENTS
-            && events
-                .iter()
-                .filter(|e| {
-                    count(e.metadata.namespace.as_deref())
-                        && e.metadata
-                            .name
-                            .as_deref()
-                            .is_some_and(|name| name.starts_with("scale-event-"))
-                })
-                .count()
-                == LIVE_EVENTS
+            && events.len() >= LIVE_EVENTS.min(event_window)
         {
             break;
         }
@@ -118,21 +107,10 @@ pub async fn populated_stores(
     let (manager, _events) =
         ClusterManager::new(tokio::runtime::Handle::current(), settings.clone(), env);
     let handle = manager.connect(context.clone());
-    let kinds = [
-        WatchKind::Pods,
-        WatchKind::Nodes,
-        WatchKind::ConfigMaps,
-        WatchKind::Services,
-    ];
-    let mut subscriptions: Vec<_> = kinds
+    let subscriptions: Vec<_> = snapshot::BACKGROUND_KINDS
         .into_iter()
         .map(|kind| handle.subscribe(kind))
         .collect();
-    subscriptions.extend(
-        snapshot::OVERVIEW_KINDS
-            .into_iter()
-            .map(|kind| handle.subscribe(kind)),
-    );
-    wait_for_stores(&handle).await;
+    wait_for_stores(&handle, settings.event_limit).await;
     (manager, handle, subscriptions)
 }

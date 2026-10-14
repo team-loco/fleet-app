@@ -96,7 +96,11 @@ the real LiveBackend channel into the UI's `AppState`. Twelve isolated probes, o
 reach `AppState` with a median under 300 ms including the API request; their maximum after the API
 acknowledged the patch must stay under 1 s, so a stalled API server on a loaded host does not fail
 the run. A ten-second storm of eight concurrent pod patchers then checks that snapshots stay at most
-one per snapshot interval while probes still get through. Each line prints the load average. This
+one per snapshot interval while probes still get through. Each line prints the load average. A separate
+heap test starts the LiveBackend on kind-fleet-b and reports the time to the first Pods and
+Deployments counts after connect, then the process heap and the API server's watch count (the sum of
+`apiserver_longrunning_requests` with `verb="WATCH"`, minus the count before Flock connected) after
+connect and on the ConfigMaps page. This
 measures state availability, not a rendered gpui frame. The API server drops Events after its one-hour
 event TTL, so re-run `mise run e2e:scale` before benchmarking an older scenario. The heap test uses [dhat](https://docs.rs/dhat/latest/dhat/) in its own profiling scope;
 timing measurements run without profiling. RSS is also reported, but includes clients and runtime

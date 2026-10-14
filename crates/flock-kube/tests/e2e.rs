@@ -1,4 +1,6 @@
-use flock_core::{Backend, ClusterId, Command, ContextRef, NewCluster, Page, Update};
+use flock_core::filter::TextFilter;
+use flock_core::resources::{Resource, filter_resources};
+use flock_core::{Backend, ClusterId, Command, ContextRef, NewCluster, Page, ResourceKind, Update};
 use flock_kube::LiveBackend;
 use flock_kube::checks::{CheckKind, CheckStatus, Verdict, run_checks};
 use flock_kube::discovery::{DiscoverySources, KubeContext, discover};
@@ -292,7 +294,7 @@ fn live_backend_publishes_kind_cluster() {
     Box::new(backend).start(updates_tx, commands_rx);
     let mut everywhere = flock_core::Preferences::default();
     everywhere.select_namespace(
-        flock_core::ResourceKind::Deployment.name(),
+        ResourceKind::Deployment.name(),
         flock_core::settings::NamespaceSelection::All,
     );
     let all_namespaces = Command::SetPreferences(ClusterId::new(CONTEXT), everywhere);
@@ -329,45 +331,51 @@ fn live_backend_publishes_kind_cluster() {
 const SCOPED_NAMESPACE: &str = "kube-system";
 const OTHER_NAMESPACE: &str = "flux-system";
 
-fn deployment_namespaces(snapshot: &flock_core::Snapshot) -> Vec<String> {
-    let mut namespaces: Vec<String> = snapshot
-        .detail(&ClusterId::new(CONTEXT))
-        .map(|detail| detail.resources(flock_core::ResourceKind::Deployment))
-        .unwrap_or_default()
-        .iter()
-        .map(|row| row.namespace.clone())
+const COMPARED_NAMESPACES: [&str; 4] = ["kube-system", "flux-system", "payments", "web"];
+
+fn listed(snapshot: &flock_core::Snapshot, kind: ResourceKind) -> Option<Vec<Resource>> {
+    let rows = snapshot.detail(&ClusterId::new(CONTEXT))?.resources(kind);
+    (!rows.is_empty()).then(|| rows.to_vec())
+}
+
+fn names_in(rows: &[Resource], namespace: &str) -> Vec<String> {
+    let mut names: Vec<String> = filter_resources(rows, Some(namespace), &TextFilter::default())
+        .into_iter()
+        .map(|row| row.name)
         .collect();
-    namespaces.sort();
-    namespaces.dedup();
-    namespaces
+    names.sort();
+    names
 }
 
-fn wait_for(
-    updates: &async_channel::Receiver<Update>,
-    what: &str,
-    done: impl Fn(&[String]) -> bool,
-) {
-    let deadline = std::time::Instant::now() + WAIT;
-    let mut last = Vec::new();
-    while std::time::Instant::now() < deadline {
-        let Ok(Update::Snapshot(snapshot)) = updates.recv_blocking() else {
-            panic!("backend stopped");
-        };
-        last = deployment_namespaces(&snapshot);
-        if done(&last) {
-            return;
-        }
-    }
-    panic!("{what}; last deployment namespaces: {last:?}");
+async fn namespaced_names<K>(client: &kube::Client, namespace: &str) -> Vec<String>
+where
+    K: kube::Resource<Scope = k8s_openapi::NamespaceResourceScope, DynamicType = ()>
+        + Clone
+        + serde::de::DeserializeOwned
+        + std::fmt::Debug,
+{
+    let api: Api<K> = Api::namespaced(client.clone(), namespace);
+    let Ok(list) = api.list(&kube::api::ListParams::default()).await else {
+        panic!("listing {namespace} failed");
+    };
+    let mut names: Vec<String> = list.items.iter().map(ResourceExt::name_any).collect();
+    names.sort();
+    names
 }
 
-#[test]
-fn live_backend_watches_only_the_chosen_namespace() {
+#[tokio::test(flavor = "multi_thread")]
+async fn filtering_the_cluster_wide_store_matches_a_namespaced_list() {
     if !enabled() {
         return;
     }
     let Some(context) = kind_context() else {
         return;
+    };
+    let env = ShellEnv::from_process(String::new());
+    let settings = KubeSettings::default();
+    let Ok(client) = flock_kube::client::connect(&context, &env, settings.connect_timeout).await
+    else {
+        panic!("client");
     };
     let home = kind_only_home(std::slice::from_ref(&context));
     let sources = DiscoverySources {
@@ -384,34 +392,38 @@ fn live_backend_watches_only_the_chosen_namespace() {
         name: CONTEXT.to_owned(),
     };
     assert!(store.add(&[added]).is_ok());
-    let backend = LiveBackend::new(KubeSettings::default(), sources, store);
+    let backend = LiveBackend::new(settings, sources, store);
     let (updates_tx, updates) = async_channel::unbounded();
     let (commands, commands_rx) = async_channel::unbounded();
     Box::new(backend).start(updates_tx, commands_rx);
     let cluster = ClusterId::new(CONTEXT);
-    let choose = |namespace: Option<&str>| {
-        let mut preferences = flock_core::Preferences::default();
-        preferences.select_namespace(
-            flock_core::ResourceKind::Deployment.name(),
-            flock_core::settings::NamespaceSelection::of(namespace),
-        );
-        Command::SetPreferences(cluster.clone(), preferences)
-    };
     for command in [
-        choose(Some(SCOPED_NAMESPACE)),
         Command::SelectCluster(Some(cluster.clone())),
         Command::SelectPage(Page::Deployments),
     ] {
-        assert!(commands.send_blocking(command).is_ok());
+        assert!(commands.send(command).await.is_ok());
     }
-    wait_for(&updates, "only kube-system deployments", |namespaces| {
-        namespaces == [SCOPED_NAMESPACE]
-    });
-    assert!(commands.send_blocking(choose(None)).is_ok());
-    wait_for(&updates, "deployments from every namespace", |namespaces| {
-        namespaces.iter().any(|ns| ns == OTHER_NAMESPACE)
-            && namespaces.iter().any(|ns| ns == SCOPED_NAMESPACE)
-    });
+    let deadline = tokio::time::Instant::now() + WAIT;
+    let (deployments, services) = loop {
+        let received = tokio::time::timeout_at(deadline, updates.recv()).await;
+        let Ok(Ok(update)) = received else {
+            panic!("no snapshot with deployments and services");
+        };
+        let Update::Snapshot(snapshot) = update else {
+            continue;
+        };
+        let deployments = listed(&snapshot, ResourceKind::Deployment);
+        let services = listed(&snapshot, ResourceKind::Service);
+        if let (Some(deployments), Some(services)) = (deployments, services) {
+            break (deployments, services);
+        }
+    };
+    for namespace in COMPARED_NAMESPACES {
+        let api = namespaced_names::<k8s_openapi::api::apps::v1::Deployment>(&client, namespace);
+        assert_eq!(names_in(&deployments, namespace), api.await, "{namespace}");
+        let api = namespaced_names::<k8s_openapi::api::core::v1::Service>(&client, namespace);
+        assert_eq!(names_in(&services, namespace), api.await, "{namespace}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

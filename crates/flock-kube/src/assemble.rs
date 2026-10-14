@@ -1,17 +1,23 @@
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use flock_core::home::{ClusterMetrics, Problem, problem_counts};
 use flock_core::overview::{Overview, Utilization};
-use flock_core::{ClusterDetail, ClusterId, ClusterSummary, Counts, Page, ResourceRef};
+use flock_core::{
+    ClusterDetail, ClusterId, ClusterSummary, Counts, Page, ResourceKind, ResourceRef, WatchState,
+};
 use jiff::Timestamp;
 use k8s_openapi::api::core::v1::{Event, Namespace, Node, Pod};
 
 use crate::detail::{self, PodIndex, capacity};
 use crate::flux::{self, FluxHealth};
-use crate::lists::watched_lists;
+use crate::lists::{self, watched_lists};
 use crate::manager::{ClusterHandle, ConnectionStatus};
 use crate::metrics::{NodeUsage, PodUsage};
 use crate::probe::PrometheusTarget;
 use crate::problems::{connection_problem, node_problems, pod_problems};
-use crate::snapshot::{pod_counts, summarize};
+use crate::resources::WatchKind;
+use crate::snapshot::{Facts, count, node_counts, page_kind, pod_counts, summarize};
 use crate::usage::{UsageRing, sample};
 
 const PERCENT: f32 = 100.;
@@ -42,7 +48,7 @@ impl Extras {
         }
     }
 
-    pub fn record(&mut self, nodes: &[std::sync::Arc<Node>], usage: Option<Vec<NodeUsage>>) {
+    pub fn record(&mut self, nodes: &[Arc<Node>], usage: Option<Vec<NodeUsage>>) {
         if let Some(sample) = usage.as_deref().and_then(|usage| sample(nodes, usage)) {
             self.ring.push(sample);
         }
@@ -97,30 +103,27 @@ pub fn cluster(
         flux: flux_counts,
         revision: flux::revision(objects),
     });
-    let counts = problem_counts(&problems);
-    let mut summary = summarize(id.clone(), id.to_string(), handle, counts, metrics);
+    let index = PodIndex::build(&pods, now);
+    let events = handle.objects::<Event>();
+    let facts = Facts {
+        problems: problem_counts(&problems),
+        metrics,
+        nodes: &nodes,
+        nav: nav(handle, &nodes, pod_tally, &events, &index),
+    };
+    let summary = summarize(id.clone(), id.to_string(), handle, facts);
     let pod_rows = if selection.is_some_and(|selection| selection.pod_rows) {
-        crate::pods::pods(
-            id,
-            &pods,
-            &handle.objects::<Event>(),
-            &extras.pod_usage,
-            now,
-        )
+        crate::pods::pods(id, &pods, &events, &extras.pod_usage, now)
     } else {
         Vec::new()
     };
-    if selection.is_some() {
-        let nav = Counts {
-            warn: 0,
-            ..pod_tally
-        };
-        summary.nav.insert(Page::Pods, nav);
-    }
     let detail = selection.map(|selection| {
-        let detail = cluster_detail(handle, extras, &pods, &nodes, selection, now);
-        summary.nav.extend(detail.nav());
-        detail
+        let parts = Parts {
+            nodes: &nodes,
+            events: &events,
+            index: &index,
+        };
+        cluster_detail(handle, extras, &parts, selection, now)
     });
     Built {
         summary,
@@ -134,15 +137,55 @@ pub fn cluster(
     }
 }
 
+fn nav(
+    handle: &ClusterHandle,
+    nodes: &[Arc<Node>],
+    pods: Counts,
+    events: &[Arc<Event>],
+    index: &PodIndex,
+) -> BTreeMap<Page, Counts> {
+    let synced = |kind: &WatchKind| handle.watch_state(kind) == WatchState::Synced;
+    let mut nav = BTreeMap::new();
+    if synced(&WatchKind::Nodes) {
+        nav.insert(Page::Nodes, node_counts(nodes));
+    }
+    if synced(&WatchKind::Pods) {
+        nav.insert(Page::Pods, Counts { warn: 0, ..pods });
+    }
+    if synced(&WatchKind::Namespaces) {
+        let namespaces = handle.objects::<Namespace>().len();
+        nav.insert(Page::Namespaces, Counts::total(count(namespaces)));
+    }
+    if synced(&WatchKind::Events) {
+        nav.insert(Page::Events, detail::event_counts(events));
+    }
+    for kind in ResourceKind::ALL {
+        let page = kind.page();
+        if page_kind(page).is_some_and(|watched| synced(&watched)) {
+            nav.insert(page, lists::counts(handle, kind, index));
+        }
+    }
+    nav
+}
+
+struct Parts<'a> {
+    nodes: &'a [Arc<Node>],
+    events: &'a [Arc<Event>],
+    index: &'a PodIndex,
+}
+
 fn cluster_detail(
     handle: &ClusterHandle,
     extras: &Extras,
-    pods: &[std::sync::Arc<Pod>],
-    nodes: &[std::sync::Arc<Node>],
+    parts: &Parts<'_>,
     selection: &Selection<'_>,
     now: Timestamp,
 ) -> ClusterDetail {
-    let index = PodIndex::build(pods, now);
+    let Parts {
+        nodes,
+        events,
+        index,
+    } = *parts;
     let (cpu, memory) = index.commitments(capacity(nodes));
     let usage = extras.node_usage.as_deref().unwrap_or_default();
     let (metrics_source, utilization) = match &extras.prometheus {
@@ -167,7 +210,7 @@ fn cluster_detail(
             (source.to_owned(), hour.into_iter().collect())
         }
     };
-    let mut resources = watched_lists(handle, &index, now);
+    let mut resources = watched_lists(handle, index, now);
     for (target, yaml) in selection.yaml.iter().copied() {
         let row = resources
             .iter_mut()
@@ -188,14 +231,14 @@ fn cluster_detail(
             pods: index.phases,
             utilization,
         },
-        nodes: detail::nodes(nodes, &index, usage, now),
+        nodes: detail::nodes(nodes, index, usage, now),
         namespaces: detail::namespaces(
             &handle.objects::<Namespace>(),
-            &index,
+            index,
             &extras.pod_usage,
             now,
         ),
-        events: detail::events(&handle.objects::<Event>(), selection.event_limit, now),
+        events: detail::events(events, selection.event_limit, now),
         resources,
     }
 }
