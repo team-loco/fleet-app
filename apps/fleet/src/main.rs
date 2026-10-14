@@ -310,7 +310,7 @@ mod tests {
             .into_iter()
             .find(|window| *window != first)
             .unwrap_or_else(|| panic!("second window missing"));
-        cx.simulate_keystrokes(first, "cmd-w");
+        cx.simulate_keystrokes(first, "cmd-shift-w");
         assert_eq!(cx.read(App::windows), vec![second]);
         cx.simulate_keystrokes(second, "cmd-n");
         assert_eq!(cx.read(|cx| cx.windows().len()), 2);

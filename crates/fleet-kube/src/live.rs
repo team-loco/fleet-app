@@ -726,6 +726,8 @@ impl Live {
             Command::OpenResource(resource) => self.open(resource),
             Command::InspectResource(resource) => self.open(resource),
             Command::FollowLogs(resource) => self.open(resource),
+            Command::OpenLogs { pod, .. } => self.open(pod),
+            Command::NewTab(command) => return self.apply_current(command),
             Command::Compare(target) => self.compare(target, None),
             Command::CompareWith { base, other } => self.compare(base, Some(other)),
             Command::PortForward { .. } => self.act(command),
@@ -1292,6 +1294,7 @@ fn leaves_compare(command: &Command) -> bool {
         command,
         Command::SelectCluster(_)
             | Command::SelectPage(_)
+            | Command::OpenLogs { .. }
             | Command::OpenCommit(_)
             | Command::OpenFluxObject(_)
             | Command::OpenResource(_)

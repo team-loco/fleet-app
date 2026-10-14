@@ -3,10 +3,10 @@ use std::fmt::Write as _;
 use gpui::KeyBinding;
 
 use crate::actions::{
-    CloseWindow, CompareAcrossClusters, FocusContent, FocusFilter, FocusSidebar, FollowLogs,
-    GoBack, GoForward, NewWindow, NextRecent, OpenSelectedNewWindow, OpenSettings, PreviousRecent,
-    QuickOpen, Quit, ShowCommands, ShowFluxOwner, ToggleClusterSwitcher, ToggleCommandPalette,
-    ToggleDock, ToggleSidebar,
+    ActivateTab, CloseTab, CloseWindow, CompareAcrossClusters, FocusContent, FocusFilter,
+    FocusSidebar, FollowLogs, GoBack, GoForward, NewTab, NewWindow, NextTab, OpenSelectedNewWindow,
+    OpenSettings, PreviousTab, QuickOpen, Quit, ShowCommands, ShowFluxOwner, ToggleClusterSwitcher,
+    ToggleCommandPalette, ToggleDock, ToggleSidebar,
 };
 use crate::kit::{SendBackTab, SendTab, TERMINAL_CONTEXT};
 use crate::screens::command::PALETTE_CONTEXT;
@@ -18,6 +18,12 @@ type Bind = fn(&'static str, Option<&'static str>) -> KeyBinding;
 const OUTSIDE_TEXT: &str = "Shell && !Input && !Terminal";
 const SEPARATOR: &str = " / ";
 const TYPE_AHEAD: &str = "letters";
+const COMMAND_CLICK: &str = "cmd-click";
+const MIDDLE_CLICK: &str = "middle click";
+const DRAG: &str = "drag";
+pub const TAB_KEYS: [&str; 9] = [
+    "cmd-1", "cmd-2", "cmd-3", "cmd-4", "cmd-5", "cmd-6", "cmd-7", "cmd-8", "cmd-9",
+];
 const DOCS_HEADER: &str = "# Keyboard shortcuts\n\nGenerated from the binding table in \
 `crates/fleet-ui/src/keymap.rs`; run `mise run gen:keys` after changing it. The same table \
 binds the keys and draws the Keyboard shortcuts section of Settings (⌘,).\n";
@@ -25,6 +31,7 @@ binds the keys and draws the Keyboard shortcuts section of Settings (⌘,).\n";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Group {
     General,
+    Tabs,
     View,
     Navigate,
     Lists,
@@ -36,8 +43,9 @@ pub enum Group {
 }
 
 impl Group {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::General,
+        Self::Tabs,
         Self::View,
         Self::Navigate,
         Self::Lists,
@@ -51,6 +59,7 @@ impl Group {
     pub const fn label(self) -> &'static str {
         match self {
             Self::General => "General",
+            Self::Tabs => "Tabs",
             Self::View => "View",
             Self::Navigate => "Navigate",
             Self::Lists => "Lists and tables",
@@ -139,24 +148,59 @@ pub const BINDINGS: &[Binding] = &[
         KeyBinding::new(k, NewWindow, c)
     }),
     Binding::new(
-        &["cmd-w"],
-        "Close the inspector, then the dock, then the window",
+        &["cmd-shift-w"],
+        "Close the window",
         Group::General,
         |k, c| KeyBinding::new(k, CloseWindow, c),
     ),
     Binding::new(&["cmd-q"], "Quit Fleet", Group::General, |k, c| {
         KeyBinding::new(k, Quit, c)
     }),
+    Binding::new(&["cmd-t"], "New tab on Fleet home", Group::Tabs, |k, c| {
+        KeyBinding::new(k, NewTab, c)
+    }),
+    Binding::new(&["cmd-w"], "Close the tab", Group::Tabs, |k, c| {
+        KeyBinding::new(k, CloseTab, c)
+    }),
+    Binding::new(
+        &["ctrl-tab", "cmd-alt-right"],
+        "Next tab",
+        Group::Tabs,
+        |k, c| KeyBinding::new(k, NextTab, c),
+    ),
+    Binding::new(
+        &["ctrl-shift-tab", "cmd-alt-left"],
+        "Previous tab",
+        Group::Tabs,
+        |k, c| KeyBinding::new(k, PreviousTab, c),
+    ),
+    Binding::new(&TAB_KEYS, "Select tab 1 to 9", Group::Tabs, |k, c| {
+        KeyBinding::new(k, ActivateTab(tab_index(k)), c)
+    }),
+    Binding::built_in(
+        &[COMMAND_CLICK, MIDDLE_CLICK],
+        "Open a page, row or result in a new tab",
+        Group::Tabs,
+    ),
+    Binding::built_in(
+        &[MIDDLE_CLICK],
+        "Close the tab under the pointer",
+        Group::Tabs,
+    ),
+    Binding::built_in(&[DRAG], "Reorder tabs", Group::Tabs),
     Binding::new(&["cmd-b"], "Toggle the sidebar", Group::View, |k, c| {
         KeyBinding::new(k, ToggleSidebar, c)
     }),
     Binding::new(&["cmd-j"], "Toggle the bottom dock", Group::View, |k, c| {
         KeyBinding::new(k, ToggleDock, c)
     }),
-    Binding::new(&["cmd-1"], "Focus the sidebar", Group::View, |k, c| {
-        KeyBinding::new(k, FocusSidebar, c)
-    }),
-    Binding::new(&["cmd-2"], "Focus the page's list", Group::View, |k, c| {
+    Binding::new(
+        &["cmd-shift-e"],
+        "Focus the sidebar",
+        Group::View,
+        |k, c| KeyBinding::new(k, FocusSidebar, c),
+    ),
+    Binding::new(&["cmd-e"], "Focus the page's list", Group::View, |k, c| {
         KeyBinding::new(k, FocusContent, c)
     }),
     Binding::built_in(
@@ -177,18 +221,6 @@ pub const BINDINGS: &[Binding] = &[
     Binding::new(&["cmd-]"], "Forward", Group::Navigate, |k, c| {
         KeyBinding::new(k, GoForward, c)
     }),
-    Binding::new(
-        &["ctrl-tab"],
-        "Next recent page",
-        Group::Navigate,
-        |k, c| KeyBinding::new(k, NextRecent, c),
-    ),
-    Binding::new(
-        &["ctrl-shift-tab"],
-        "Previous recent page",
-        Group::Navigate,
-        |k, c| KeyBinding::new(k, PreviousRecent, c),
-    ),
     Binding::built_in(&["up", "down"], "Move the selection", Group::Lists),
     Binding::built_in(&["home", "end"], "First or last row", Group::Lists),
     Binding::built_in(&["pageup", "pagedown"], "Move a page", Group::Lists),
@@ -215,6 +247,11 @@ pub const BINDINGS: &[Binding] = &[
         Group::Resource,
         |k, c| KeyBinding::new(k, ShowFluxOwner, c),
     ),
+    Binding::built_in(
+        &["cmd-enter"],
+        "Open the result in a new tab",
+        Group::Palette,
+    ),
     Binding::new(
         &["alt-enter"],
         "Open the result in a new window",
@@ -230,7 +267,7 @@ pub const BINDINGS: &[Binding] = &[
         KeyBinding::new(k, workload::ShowLogs, c)
     })
     .within(WORKLOAD_CONTEXT),
-    Binding::new(&["cmd-t"], "Terminal", Group::Workload, |k, c| {
+    Binding::new(&["ctrl-`"], "Terminal", Group::Workload, |k, c| {
         KeyBinding::new(k, workload::ShowTerminal, c)
     })
     .within(WORKLOAD_CONTEXT),
@@ -277,6 +314,13 @@ pub const BINDINGS: &[Binding] = &[
     })
     .within(FLUX_CONTEXT),
 ];
+
+fn tab_index(keys: &str) -> usize {
+    TAB_KEYS
+        .iter()
+        .position(|tab| *tab == keys)
+        .unwrap_or_default()
+}
 
 pub fn key_bindings() -> Vec<KeyBinding> {
     BINDINGS
@@ -333,6 +377,7 @@ fn key_name(key: &str) -> String {
         "pagedown" => "PgDn",
         "tab" => "Tab",
         "space" => "Space",
+        "click" => "-click",
         other if other.chars().count() == 1 => return other.to_uppercase(),
         other => other,
     };
@@ -382,6 +427,11 @@ mod tests {
         assert_eq!(display("alt-enter"), "⌥↵");
         assert_eq!(display("pagedown"), "PgDn");
         assert_eq!(display(TYPE_AHEAD), TYPE_AHEAD);
+        assert_eq!(display(COMMAND_CLICK), "⌘-click");
+        assert_eq!(display("cmd-alt-right"), "⌥⌘→");
+        assert_eq!(display("ctrl-`"), "⌃`");
+        assert_eq!(tab_index("cmd-1"), 0);
+        assert_eq!(tab_index("cmd-9"), 8);
     }
 
     #[test]
@@ -416,6 +466,8 @@ mod tests {
             "cmd-w",
             "cmd-,",
             "ctrl-tab",
+            "cmd-t",
+            "cmd-1",
             "cmd-[",
             "cmd-]",
             "cmd-f",

@@ -1,7 +1,7 @@
 use std::time::Instant;
 
-use fleet_core::history::{Cycle, History, Location};
 use fleet_core::palette::COMMAND_PREFIX;
+use fleet_core::tabs::Cycle;
 use fleet_core::{Command, Page};
 use gpui::{
     App, Context, Div, Entity, FocusHandle, InteractiveElement, KeyDownEvent, Stateful, Window,
@@ -9,8 +9,8 @@ use gpui::{
 
 use super::Shell;
 use crate::actions::{
-    CloseInspector, CloseWindow, FocusContent, FocusSidebar, GoBack, GoForward, NextRecent,
-    PreviousRecent, QuickOpen, ShowCommands, ToggleDock,
+    ActivateTab, CloseInspector, CloseTab, CloseWindow, FocusContent, FocusSidebar, GoBack,
+    GoForward, NewTab, NextTab, PreviousTab, QuickOpen, ShowCommands, ToggleDock,
 };
 use crate::kit::DockState;
 use crate::kit::list_keys::{Nav, TypeAhead, find, typed};
@@ -19,8 +19,6 @@ use crate::screens::workload::WorkloadScreen;
 pub(super) const SIDEBAR_CONTEXT: &str = "FleetSidebar";
 
 pub(super) struct Keyboard {
-    pub(super) history: History,
-    pub(super) restoring: bool,
     pub(super) refocus: bool,
     pub(super) sidebar_focus: FocusHandle,
     pub(super) nav_cursor: Option<Page>,
@@ -30,8 +28,6 @@ pub(super) struct Keyboard {
 impl Keyboard {
     pub(super) fn new(cx: &mut Context<Shell>) -> Self {
         Self {
-            history: History::default(),
-            restoring: false,
             refocus: false,
             sidebar_focus: cx.focus_handle().tab_stop(true),
             nav_cursor: None,
@@ -42,9 +38,30 @@ impl Keyboard {
 
 impl Shell {
     pub(super) fn key_actions(root: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
-        root.on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
-            if !this.close_inspector(cx) && !this.close_dock(cx) {
-                window.remove_window();
+        root.on_action(cx.listener(|_, _: &CloseWindow, window, _| {
+            window.remove_window();
+        }))
+        .on_action(cx.listener(|this, _: &CloseTab, _, cx| {
+            let active = this.state.panes().active().id();
+            this.close_tab(active, cx);
+        }))
+        .on_action(cx.listener(|this, _: &NewTab, _, cx| {
+            this.state.new_tab();
+            this.show_active(cx);
+        }))
+        .on_action(cx.listener(|this, _: &NextTab, _, cx| {
+            if this.state.panes_mut().cycle(Cycle::Next) {
+                this.show_active(cx);
+            }
+        }))
+        .on_action(cx.listener(|this, _: &PreviousTab, _, cx| {
+            if this.state.panes_mut().cycle(Cycle::Previous) {
+                this.show_active(cx);
+            }
+        }))
+        .on_action(cx.listener(|this, action: &ActivateTab, _, cx| {
+            if this.state.panes_mut().activate_nth(action.0) {
+                this.show_active(cx);
             }
         }))
         .on_action(cx.listener(|this, _: &CloseInspector, _, cx| {
@@ -62,20 +79,14 @@ impl Shell {
             }
         }))
         .on_action(cx.listener(|this, _: &GoBack, _, cx| {
-            let target = this.keys.history.back();
-            this.go(target, cx);
+            if this.state.back() {
+                this.show_active(cx);
+            }
         }))
         .on_action(cx.listener(|this, _: &GoForward, _, cx| {
-            let target = this.keys.history.forward();
-            this.go(target, cx);
-        }))
-        .on_action(cx.listener(|this, _: &NextRecent, _, cx| {
-            let target = this.keys.history.cycle(Cycle::Older);
-            this.go(target, cx);
-        }))
-        .on_action(cx.listener(|this, _: &PreviousRecent, _, cx| {
-            let target = this.keys.history.cycle(Cycle::Newer);
-            this.go(target, cx);
+            if this.state.forward() {
+                this.show_active(cx);
+            }
         }))
         .on_action(cx.listener(|this, _: &FocusSidebar, window, cx| {
             this.focus_sidebar(window, cx);
@@ -83,15 +94,6 @@ impl Shell {
         .on_action(cx.listener(|this, _: &FocusContent, window, cx| {
             this.focus_content(window, cx);
         }))
-    }
-
-    pub(super) fn record_visit(&mut self) {
-        if self.keys.restoring {
-            return;
-        }
-        let location = Location::of(&self.state);
-        self.keys.refocus |= self.keys.history.current() != Some(&location);
-        self.keys.history.visit(location);
     }
 
     pub(super) fn keep_keyboard_focus(&mut self, window: &Window, cx: &mut Context<Self>) {
@@ -102,24 +104,11 @@ impl Shell {
         window.defer(cx, move |window, cx| window.focus(&focus, cx));
     }
 
-    fn go(&mut self, target: Option<Location>, cx: &mut Context<Self>) {
-        let Some(target) = target else {
-            return;
-        };
-        self.keys.restoring = true;
-        for command in target.commands() {
-            self.dispatch(command, cx);
-        }
-        self.keys.restoring = false;
-        self.keys.refocus = true;
-        self.record_visit();
-    }
-
     fn close_inspector(&mut self, cx: &mut Context<Self>) -> bool {
         if let Some((screen, _)) = &self.workload {
             return screen.update(cx, WorkloadScreen::close_inspector);
         }
-        self.pages.close_inspector(self.state.page, cx)
+        self.pages.close_inspector(self.state.location().page, cx)
     }
 
     pub fn dock_open(&self, cx: &App) -> Option<bool> {
@@ -130,23 +119,15 @@ impl Shell {
         if let Some((screen, _)) = &self.workload {
             return Some(screen.read(cx).dock().clone());
         }
-        let pods = self.state.page == Page::Pods && self.has_detail();
+        let pods = self.state.location().page == Page::Pods && self.has_detail();
         pods.then(|| self.pods.read(cx).dock().clone())
-    }
-
-    fn close_dock(&self, cx: &mut Context<Self>) -> bool {
-        let Some(dock) = self.dock(cx).filter(|dock| dock.read(cx).is_open()) else {
-            return false;
-        };
-        dock.update(cx, DockState::toggle);
-        true
     }
 
     fn list_focus(&self, cx: &mut Context<Self>) -> Option<FocusHandle> {
         if let Some((screen, _)) = &self.workload {
             return Some(screen.read(cx).list_focus(cx));
         }
-        let page = self.state.page;
+        let page = self.state.location().page;
         match page {
             Page::Overview => Some(self.fleet.read(cx).list_focus(page, cx)),
             Page::Problems => Some(self.fleet.read(cx).list_focus(page, cx)),
@@ -171,7 +152,7 @@ impl Shell {
         if !self.state.sidebar_open {
             self.dispatch(Command::ToggleSidebar, cx);
         }
-        self.keys.nav_cursor = Some(self.state.page);
+        self.keys.nav_cursor = Some(self.state.location().page);
         window.focus(&self.keys.sidebar_focus, cx);
         cx.notify();
     }
@@ -179,7 +160,7 @@ impl Shell {
     pub(super) fn nav_pages(&self) -> Vec<Page> {
         self.state
             .snapshot
-            .nav_sections(self.state.cluster.as_ref())
+            .nav_sections(self.state.location().cluster.as_ref())
             .iter()
             .flat_map(|section| section.pages.iter().copied())
             .collect()
@@ -196,7 +177,7 @@ impl Shell {
         let current = self
             .keys
             .nav_cursor
-            .or(Some(self.state.page))
+            .or(Some(self.state.location().page))
             .and_then(|page| pages.iter().position(|p| *p == page));
         let opens =
             matches!(keystroke.key.as_str(), "enter" | "space") && !keystroke.modifiers.modified();

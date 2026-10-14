@@ -11,6 +11,7 @@ use crate::kit::status_symbols;
 use crate::kit::{
     Column, Link, SectionHeader, Segmented, StatusGlyph, StatusText, Table, TableEvent,
 };
+use crate::screens::new_tab_item;
 use crate::shell::switcher::{Run, cluster_items};
 use crate::theme::{
     ActiveTheme, FONT_MONO, METER_MINI, METER_MINI_WIDTH, Palette, ROW_TABLE, ROW_TABLE_MAX, RULE,
@@ -87,7 +88,15 @@ impl FleetScreen {
         });
         let cluster_table = cx.new(|cx| {
             Table::new("fleet-clusters", cluster_columns(), cx)
-                .row_actions(move |cluster: &ClusterSummary| cluster_items(cluster, &run))
+                .row_actions(move |cluster: &ClusterSummary| {
+                    let open_run = run.clone();
+                    let open = Command::SelectCluster(Some(cluster.id.clone()));
+                    let mut items = vec![new_tab_item(open, move |command, cx| {
+                        open_run(command, cx);
+                    })];
+                    items.extend(cluster_items(cluster, &run));
+                    items
+                })
                 .type_ahead(|c: &ClusterSummary| c.name.clone().into())
                 .row_height(ROW_TABLE_MAX)
                 .column_gap(SPACE_7)

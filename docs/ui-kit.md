@@ -271,6 +271,14 @@ cells without `fit_by` go back to their design width). Widths are stored per sco
 `fleet_ui::prefs` (`view.json` in the Fleet data dir, memory only in demo and tests); call
 `table.set_scope(cluster.as_str(), cx)` on cluster pages, fleet pages use `prefs::FLEET_SCOPE`.
 
+⌘-click and middle-click on a row emit `Opened` as well (the shell turns the resulting navigation
+into a new tab). Rows that open something put `screens::new_tab_item(command, emit)` ("Open in new
+tab") first in their menu.
+
+⌘-click and middle-click on a row emit `Opened` as well (the shell turns the resulting navigation
+into a new tab). Rows that open something put `screens::new_tab_item(command, emit)` ("Open in new
+tab") first in their menu.
+
 Row actions: `.row_actions(|row| Vec<MenuItem>)` / `set_row_actions(..)` adds a ⋯ button on the hovered
 row (`{table}-row-{ix}-more`) and a right-click menu (`{table}-row-menu-item-{ix}`), both with that
 row's items. `hovered_row()` reads the hovered row. Table options:

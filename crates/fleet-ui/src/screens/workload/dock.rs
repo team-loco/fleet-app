@@ -32,6 +32,7 @@ const DEBUG: &str = "debug";
 const EXEC: &str = "exec";
 const FOLLOW: &str = "follow";
 const WRAP: &str = "wrap";
+const OPEN_IN_TAB: &str = "Open logs in tab";
 const DEBUG_IMAGE: &str = "busybox:1.36";
 const POD_KIND: &str = "Pod";
 
@@ -285,6 +286,21 @@ impl WorkloadScreen {
                         cx.notify();
                     })),
             )
+            .child(
+                Button::new("logs-open-tab", OPEN_IN_TAB)
+                    .small()
+                    .disabled(self.selected_pod().is_none() || self.container_name().is_none())
+                    .on_click(cx.listener(|this, _, _, cx| this.open_logs_tab(cx))),
+            )
+    }
+
+    fn open_logs_tab(&mut self, cx: &mut Context<Self>) {
+        let (Some(pod), Some(container)) = (self.selected_pod(), self.container_name()) else {
+            return;
+        };
+        let pod = pod_ref(&self.target, &pod.name);
+        let open = Command::OpenLogs { pod, container };
+        cx.emit(Command::NewTab(Box::new(open)));
     }
 
     fn terminal_tools(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {

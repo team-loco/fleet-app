@@ -101,3 +101,23 @@ Settled; change only with a new entry that says why.
     confirm for destructive items (decision 15). Inspectors keep only their primary action (Cordon
     or Uncordon, Shell) and close. Page headers keep one primary action plus their Actions menu
     (workload, Flux object). The non-functional ⋯ on list page headers is gone.
+23. **Pane tabs** (design v3; product owner): supersedes HANDOFF's "No tabs" and amends 17 and
+    20. `fleet_core::AppState` owns `fleet_core::tabs::Panes`: a list of panes (one until Split
+    lands), each with its own tabs and active tab, and each tab with its own `Location` (cluster,
+    page, selected object, log container) and its own `History` for ⌘[ / ⌘]. Navigation commands
+    move the active tab of the focused pane; the sidebar and the status-bar switcher follow that
+    tab's cluster. VS Code semantics: a sidebar click or row open navigates the active tab;
+    ⌘-click, middle-click, ⌘↵ in the palette and the row menus' "Open in new tab" open a tab
+    beside it (`Command::NewTab`), focusing an existing tab with the same location instead of
+    duplicating it. ⌘T opens Fleet home in a new tab; ⌘W closes the active tab and closing the last
+    one leaves Fleet home, so the window closes only with ⌘⇧W or its close button. ⌃Tab / ⌃⇧Tab and
+    ⌥⌘→ / ⌥⌘← cycle tabs in strip order (the recent-page cycle is gone), ⌘1…⌘9 select tab N;
+    middle-click closes a tab and dragging reorders it. The old focus bindings move from ⌘1 / ⌘2
+    to ⌘⇧E (sidebar) and ⌘E (page list), and the workload terminal from ⌘T to ⌃`. A tab is
+    labelled with the object's status glyph, a kind (`fleet` for Fleet home pages, the kubectl
+    short kind for objects, `logs` with the pod's hash suffix, `loco` / `workloads` / `flux` /
+    `network` / `config` / `storage` from the nav section, `cluster` for the rest), the name, and
+    the cluster's short name (`tabs::short_name`: a leading segment shared with another cluster is
+    dropped when the rest stays unique). The strip scrolls horizontally and keeps the active tab
+    in view. The Workload dock stays; "Open logs in tab" opens the selected pod's logs as a tab.
+    A cluster that leaves the snapshot no longer resets its tabs to Fleet home.

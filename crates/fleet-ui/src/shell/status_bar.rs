@@ -24,7 +24,7 @@ impl Shell {
         let snapshot = &self.state.snapshot;
         let problems = snapshot.problems();
         let left = match self.selected_cluster() {
-            None if self.state.page == Page::Changes => snapshot.changes.fetched_label(),
+            None if self.state.location().page == Page::Changes => snapshot.changes.fetched_label(),
             Some(cluster) => {
                 let version = cluster.version.as_deref().unwrap_or("—");
                 let flux = snapshot
@@ -37,7 +37,7 @@ impl Shell {
                     .collect::<Vec<_>>()
                     .join(SEPARATOR)
             }
-            None if self.state.page == Page::GitOps => {
+            None if self.state.location().page == Page::GitOps => {
                 let flux = flux_ready(&snapshot.clusters);
                 format!("flux {}/{} ready", flux.ready, flux.total)
             }
@@ -107,7 +107,7 @@ impl Shell {
     #[cfg(feature = "loco")]
     fn loco_agent(&self, palette: &crate::theme::Palette) -> Option<AnyElement> {
         use crate::theme::SPACE_3;
-        let id = self.state.cluster.as_ref()?;
+        let id = self.state.location().cluster.as_ref()?;
         let agent = &self.state.snapshot.loco.get(id)?.platform.agent;
         let (status, label) = match agent.last_heartbeat {
             Some(heartbeat) => (

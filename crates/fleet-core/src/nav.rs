@@ -1,4 +1,6 @@
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Page {
     Overview,
     Problems,
@@ -33,6 +35,7 @@ pub enum Page {
     Secrets,
     Pvcs,
     Compare,
+    Logs,
 }
 
 impl Page {
@@ -71,6 +74,7 @@ impl Page {
             Self::Secrets => "Secrets",
             Self::Pvcs => "PVCs",
             Self::Compare => "Compare",
+            Self::Logs => "Logs",
         }
     }
 

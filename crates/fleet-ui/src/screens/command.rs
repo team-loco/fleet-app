@@ -32,7 +32,12 @@ const HINTS: &[(&str, &str)] = &[
     ("l:", "label=value"),
     (">", "command"),
 ];
-const FOOTER_START: &[&str] = &["↑↓ move", "↵ open", "⌥↵ open in new window"];
+const FOOTER_START: &[&str] = &[
+    "↑↓ move",
+    "↵ open",
+    "⌘↵ open in new tab",
+    "⌥↵ open in new window",
+];
 const FOOTER_END: &str = "esc";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +49,7 @@ enum Phase {
 
 pub enum PaletteEvent {
     Run(Command),
+    NewTab(Command),
     NewWindow(Command),
 }
 
@@ -67,6 +73,9 @@ impl CommandPalette {
         let input = cx.new(|cx| TextFieldState::new(window, cx).placeholder(PLACEHOLDER));
         let input_events = cx.subscribe(&input, |this, _, event: &InputEvent, cx| match event {
             InputEvent::Change => this.refresh(cx),
+            InputEvent::PressEnter {
+                secondary: true, ..
+            } => this.open_selected_in_tab(cx),
             InputEvent::PressEnter { .. } => this.run_selected(cx),
             _ => {}
         });
@@ -170,6 +179,13 @@ impl CommandPalette {
     fn run_selected(&mut self, cx: &mut Context<Self>) {
         if let Some(ix) = self.selected {
             self.run(ix, cx);
+        }
+    }
+
+    fn open_selected_in_tab(&mut self, cx: &mut Context<Self>) {
+        let hit = self.selected.and_then(|ix| self.results.hits.get(ix));
+        if let Some(hit) = hit {
+            cx.emit(PaletteEvent::NewTab(hit.command.clone()));
         }
     }
 

@@ -31,8 +31,10 @@ pub mod actions {
             ShowCommands,
             ToggleDock,
             CloseInspector,
-            NextRecent,
-            PreviousRecent,
+            NewTab,
+            CloseTab,
+            NextTab,
+            PreviousTab,
             GoBack,
             GoForward,
             FocusFilter,
@@ -42,6 +44,10 @@ pub mod actions {
             NewWindow
         ]
     );
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, gpui::Action)]
+    #[action(namespace = fleet, no_json)]
+    pub struct ActivateTab(pub usize);
 }
 
 pub fn init(

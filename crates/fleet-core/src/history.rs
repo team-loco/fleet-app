@@ -1,23 +1,42 @@
-use crate::{AppState, ClusterId, Command, FluxKey, Page, ResourceRef};
+use serde::{Deserialize, Serialize};
+
+use crate::{ClusterId, Command, FluxKey, Page, ResourceRef};
 
 pub const HISTORY_LIMIT: usize = 50;
-pub const RECENT_LIMIT: usize = 12;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Location {
     pub cluster: Option<ClusterId>,
     pub page: Page,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource: Option<ResourceRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flux_object: Option<FluxKey>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
+}
+
+impl Default for Location {
+    fn default() -> Self {
+        Self::fleet(Page::Overview)
+    }
 }
 
 impl Location {
-    pub fn of(state: &AppState) -> Self {
+    pub const fn fleet(page: Page) -> Self {
         Self {
-            cluster: state.cluster.clone(),
-            page: state.page,
-            resource: state.resource.clone(),
-            flux_object: state.flux_object.clone(),
+            cluster: None,
+            page,
+            resource: None,
+            flux_object: None,
+            container: None,
+        }
+    }
+
+    pub fn page_on(cluster: ClusterId, page: Page) -> Self {
+        Self {
+            cluster: Some(cluster),
+            ..Self::fleet(page)
         }
     }
 
@@ -25,10 +44,18 @@ impl Location {
         if let Some(key) = &self.flux_object {
             return vec![Command::OpenFluxObject(key.clone())];
         }
-        match (&self.resource, self.page) {
-            (Some(resource), Page::Compare) => return vec![Command::Compare(resource.clone())],
-            (Some(resource), _) => return vec![Command::OpenResource(resource.clone())],
-            (None, _) => {}
+        match (&self.resource, self.page, &self.container) {
+            (Some(pod), Page::Logs, Some(container)) => {
+                return vec![Command::OpenLogs {
+                    pod: pod.clone(),
+                    container: container.clone(),
+                }];
+            }
+            (Some(resource), Page::Compare, _) => {
+                return vec![Command::Compare(resource.clone())];
+            }
+            (Some(resource), _, _) => return vec![Command::OpenResource(resource.clone())],
+            (None, _, _) => {}
         }
         match &self.cluster {
             Some(cluster) if !self.page.is_fleet() => {
@@ -45,33 +72,22 @@ impl Location {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Cycle {
-    Older,
-    Newer,
-}
-
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct History {
     current: Option<Location>,
     back: Vec<Location>,
     forward: Vec<Location>,
-    recent: Vec<Location>,
-    cycling: Option<(Vec<Location>, usize)>,
 }
 
 impl History {
-    pub fn visit(&mut self, location: Location) {
-        let cycled = self
-            .cycling
-            .as_ref()
-            .is_some_and(|(frozen, at)| frozen.get(*at) == Some(&location));
-        if !cycled {
-            self.cycling = None;
+    pub fn starting_at(location: Location) -> Self {
+        Self {
+            current: Some(location),
+            ..Self::default()
         }
-        self.recent.retain(|seen| seen != &location);
-        self.recent.insert(0, location.clone());
-        self.recent.truncate(RECENT_LIMIT);
+    }
+
+    pub fn visit(&mut self, location: Location) {
         if self.current.as_ref() == Some(&location) {
             return;
         }
@@ -98,19 +114,6 @@ impl History {
         Some(target)
     }
 
-    pub fn cycle(&mut self, direction: Cycle) -> Option<Location> {
-        let (frozen, at) = self.cycling.get_or_insert_with(|| (self.recent.clone(), 0));
-        let len = frozen.len();
-        if len < 2 {
-            return None;
-        }
-        *at = match direction {
-            Cycle::Older => (*at + 1) % len,
-            Cycle::Newer => (*at + len - 1) % len,
-        };
-        frozen.get(*at).cloned()
-    }
-
     pub fn current(&self) -> Option<&Location> {
         self.current.as_ref()
     }
@@ -132,9 +135,7 @@ mod tests {
     fn page(page: Page) -> Location {
         Location {
             cluster: (!page.is_fleet()).then(|| ClusterId::new("a")),
-            page,
-            resource: None,
-            flux_object: None,
+            ..Location::fleet(page)
         }
     }
 
@@ -159,10 +160,10 @@ mod tests {
 
     #[test]
     fn repeated_visits_to_the_same_place_are_one_entry() {
-        let mut history = History::default();
-        history.visit(page(Page::Overview));
+        let mut history = History::starting_at(page(Page::Overview));
         history.visit(page(Page::Overview));
         assert!(!history.can_go_back());
+        assert_eq!(history.current(), Some(&page(Page::Overview)));
     }
 
     #[test]
@@ -177,23 +178,6 @@ mod tests {
             steps += 1;
         }
         assert_eq!(steps, HISTORY_LIMIT);
-    }
-
-    #[test]
-    fn control_tab_cycles_recent_pages_while_held() {
-        let mut history = History::default();
-        for p in [Page::Overview, Page::Nodes, Page::Pods] {
-            history.visit(page(p));
-        }
-        let first = history.cycle(Cycle::Older);
-        assert_eq!(first, Some(page(Page::Nodes)));
-        history.visit(page(Page::Nodes));
-        assert_eq!(history.cycle(Cycle::Older), Some(page(Page::Overview)));
-        history.visit(page(Page::Overview));
-        assert_eq!(history.cycle(Cycle::Newer), Some(page(Page::Nodes)));
-        history.visit(page(Page::Nodes));
-        history.visit(page(Page::Events));
-        assert_eq!(history.cycle(Cycle::Older), Some(page(Page::Nodes)));
     }
 
     #[test]
@@ -221,18 +205,30 @@ mod tests {
             ..page(Page::Pods)
         };
         assert_eq!(open.commands(), [Command::OpenResource(pod.clone())]);
+        let logs = Location {
+            resource: Some(pod.clone()),
+            container: Some("api".into()),
+            ..page(Page::Logs)
+        };
+        assert_eq!(
+            logs.commands(),
+            [Command::OpenLogs {
+                pod: pod.clone(),
+                container: "api".into()
+            }]
+        );
         let compare = Location {
             resource: Some(pod.clone()),
             ..page(Page::Compare)
         };
         assert_eq!(compare.commands(), [Command::Compare(pod)]);
-        let mut state = AppState::default();
+        let mut state = crate::AppState::default();
         state.update(crate::Update::Snapshot(Box::new(
             crate::fleet::tests::sample(),
         )));
         for command in nodes.commands() {
             state.apply(&command);
         }
-        assert_eq!(Location::of(&state), nodes);
+        assert_eq!(state.location(), &nodes);
     }
 }

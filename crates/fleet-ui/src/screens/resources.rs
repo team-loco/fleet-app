@@ -20,6 +20,7 @@ use crate::kit::{
     CodeView, Column, ConfirmDialog, FilterBar, FilterEvent, IconButton, Inspector, MenuItem,
     Presence, Select, SelectEvent, Table, TableEvent, chip_label, confirm, slide_in, slide_out,
 };
+use crate::screens::new_tab_item;
 use crate::theme::SPACE_3;
 
 const ALL_NAMESPACES: &str = "All namespaces";
@@ -407,8 +408,19 @@ impl ResourcesScreen {
                 namespace: Some(row.namespace.clone()),
                 name: row.name.clone(),
             };
+            let open_screen = screen.clone();
+            let open = new_tab_item(Command::OpenResource(target.clone()), move |command, cx| {
+                let _ = open_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+            });
             let seen = Seen::new(target, row.uid.clone());
-            delete_items(kind, seen, confirm_destructive, screen.clone())
+            let mut items = vec![open];
+            items.extend(delete_items(
+                kind,
+                seen,
+                confirm_destructive,
+                screen.clone(),
+            ));
+            items
         }
     }
 

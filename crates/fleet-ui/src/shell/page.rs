@@ -9,6 +9,7 @@ use fleet_core::AddClusterStep;
 use super::Shell;
 use crate::kit::{Skeleton, status_symbols};
 use crate::screens::add_cluster::empty_fleet;
+use crate::screens::logs::LogsScreen;
 use crate::screens::workload::WorkloadScreen;
 use crate::theme::{
     ActiveTheme, FONT_MONO, PAGE_HEADER, Palette, RULE, SPACE_2, SPACE_4, SPACE_5, SPACE_7,
@@ -21,8 +22,16 @@ const SEPARATOR: &str = "· ";
 impl Shell {
     pub(super) fn page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         #[cfg(feature = "loco")]
-        if crate::screens::loco::owns(self.state.page) {
+        if crate::screens::loco::owns(self.state.location().page) {
             return self.loco.clone().into_any_element();
+        }
+        if let Some(screen) = self.logs_screen(window, cx) {
+            return div()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .child(screen)
+                .into_any_element();
         }
         if let Some(screen) = self.workload_screen(window, cx) {
             return div()
@@ -33,7 +42,7 @@ impl Shell {
                 .into_any_element();
         }
         let palette = *cx.palette();
-        let full_page: Option<AnyElement> = match self.state.page {
+        let full_page: Option<AnyElement> = match self.state.location().page {
             Page::Changes => Some(self.changes.clone().into_any_element()),
             Page::Compare => Some(self.compare.clone().into_any_element()),
             Page::ClusterSettings => Some(self.settings.clone().into_any_element()),
@@ -49,7 +58,7 @@ impl Shell {
                 .child(screen)
                 .into_any_element();
         }
-        if self.state.flux_object.is_some() {
+        if self.state.location().flux_object.is_some() {
             return self.flux_object.clone().into_any_element();
         }
         let loading = self.load_view(cx);
@@ -61,7 +70,7 @@ impl Shell {
                 .overflow_y_scroll()
                 .child(view)
                 .into_any_element()
-        } else if self.state.page == Page::Pods && self.has_detail() {
+        } else if self.state.location().page == Page::Pods && self.has_detail() {
             div()
                 .flex_1()
                 .min_h_0()
@@ -115,12 +124,44 @@ impl Shell {
         Some(screen)
     }
 
+    fn logs_screen(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<LogsScreen>> {
+        let location = self.state.location();
+        let target = location
+            .resource
+            .clone()
+            .zip(location.container.clone())
+            .filter(|_| location.page == Page::Logs);
+        let Some((pod, container)) = target else {
+            self.logs = None;
+            return None;
+        };
+        let current = self
+            .logs
+            .as_ref()
+            .filter(|(screen, _)| screen.read(cx).shows(&pod, &container))
+            .map(|(screen, _)| screen.clone());
+        if current.is_some() {
+            return current;
+        }
+        let screen = cx.new(|cx| LogsScreen::new(pod, container, window, cx));
+        let subscription = cx.subscribe(&screen, |shell, _, command: &Command, cx| {
+            shell.dispatch(command.clone(), cx);
+        });
+        screen.update(cx, LogsScreen::watch);
+        self.logs = Some((screen.clone(), subscription));
+        Some(screen)
+    }
+
     fn page_header(&self, palette: &Palette, cx: &App) -> impl IntoElement {
-        let note = if self.state.page == Page::Pods {
+        let note = if self.state.location().page == Page::Pods {
             Some(self.pods.read(cx).header_note())
         } else {
             self.pages
-                .header_note(self.state.page, self.has_detail(), cx)
+                .header_note(self.state.location().page, self.has_detail(), cx)
         };
         let status: Option<Vec<(String, gpui::Hsla)>> = match (self.selected_cluster(), note) {
             (Some(_), Some((counts, text))) => Some(note_parts(&counts, text, palette)),
@@ -128,7 +169,7 @@ impl Shell {
                 let text = format!("{} {}", cluster.status.glyph(), cluster.state);
                 Some(vec![(text, palette.status(cluster.status))])
             }
-            (None, _) if self.state.page == Page::GitOps => None,
+            (None, _) if self.state.location().page == Page::GitOps => None,
             (None, _) => Some(vec![(LIVE.to_owned(), palette.mute)]),
         };
         let status = status.map(|parts| {
@@ -145,7 +186,7 @@ impl Shell {
         });
         let controls = self
             .selected_cluster()
-            .and_then(|_| self.pages.header_controls(self.state.page, cx));
+            .and_then(|_| self.pages.header_controls(self.state.location().page, cx));
         div()
             .flex()
             .items_center()
@@ -160,7 +201,7 @@ impl Shell {
                 div()
                     .text_size(TEXT_TITLE)
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(self.state.page.title()),
+                    .child(self.state.location().page.title()),
             )
             .children(status)
             .child(div().flex_1())
@@ -170,14 +211,14 @@ impl Shell {
     fn content(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let empty = self.loaded
             && self.state.snapshot.clusters.is_empty()
-            && self.state.page == Page::Overview;
+            && self.state.location().page == Page::Overview;
         if empty {
             let add = cx.listener(|this, _, window, cx| {
                 this.open_add_cluster(AddClusterStep::Pick, window, cx);
             });
             return empty_fleet(palette, add).into_any_element();
         }
-        match self.state.page {
+        match self.state.location().page {
             Page::Overview => self.fleet.clone().into_any_element(),
             Page::Problems => self.fleet.clone().into_any_element(),
             Page::GitOps => self.gitops.clone().into_any_element(),
@@ -209,7 +250,7 @@ impl Shell {
                     .text_size(TEXT_LABEL)
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(palette.mute)
-                    .child(self.state.page.label().to_uppercase()),
+                    .child(self.state.location().page.label().to_uppercase()),
             )
             .child(div().text_color(palette.fg2).child(scope))
             .into_any_element()

@@ -683,7 +683,7 @@ fn more_items() -> Vec<MenuItem> {
 fn workload_items() -> Vec<MenuItem> {
     vec![
         MenuItem::new("Logs", |_, _| {}).shortcut("⌘L"),
-        MenuItem::new("Shell into pod", |_, _| {}).shortcut("⌘T"),
+        MenuItem::new("Shell into pod", |_, _| {}).shortcut("⌃`"),
         MenuItem::new("Restart rollout", |_, _| {}),
         MenuItem::new("Scale…", |_, _| {}).disabled(true),
         MenuItem::new("Roll back to revision 36", |_, _| {}).description(

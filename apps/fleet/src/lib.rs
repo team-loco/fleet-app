@@ -1,4 +1,6 @@
 use clap::ValueEnum;
+use fleet_core::history::Location;
+use fleet_core::tabs::{SavedPane, SavedWindow};
 use fleet_core::{AddClusterStep, ClusterId, Command, FluxKey, FluxKind, Page, ResourceRef};
 use fleet_ui::actions::{NewWindow, OpenSettings, Quit};
 use fleet_ui::theme::Appearance;
@@ -13,6 +15,12 @@ const SAMPLE_RELEASE_CLUSTER: &str = "staging";
 const SAMPLE_NAMESPACE: &str = "payments";
 const SAMPLE_DEPLOYMENT: &str = "checkout-api";
 const DEPLOYMENT: &str = "Deployment";
+const POD: &str = "Pod";
+const SAMPLE_OTHER_CLUSTER: &str = "prod-eu-west";
+const SAMPLE_POD: &str = "checkout-api-7f9c6d-x2lqp";
+const SAMPLE_CONTAINER: &str = "api";
+const SAMPLE_KUSTOMIZATION: &str = "apps-payments";
+const FLUX_NAMESPACE: &str = "flux-system";
 
 pub const APP_ID: &str = "dev.fleet.app";
 pub const APP_NAME: &str = "Fleet";
@@ -145,7 +153,7 @@ impl Screen {
             Self::Fleet => vec![Command::SelectPage(Page::Overview)],
             Self::Cluster => vec![sample],
             Self::Collapsed => vec![sample, Command::ToggleSidebar],
-            Self::Switcher => vec![sample],
+            Self::Switcher => vec![sample, Command::OpenResource(preset.deployment())],
             Self::Command => vec![Command::SelectPage(Page::Overview)],
             Self::Changes => vec![Command::SelectPage(Page::Changes)],
             Self::Overview => vec![sample, Command::SelectPage(Page::ClusterOverview)],
@@ -202,6 +210,63 @@ impl Screen {
             #[cfg(feature = "loco")]
             Self::LocoRoutes => vec![sample, Command::SelectPage(Page::LocoRoutes)],
         }
+    }
+}
+
+impl Screen {
+    pub fn tabs(self, preset: &Preset) -> Option<SavedWindow> {
+        let cluster = preset.cluster_or(SAMPLE_CLUSTER);
+        let deployment = preset.deployment();
+        let workload = Location {
+            resource: Some(deployment.clone()),
+            ..Location::page_on(cluster.clone(), Page::Deployments)
+        };
+        let other = ClusterId::new(SAMPLE_OTHER_CLUSTER);
+        let elsewhere = Location {
+            resource: Some(ResourceRef {
+                cluster: other.clone(),
+                ..deployment
+            }),
+            ..Location::page_on(other, Page::Deployments)
+        };
+        let key = FluxKey::new(
+            cluster.as_str(),
+            FluxKind::Kustomization,
+            FLUX_NAMESPACE,
+            SAMPLE_KUSTOMIZATION,
+        );
+        let kustomization = Location {
+            flux_object: Some(key),
+            ..Location::page_on(cluster.clone(), Page::Kustomizations)
+        };
+        let logs = Location {
+            resource: Some(ResourceRef {
+                cluster: cluster.clone(),
+                kind: POD.into(),
+                namespace: Some(SAMPLE_NAMESPACE.into()),
+                name: SAMPLE_POD.into(),
+            }),
+            container: Some(SAMPLE_CONTAINER.into()),
+            ..Location::page_on(cluster, Page::Logs)
+        };
+        let (tabs, active) = match self {
+            Self::Fleet => (
+                vec![
+                    Location::fleet(Page::Overview),
+                    Location::fleet(Page::GitOps),
+                    workload,
+                ],
+                0,
+            ),
+            Self::Workload => (vec![workload, kustomization, elsewhere], 0),
+            Self::Switcher => (vec![workload, kustomization, elsewhere], 0),
+            Self::Kustomization => (vec![workload, kustomization, logs], 1),
+            _ => return None,
+        };
+        Some(SavedWindow {
+            panes: vec![SavedPane { tabs, active }],
+            focused: 0,
+        })
     }
 }
 
@@ -285,6 +350,9 @@ fn shell_view(
 ) -> AnyView {
     let initial = screen.commands(preset);
     let shell = cx.new(|cx| Shell::new(store, initial, window, cx));
+    if let Some(tabs) = screen.tabs(preset) {
+        shell.update(cx, |shell, cx| shell.restore_tabs(&tabs, cx));
+    }
     if let Screen::Command = screen {
         shell.update(cx, |shell, cx| shell.open_palette(SAMPLE_QUERY, window, cx));
     }
