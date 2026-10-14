@@ -1596,3 +1596,32 @@ fn log_lines_select_across_lines() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn text_selected_inside_a_selected_row_is_painted_with_its_own_colour() -> anyhow::Result<()> {
+    use gpui::{point, px};
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    for (appearance, name) in [
+        (
+            flock_ui::theme::Appearance::Dark,
+            "selection-in-row-dark.png",
+        ),
+        (
+            flock_ui::theme::Appearance::Light,
+            "selection-in-row-light.png",
+        ),
+    ] {
+        let mut ui = Ui::with(Screen::Events, flock::Preset::default(), appearance)?;
+        ui.click("events-row-1")?;
+        let row = bounds_of(&mut ui, "events-row-1")?;
+        let border = bounds_of(&mut ui, "events-resize-0")?;
+        let start = point(border.center().x + px(12.), row.center().y);
+        ui.drag_between(start, start + point(px(40.), px(0.)))?;
+        ui.press("cmd-c")?;
+        assert_eq!(ui.clipboard().as_deref(), Some("deplo"));
+        let palette = ui.read_app(|cx| *flock_ui::theme::ActiveTheme::palette(cx));
+        assert_ne!(palette.textsel_on_sel, palette.sel);
+        ui.save_png(&dir.join(name))?;
+    }
+    Ok(())
+}
