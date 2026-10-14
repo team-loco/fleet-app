@@ -7,7 +7,7 @@ use gpui::{
 use fleet_core::AddClusterStep;
 
 use super::Shell;
-use crate::kit::{Skeleton, status_symbols};
+use crate::kit::{Button, EmptyState, Skeleton, status_symbols};
 use crate::screens::add_cluster::empty_fleet;
 use crate::screens::logs::LogsScreen;
 use crate::screens::workload::WorkloadScreen;
@@ -18,9 +18,15 @@ use crate::theme::{
 
 const LIVE: &str = "live";
 const SEPARATOR: &str = "· ";
+const UNAVAILABLE_REASON: &str =
+    "It was removed from Fleet or its kubeconfig context is gone, so this tab has nothing to show.";
+const SHOW_ALL_CLUSTERS: &str = "Show all clusters";
 
 impl Shell {
     pub(super) fn page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if self.loaded && !self.state.cluster_available() {
+            return self.unavailable(cx);
+        }
         #[cfg(feature = "loco")]
         if crate::screens::loco::owns(self.state.location().page) {
             return self.loco.clone().into_any_element();
@@ -154,6 +160,30 @@ impl Shell {
         screen.update(cx, LogsScreen::watch);
         self.logs = Some((screen.clone(), subscription));
         Some(screen)
+    }
+
+    fn unavailable(&self, cx: &mut Context<Self>) -> AnyElement {
+        let palette = *cx.palette();
+        let name = self
+            .state
+            .location()
+            .cluster
+            .as_ref()
+            .map(|id| fleet_core::tabs::cluster_name(id, &self.state.snapshot))
+            .unwrap_or_default();
+        let sentence = format!("{name} is not available. {UNAVAILABLE_REASON}");
+        let action = Button::new("tab-show-fleet", SHOW_ALL_CLUSTERS)
+            .on_click(cx.listener(|this, _, _, cx| this.retarget(None, cx)));
+        div()
+            .debug_selector(|| "cluster-unavailable".to_owned())
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .bg(palette.editor)
+            .child(EmptyState::new(sentence, action))
+            .into_any_element()
     }
 
     fn page_header(&self, palette: &Palette, cx: &App) -> impl IntoElement {

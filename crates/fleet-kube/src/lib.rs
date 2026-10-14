@@ -32,6 +32,7 @@ pub mod settings;
 pub mod shell_env;
 pub mod snapshot;
 pub mod store;
+pub mod tab_store;
 pub mod task;
 pub mod throttle;
 pub mod usage;

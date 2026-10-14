@@ -19,6 +19,8 @@ const CLOSE_TOOLTIP: &str = "Close tab  ⌘W";
 pub(super) struct TabStrip {
     scroll: ScrollHandle,
     shown: Option<TabId>,
+    pub(super) announce: bool,
+    pub(super) saved: Option<fleet_core::tabs::SavedWindow>,
 }
 
 #[derive(Clone)]
@@ -154,6 +156,7 @@ impl Shell {
 
     fn drop_tab(&mut self, id: TabId, to: usize, cx: &mut Context<Self>) {
         if self.state.panes_mut().move_tab(id, to) {
+            self.save_tabs(cx);
             cx.notify();
         }
     }

@@ -79,5 +79,5 @@ Spec column points at `design/`.
 | SAFE3 | Compare apply-spec and Loco cancel-build/restart carry the UID the user saw; Compare follows clusters that connect after it opens (#141, #136) | claude | compare-safety | done |
 | UPD1 | release pipeline: `mise run release`, tag-triggered arm64 build, ed25519-signed zip on GitHub Releases | claude | auto-update | done |
 | UPD2 | in-app updater: check, verify, stage, restart to update; menu, palette, settings and status bar | claude | auto-update-app | done |
-| TABS1 | pane tabs (one pane), v3 sidebar and status-bar switcher, tabs persisted per window | claude | tabs-and-shell-v3 | doing |
+| TABS1 | pane tabs (one pane), v3 sidebar and status-bar switcher, tabs persisted per window | claude | tabs-and-shell-v3, tabs-shell-v3-nav, tabs-persist | done (#158, #160, persistence PR) |
 | HL1 | primary and secondary highlight colours: presets or hex, derived for dark and light with WCAG checks | claude | themes | done |

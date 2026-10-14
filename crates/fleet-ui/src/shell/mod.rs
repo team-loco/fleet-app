@@ -50,7 +50,6 @@ pub struct Shell {
     commands: Sender<Command>,
     pending: Vec<Command>,
     new_tab_gesture: bool,
-    announce: bool,
     tab_strip: tabs::TabStrip,
     sidebar_generation: usize,
     focus: FocusHandle,
@@ -158,7 +157,6 @@ impl Shell {
             commands,
             pending: initial,
             new_tab_gesture: false,
-            announce: false,
             tab_strip: tabs::TabStrip::default(),
             sidebar_generation: 0,
             focus,
@@ -236,9 +234,12 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> Subscription {
         let handle = window.window_handle();
-        cx.on_window_closed(move |_, closed| {
+        cx.on_window_closed(move |cx, closed| {
             if closed == handle.window_id() {
                 let _ = commands.try_send(Command::WindowClosed(window_id));
+                if !cx.windows().is_empty() {
+                    crate::session::forget(window_id, cx);
+                }
             }
         })
     }
@@ -279,8 +280,11 @@ impl Shell {
         }
         self.state.update(update);
         self.run_pending(window, cx);
-        if self.loaded && std::mem::take(&mut self.announce) {
+        if self.loaded && std::mem::take(&mut self.tab_strip.announce) {
             self.show_active(cx);
+        }
+        if self.loaded {
+            self.save_tabs(cx);
         }
         let snapshot = &self.state.snapshot;
         self.fleet
@@ -317,8 +321,11 @@ impl Shell {
 
     pub fn restore_tabs(&mut self, saved: &fleet_core::tabs::SavedWindow, cx: &mut Context<Self>) {
         self.state.restore(saved);
-        self.announce = true;
-        cx.notify();
+        if self.loaded {
+            self.show_active(cx);
+        } else {
+            self.tab_strip.announce = true;
+        }
     }
 
     pub fn state(&self) -> &AppState {
@@ -448,6 +455,7 @@ impl Shell {
         self.track_load(cx);
         self.send(command);
         self.sync_palette(cx);
+        self.save_tabs(cx);
         cx.notify();
     }
 
@@ -472,7 +480,17 @@ impl Shell {
         self.sync_page(cx);
         self.track_load(cx);
         self.sync_palette(cx);
+        self.save_tabs(cx);
         cx.notify();
+    }
+
+    pub(super) fn save_tabs(&mut self, cx: &mut Context<Self>) {
+        let saved = self.state.panes().saved();
+        if self.tab_strip.saved.as_ref() == Some(&saved) {
+            return;
+        }
+        self.tab_strip.saved = Some(saved.clone());
+        crate::session::record(self.window_id, saved, cx);
     }
 
     pub(super) fn retarget(
@@ -490,6 +508,7 @@ impl Shell {
             if active == id {
                 self.show_active(cx);
             } else {
+                self.save_tabs(cx);
                 cx.notify();
             }
         }
@@ -852,5 +871,46 @@ mod tests {
         assert!(received.is_empty());
         assert!(shell.read_with(cx, |shell, cx| shell.palette.read(cx).is_open()));
         assert!(shell.read_with(cx, |shell, _| shell.state.sidebar_open));
+    }
+
+    #[gpui::test]
+    fn tabs_are_saved_per_window_and_restore_into_a_new_one(cx: &mut TestAppContext) {
+        let saved = std::rc::Rc::new(std::cell::RefCell::new(fleet_core::tabs::Session::default()));
+        let sink = saved.clone();
+        cx.update(|cx| {
+            crate::init(Some(theme::Appearance::Dark), cx)
+                .unwrap_or_else(|error| panic!("UI init: {error}"));
+            cx.bind_keys(crate::keymap::key_bindings());
+            crate::session::install(
+                std::rc::Rc::new(move |session| {
+                    sink.replace(session.clone());
+                    Ok(())
+                }),
+                cx,
+            );
+        });
+        let (backend, updates) = async_channel::unbounded();
+        let (commands, _received) = async_channel::unbounded();
+        let store = cx.new(|cx| Store::new(updates, commands, cx));
+        let (first, first_window) = cx.update(|cx| open_window(&store, Vec::new(), cx));
+        assert!(backend.try_send(Update::Snapshot(Box::default())).is_ok());
+        cx.run_until_parked();
+        cx.simulate_keystrokes(first_window, "cmd-t cmd-t cmd-1");
+        let written = saved.borrow().clone();
+        let expected = first.read_with(cx, |shell, _| shell.state.panes().saved());
+        assert_eq!(written.windows, std::slice::from_ref(&expected));
+        assert_eq!(expected.panes.first().map(|p| p.tabs.len()), Some(3));
+        let (second, second_window) = cx.update(|cx| open_window(&store, Vec::new(), cx));
+        cx.run_until_parked();
+        second.update(cx, |shell, cx| shell.restore_tabs(&expected, cx));
+        cx.run_until_parked();
+        assert_eq!(
+            second.read_with(cx, |shell, _| shell.state.panes().saved()),
+            expected
+        );
+        assert_eq!(saved.borrow().windows.len(), 2);
+        cx.simulate_keystrokes(second_window, "cmd-shift-w");
+        cx.run_until_parked();
+        assert_eq!(saved.borrow().windows, [expected]);
     }
 }
