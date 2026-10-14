@@ -132,3 +132,20 @@ Settled; change only with a new entry that says why.
     accent text is ≥ 4.5:1 on `editor`, `panel` and its own tint, `onacc` is ≥ 4.5:1 on `acc`,
     and `selfg`, `fg`, `fg2`, `mute` are ≥ 4.5:1 and status glyphs ≥ 3:1 on `sel`. The override
     applies to every window at once and to the gpui-component kit theme.
+25. **v3 sidebar and status-bar switcher** (design v3; product owner): supersedes the parts of 16
+    and 18 that conflict. The sidebar is 200px: the 28px strip (traffic lights only), then a 32px
+    header with the scope (All clusters, or the active tab's cluster) and the ⌘B collapse
+    chevron, then the nav. Collapsed it is 76px with only the expand chevron: the product owner
+    overrides the design's vertical scope label, so `kit::VerticalLabel` stays removed. The cluster
+    switcher moves from the start of the status bar to its right end, after a 1px rule; the
+    problem counts come first and the scope facts ellipsize. Its menu is 290px, anchored to the
+    right edge above the bar: All clusters (⌘0, a new binding that also works with the menu
+    closed), a rule, every cluster (glyph, name, problem counts, or the state when it is not
+    healthy, offline names in mute), a rule, Add cluster…. The current row uses `sel`; the hovered
+    and the current row show a gear that opens Cluster settings. The query field and footer are
+    gone: ↑ ↓ ↵ Esc and type-ahead letters move and pick. Connect or Disconnect and Remove from
+    Fleet move to right-click on a cluster row (or ⌘. on the highlighted one), which shows the
+    same Settings / Connect or Disconnect / Remove list as before, and stay in Cluster settings.
+    Picking a cluster retargets the active tab (decision 23) to the same page on that cluster,
+    or the same object when it exists there, else that cluster's Overview; All clusters retargets
+    it to Fleet home. The move is one history step, so ⌘[ returns to the previous cluster.

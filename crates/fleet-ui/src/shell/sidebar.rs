@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
+use fleet_core::switcher::ALL_CLUSTERS;
 use fleet_core::{ClusterSummary, Command, Counts, NavSection, Page};
 use gpui::{
     Animation, AnimationExt, AnyElement, ClickEvent, Context, ElementId, FontWeight, Hsla,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, SharedString,
     StatefulInteractiveElement, Styled, Window, div, ease_out_quint, prelude::FluentBuilder, svg,
 };
 
@@ -13,7 +14,8 @@ use crate::assets::{CHEVRON_LEFT, CHEVRON_RIGHT};
 use crate::kit::{Tooltip, status_symbols};
 use crate::theme::{
     ActiveTheme, COLLAPSE, FONT_MONO, ICON, ICON_BUTTON, Palette, RADIUS, ROW_NAV, RULE, SIDEBAR,
-    SIDEBAR_COLLAPSED, SPACE_2, SPACE_3, SPACE_4, SPACE_6, STRIP, TEXT_LABEL, TEXT_SMALL,
+    SIDEBAR_COLLAPSED, SIDEBAR_HEADER, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_8, STRIP,
+    TEXT_LABEL, TEXT_SMALL, TEXT_UI,
 };
 
 const COLLAPSE_TOOLTIP: &str = "Collapse sidebar  ⌘B";
@@ -100,12 +102,35 @@ impl Shell {
         }
         let collapse = icon_button("collapse-sidebar", CHEVRON_LEFT, COLLAPSE_TOOLTIP, palette)
             .on_click(cx.listener(|this, _, _, cx| this.dispatch(Command::ToggleSidebar, cx)));
+        let scope: SharedString = match &self.state.location().cluster {
+            Some(id) => fleet_core::tabs::cluster_name(id, &self.state.snapshot).into(),
+            None => ALL_CLUSTERS.into(),
+        };
+        let header = div()
+            .debug_selector(|| "sidebar-scope".to_owned())
+            .flex()
+            .flex_none()
+            .items_center()
+            .h(SIDEBAR_HEADER)
+            .pl(SPACE_8)
+            .pr(SPACE_3)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(TEXT_UI)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(scope),
+            )
+            .child(collapse);
         div()
             .w(SIDEBAR)
             .h_full()
             .flex()
             .flex_col()
-            .child(top_strip(palette).justify_end().pr(SPACE_3).child(collapse))
+            .child(top_strip(palette))
+            .child(header)
             .child(
                 div()
                     .id("sidebar-scroll")
@@ -117,7 +142,6 @@ impl Shell {
                     .min_h_0()
                     .overflow_y_scroll()
                     .px(SPACE_4)
-                    .pt(SPACE_3)
                     .pb(SPACE_3)
                     .children(items),
             )
@@ -133,7 +157,7 @@ fn sidebar_collapsed(palette: &Palette, cx: &mut Context<Shell>) -> impl IntoEle
         .flex()
         .flex_col()
         .child(top_strip(palette))
-        .child(div().flex().pt(SPACE_3).px(SPACE_4).child(expand))
+        .child(div().flex().justify_center().pt(SPACE_5).child(expand))
 }
 
 fn top_strip(palette: &Palette) -> gpui::Div {

@@ -5,8 +5,8 @@ use gpui::KeyBinding;
 use crate::actions::{
     ActivateTab, CloseTab, CloseWindow, CompareAcrossClusters, FocusContent, FocusFilter,
     FocusSidebar, FollowLogs, GoBack, GoForward, NewTab, NewWindow, NextTab, OpenSelectedNewWindow,
-    OpenSettings, PreviousTab, QuickOpen, Quit, ShowCommands, ShowFluxOwner, ToggleClusterSwitcher,
-    ToggleCommandPalette, ToggleDock, ToggleSidebar,
+    OpenSettings, PreviousTab, QuickOpen, Quit, ShowAllClusters, ShowCommands, ShowFluxOwner,
+    ToggleClusterSwitcher, ToggleCommandPalette, ToggleDock, ToggleSidebar,
 };
 use crate::kit::{SendBackTab, SendTab, TERMINAL_CONTEXT};
 use crate::screens::command::PALETTE_CONTEXT;
@@ -141,6 +141,12 @@ pub const BINDINGS: &[Binding] = &[
         Group::General,
         |k, c| KeyBinding::new(k, ToggleClusterSwitcher, c),
     ),
+    Binding::new(
+        &["cmd-0"],
+        "All clusters in this tab",
+        Group::General,
+        |k, c| KeyBinding::new(k, ShowAllClusters, c),
+    ),
     Binding::new(&["cmd-,"], "Settings", Group::General, |k, c| {
         KeyBinding::new(k, OpenSettings, c)
     }),
@@ -231,7 +237,11 @@ pub const BINDINGS: &[Binding] = &[
     ),
     Binding::built_in(&["enter"], "Open the selected row", Group::Lists),
     Binding::built_in(&["escape"], "Close the inspector", Group::Lists),
-    Binding::built_in(&["cmd-."], "Cluster actions in the switcher", Group::Lists),
+    Binding::built_in(
+        &["cmd-."],
+        "Connect, disconnect or remove the highlighted cluster in the switcher",
+        Group::Lists,
+    ),
     Binding::new(&["cmd-l"], "Follow logs", Group::Resource, |k, c| {
         KeyBinding::new(k, FollowLogs, c)
     }),
@@ -491,6 +501,10 @@ mod tests {
             Some(COMPARE_KEY)
         );
         assert_eq!(label("Show the Flux owner").as_deref(), Some(OWNER_KEY));
+        assert_eq!(
+            label("All clusters in this tab").as_deref(),
+            Some(crate::shell::switcher::ALL_CLUSTERS_KEY)
+        );
     }
 
     #[test]

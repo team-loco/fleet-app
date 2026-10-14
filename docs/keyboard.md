@@ -10,6 +10,7 @@ Generated from the binding table in `crates/fleet-ui/src/keymap.rs`; run `mise r
 | ⌘⇧P | Run a command |
 | ⌘K | Command palette |
 | ⌘⇧C | Switch cluster |
+| ⌘0 | All clusters in this tab |
 | ⌘, | Settings |
 | ⌘N | New window |
 | ⌘⇧W | Close the window |
@@ -57,7 +58,7 @@ Generated from the binding table in `crates/fleet-ui/src/keymap.rs`; run `mise r
 | letters | Jump to the row whose name starts with them |
 | ↵ | Open the selected row |
 | Esc | Close the inspector |
-| ⌘. | Cluster actions in the switcher |
+| ⌘. | Connect, disconnect or remove the highlighted cluster in the switcher |
 
 ## Selected resource
 
