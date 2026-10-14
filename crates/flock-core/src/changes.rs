@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use crate::filter::TextFilter;
+use crate::overview::plural;
 use crate::time::age;
 use crate::{ClusterId, Status};
 
@@ -204,7 +205,7 @@ impl Commit {
     pub fn target_sentence(&self) -> String {
         let scope = match self.rollout.as_slice() {
             [only] => only.cluster.to_string(),
-            all => format!("{} clusters", all.len()),
+            all => plural(all.len(), "cluster", "clusters"),
         };
         format!(
             "affects {}/{} on {scope}",

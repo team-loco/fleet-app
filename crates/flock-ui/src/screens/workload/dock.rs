@@ -24,13 +24,12 @@ use crate::theme::{
 
 pub const LOGS: usize = 0;
 pub const TERMINAL: usize = 2;
-pub const FILTER_PLACEHOLDER: &str = "filter  /regex/";
 
 const LOGS_LABEL: &str = "Logs";
 const EVENTS_LABEL: &str = "Events";
 const TERMINAL_LABEL: &str = "Terminal";
-const DEBUG: &str = "debug";
-const EXEC: &str = "exec";
+const DEBUG: &str = "debug container";
+const EXEC: &str = "shell";
 const FOLLOW: &str = "follow";
 const WRAP: &str = "wrap";
 const OPEN_IN_TAB: &str = "Open logs in tab";
@@ -40,7 +39,7 @@ const POD_KIND: &str = "Pod";
 const EVENT_AGE: Pixels = px(48.);
 const EVENT_GLYPH: Pixels = px(14.);
 const EVENT_REASON: Pixels = px(150.);
-const EVENT_COUNT: Pixels = px(34.);
+const EVENT_COUNT: Pixels = px(72.);
 
 pub struct ExecSession {
     input: async_channel::Sender<Vec<u8>>,
@@ -466,7 +465,7 @@ fn event_row(event: &Event, palette: &Palette) -> AnyElement {
                 .justify_end()
                 .pr(SPACE_4)
                 .text_color(palette.mute)
-                .child(format!("×{}", event.count)),
+                .child(flock_core::units::times(event.count)),
         )
         .into_any_element()
 }

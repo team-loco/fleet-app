@@ -130,7 +130,7 @@ impl NodeSummary {
         let parts: Vec<String> = self
             .instance_types
             .iter()
-            .map(|(name, count)| format!("{name} ×{count}"))
+            .map(|(name, count)| format!("{count} × {name}"))
             .collect();
         parts.join(" · ")
     }
@@ -147,7 +147,7 @@ impl NodeSummary {
                 } else {
                     name.split(INSTANCE_SIZE_SEPARATOR).next().unwrap_or(name)
                 };
-                format!("{shown} ×{count}")
+                format!("{count} × {shown}")
             })
             .collect();
         parts.join(" · ")
@@ -213,8 +213,8 @@ pub(crate) mod tests {
         assert_eq!(summary.cordoned, 1);
         assert_eq!(summary.not_ready, 1);
         assert_eq!(summary.pod_capacity, 440);
-        assert_eq!(summary.instance_label(), "m6i.4xlarge ×3 · g5.2xlarge ×1");
-        assert_eq!(summary.compact_instance_label(), "m6i.4xlarge ×3 · g5 ×1");
+        assert_eq!(summary.instance_label(), "3 × m6i.4xlarge · 1 × g5.2xlarge");
+        assert_eq!(summary.compact_instance_label(), "3 × m6i.4xlarge · 1 × g5");
     }
 
     #[test]
@@ -222,7 +222,7 @@ pub(crate) mod tests {
         let one = NodeSummary::of(&[node("a", "m6i.large", true, true)]);
         assert_eq!(
             one.meta_line(),
-            "1 node · 1 ready · 0 cordoned · m6i.large ×1"
+            "1 node · 1 ready · 0 cordoned · 1 × m6i.large"
         );
         let two = NodeSummary::of(&[
             node("a", "m6i.large", true, true),
@@ -230,7 +230,7 @@ pub(crate) mod tests {
         ]);
         assert_eq!(
             two.meta_line(),
-            "2 nodes · 1 ready · 1 cordoned · m6i.large ×2"
+            "2 nodes · 1 ready · 1 cordoned · 2 × m6i.large"
         );
     }
 

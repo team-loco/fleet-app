@@ -1,6 +1,7 @@
 use crate::kit::SelectableText;
 use flock_core::emptiness::Noun;
 use flock_core::events::{self, Event, EventFilter, filter_counts, filter_events};
+use flock_core::overview::plural;
 use flock_core::resources::EVENT_LIST;
 use flock_core::settings::NamespaceSelection;
 use flock_core::time::age;
@@ -183,7 +184,7 @@ impl EventsScreen {
         let scope = self.preferences.namespace_selection(EVENT_LIST);
         let events = events::in_namespace(&self.events, scope.namespace());
         let counts = events::counts(&events);
-        (counts, format!("{} events", events.len()))
+        (counts, plural(events.len(), "event", "events"))
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
@@ -407,11 +408,15 @@ fn columns() -> Vec<Column<Event>> {
             .mono()
             .fixed(EVENT_AGE_WIDTH)
             .sort_by_key(|e: &Event| e.age),
-        Column::colored_text("×", |e: &Event| e.count.to_string().into(), |_, p| p.mute)
-            .mono()
-            .end()
-            .fixed(EVENT_COUNT_WIDTH)
-            .sort_by_key(|e: &Event| e.count),
+        Column::colored_text(
+            "Count",
+            |e: &Event| e.count.to_string().into(),
+            |_, p| p.mute,
+        )
+        .mono()
+        .end()
+        .fixed(EVENT_COUNT_WIDTH)
+        .sort_by_key(|e: &Event| e.count),
     ]
 }
 

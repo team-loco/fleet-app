@@ -29,7 +29,7 @@ const ROLLOUT_CLUSTER: Pixels = px(110.);
 const ROLLOUT_OBJECT: Pixels = px(140.);
 
 const ALL_CLUSTERS: &str = "All clusters";
-const COMMIT: &str = "commit";
+const COMMIT: &str = "Commit";
 const NO_COMMITS: &str = "No commits match the filter.";
 const NOT_TARGETED: &str = "·";
 const SEPARATOR: &str = " · ";

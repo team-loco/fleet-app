@@ -3,13 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::filter::TextFilter;
 use std::time::Duration;
 
-use crate::{ClusterId, Counts, ResourceRef, Status, Uid};
+use crate::{ClusterId, Counts, ResourceRef, Status, Uid, units};
 
 pub const POD_KIND: &str = "Pod";
 const RESTARTS_ERR: u32 = 5;
 const SHORT_NAME_MIN: usize = 4;
-const MILLIS_PER_CORE: u32 = 1000;
-const MIB_PER_GIB: u32 = 1024;
 const SEPARATOR: &str = " · ";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -104,19 +102,11 @@ pub struct Usage {
 
 impl Usage {
     pub fn cpu_label(self) -> String {
-        if self.cpu_millis < MILLIS_PER_CORE {
-            return format!("{}m", self.cpu_millis);
-        }
-        let cores = f64::from(self.cpu_millis) / f64::from(MILLIS_PER_CORE);
-        format!("{cores:.1}")
+        units::cpu_millis(self.cpu_millis)
     }
 
     pub fn memory_label(self) -> String {
-        if self.memory_mib < MIB_PER_GIB {
-            return format!("{}Mi", self.memory_mib);
-        }
-        let gib = f64::from(self.memory_mib) / f64::from(MIB_PER_GIB);
-        format!("{gib:.1}Gi")
+        units::memory_mib(self.memory_mib)
     }
 }
 
@@ -575,7 +565,7 @@ mod tests {
         };
         assert_eq!(
             (small.cpu_label(), small.memory_label()),
-            ("212m".into(), "301Mi".into())
+            ("212m".into(), "301 MiB".into())
         );
         let large = Usage {
             cpu_millis: 1500,
@@ -583,7 +573,7 @@ mod tests {
         };
         assert_eq!(
             (large.cpu_label(), large.memory_label()),
-            ("1.5".into(), "2.0Gi".into())
+            ("1.5 cores".into(), "2.0 GiB".into())
         );
     }
 

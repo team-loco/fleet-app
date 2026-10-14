@@ -31,6 +31,7 @@ pub mod stream;
 pub mod switcher;
 pub mod tabs;
 pub mod time;
+pub mod units;
 pub mod updater;
 pub mod watch;
 pub mod workload;

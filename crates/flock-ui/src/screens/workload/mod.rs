@@ -17,9 +17,9 @@ use gpui::{
 use crate::kit::status_symbols;
 use crate::kit::{
     ActionMenu, Button, CodeView, Column, ConfirmDialog, DockState, EmptyState, ErrorState,
-    InspectorPane, KeyValue, Link, LogView, MenuItem, PageHeader, Rule, SectionHeader,
-    SectionLabel, Segmented, Skeleton, StatusText, Table, TableEvent, Terminal, TextFieldState,
-    Toast, Width, confirm, min_row_width, slide_in, toast,
+    InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER, Link, LogView, MenuItem, PageHeader, Rule,
+    SectionHeader, SectionLabel, Segmented, Skeleton, StatusText, Table, TableEvent, Terminal,
+    TextFieldState, Toast, Width, confirm, min_row_width, slide_in, toast,
 };
 use crate::screens::{FullView, full_view_link};
 use crate::theme::{
@@ -54,7 +54,7 @@ const STATUS_MAX: Pixels = px(260.);
 const RESTARTS_WIDTH: Pixels = px(58.);
 const NODE_WIDTH: Pixels = px(178.);
 const CPU_WIDTH: Pixels = px(52.);
-const MEM_WIDTH: Pixels = px(60.);
+const MEM_WIDTH: Pixels = px(76.);
 const AGE_WIDTH: Pixels = px(34.);
 
 const REV_WIDTH: Pixels = px(34.);
@@ -154,7 +154,7 @@ impl WorkloadScreen {
         let dock = cx.new(|_| DockState::new());
         let logs = cx.new(|_| LogView::new("workload-logs"));
         let filter =
-            cx.new(|cx| TextFieldState::new(window, cx).placeholder(dock::FILTER_PLACEHOLDER));
+            cx.new(|cx| TextFieldState::new(window, cx).placeholder(LOG_FILTER_PLACEHOLDER));
         let terminal = cx.new(|cx| Terminal::new("workload-terminal", cx));
         let mut subscriptions = vec![cx.subscribe(&pods, |this, table, event: &TableEvent, cx| {
             let TableEvent::Selected(ix) = event else {
@@ -869,7 +869,7 @@ fn pod_columns() -> Vec<Column<Pod>> {
         .end()
         .fixed(CPU_WIDTH),
         Column::colored_text(
-            "Mem",
+            "Memory",
             |p: &Pod| p.memory_label().into(),
             |_, palette| palette.fg2,
         )

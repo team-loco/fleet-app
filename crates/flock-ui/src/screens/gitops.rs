@@ -44,7 +44,7 @@ const LEGEND: [(Option<Status>, &str); 6] = [
     (Some(Status::Suspended), "suspended"),
     (None, "not deployed"),
 ];
-const LEGEND_BEHIND: &str = "dim rev = behind HEAD";
+const LEGEND_BEHIND: &str = "Dimmed revision: not yet on the latest commit";
 
 pub struct GitOpsScreen {
     gitops: GitOps,

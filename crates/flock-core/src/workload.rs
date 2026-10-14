@@ -1,12 +1,8 @@
 use std::time::Duration;
 
-use crate::{ResourceRef, Status, Uid, time};
+use crate::{ResourceRef, Status, Uid, time, units};
 
 const CRASH_LOOP: &str = "CrashLoopBackOff";
-const MILLIS_PER_CORE: u32 = 1000;
-const KIB: u64 = 1024;
-const MIB: u64 = KIB * KIB;
-const GIB: u64 = MIB * KIB;
 const NONE: &str = "—";
 const FIELD_SEPARATOR: &str = " · ";
 const LIMIT_SEPARATOR: &str = " / ";
@@ -166,8 +162,8 @@ impl Workload {
             Field::new("Image", image),
             Field::new("Revision", revision),
             Field::new("Replicas", self.desired.to_string()),
-            Field::new("CPU req / limit", cpu),
-            Field::new("Memory req / limit", memory),
+            Field::new("CPU request / limit", cpu),
+            Field::new("Memory request / limit", memory),
         ];
         if let Some(owner) = &self.managed_by {
             fields.push(Field::new("Managed by", owner.name.clone()));
@@ -284,24 +280,6 @@ pub fn short_pod_name(name: &str) -> &str {
     name.rsplit('-').next().unwrap_or(name)
 }
 
-pub fn format_cpu(millis: u32) -> String {
-    if millis >= MILLIS_PER_CORE && millis.is_multiple_of(MILLIS_PER_CORE) {
-        (millis / MILLIS_PER_CORE).to_string()
-    } else {
-        format!("{millis}m")
-    }
-}
-
-pub fn format_memory(bytes: u64) -> String {
-    if bytes >= GIB {
-        format!("{}Gi", bytes / GIB)
-    } else if bytes >= MIB {
-        format!("{}Mi", bytes / MIB)
-    } else {
-        format!("{}Ki", bytes / KIB)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pod {
     pub name: String,
@@ -336,12 +314,13 @@ impl Pod {
     }
 
     pub fn cpu_label(&self) -> String {
-        self.cpu_millis.map_or_else(|| NONE.to_owned(), format_cpu)
+        self.cpu_millis
+            .map_or_else(|| NONE.to_owned(), units::cpu_millis)
     }
 
     pub fn memory_label(&self) -> String {
         self.memory_bytes
-            .map_or_else(|| NONE.to_owned(), format_memory)
+            .map_or_else(|| NONE.to_owned(), units::memory_bytes)
     }
 
     pub fn age_label(&self) -> String {
@@ -454,7 +433,7 @@ pub struct Resources {
 
 impl Resources {
     pub fn label(&self) -> String {
-        let parts: Vec<String> = [("cpu", &self.cpu), ("mem", &self.memory)]
+        let parts: Vec<String> = [("CPU", &self.cpu), ("memory", &self.memory)]
             .into_iter()
             .filter_map(|(name, value)| value.as_ref().map(|v| format!("{name} {v}")))
             .collect();
@@ -685,8 +664,8 @@ pub(crate) mod tests {
                 ("Image", "checkout-api:2.37"),
                 ("Revision", "37 · 1h ago"),
                 ("Replicas", "3"),
-                ("CPU req / limit", "500m / 1"),
-                ("Memory req / limit", "512Mi / —"),
+                ("CPU request / limit", "500m / 1"),
+                ("Memory request / limit", "512Mi / —"),
                 ("Managed by", "apps-payments"),
             ]
         );
@@ -767,17 +746,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn formats_quantities_like_kubectl_top() {
-        assert_eq!(format_cpu(4), "4m");
-        assert_eq!(format_cpu(212), "212m");
-        assert_eq!(format_cpu(2000), "2");
-        assert_eq!(format_memory(38 * MIB), "38Mi");
-        assert_eq!(format_memory(301 * MIB + 5), "301Mi");
-        assert_eq!(format_memory(GIB), "1Gi");
-        assert_eq!(format_memory(512 * KIB), "512Ki");
-    }
-
-    #[test]
     fn spec_labels_match_the_inspector() {
         let port = Port {
             port: 8080,
@@ -789,7 +757,7 @@ pub(crate) mod tests {
             cpu: Some("500m".into()),
             memory: Some("512Mi".into()),
         };
-        assert_eq!(requests.label(), "cpu 500m · mem 512Mi");
+        assert_eq!(requests.label(), "CPU 500m · memory 512Mi");
         assert_eq!(Resources::default().label(), "none");
         let probe = Probe {
             action: ProbeAction::HttpGet {

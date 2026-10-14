@@ -761,9 +761,9 @@ mod tests {
     #[test]
     fn prod_us_east_matches_design_overview() {
         let detail = prod_us_east();
-        assert_eq!(detail.cpu().amount(), "68.4 / 112 cores");
+        assert_eq!(detail.cpu().amount(), "68.4 / 112.0 cores");
         assert_eq!(percent(detail.cpu().fraction()), "61%");
-        assert_eq!(detail.memory().amount(), "312 / 512 GiB");
+        assert_eq!(detail.memory().amount(), "312.0 / 512.0 GiB");
         assert_eq!(percent(detail.memory().fraction()), "61%");
         let nodes = detail.node_summary();
         assert_eq!((nodes.total, nodes.ready, nodes.cordoned), (14, 13, 1));

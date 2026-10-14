@@ -1,5 +1,5 @@
 use crate::resources::{Resource, ResourceKind};
-use crate::{Page, Status};
+use crate::{Page, Status, units};
 
 const PERCENT: f32 = 100.;
 const THOUSANDS_GROUP: usize = 3;
@@ -24,25 +24,8 @@ impl Capacity {
     }
 
     pub fn amount(&self) -> String {
-        format!(
-            "{} / {} {}",
-            number(self.used),
-            number(self.total),
-            self.unit
-        )
+        units::amount(self.used, self.total, &self.unit)
     }
-}
-
-pub fn number(value: f32) -> String {
-    let rounded = format!("{value:.1}");
-    match rounded.strip_suffix(".0") {
-        Some(whole) => whole.to_owned(),
-        None => rounded,
-    }
-}
-
-pub fn fixed(value: f32) -> String {
-    format!("{value:.1}")
 }
 
 pub fn percent(fraction: f32) -> String {
@@ -232,7 +215,7 @@ mod tests {
             requests: 0.74,
             limits: 1.31,
         };
-        assert_eq!(cpu.amount(), "68.4 / 112 cores");
+        assert_eq!(cpu.amount(), "68.4 / 112.0 cores");
         assert_eq!(percent(cpu.fraction()), "61%");
         assert_eq!(percent(cpu.limits), "131%");
         assert!(Capacity::default().fraction().abs() < f32::EPSILON);
@@ -292,13 +275,6 @@ mod tests {
         assert_eq!(named(&["a", "b", "c", "d", "e"]), "a, b, c and 2 more");
         assert_eq!(verb(1, "is", "are"), "is");
         assert_eq!(verb(2, "is", "are"), "are");
-    }
-
-    #[test]
-    fn fixed_keeps_one_decimal() {
-        assert_eq!(fixed(61.), "61.0");
-        assert_eq!(fixed(0.), "0.0");
-        assert_eq!(fixed(22.46), "22.5");
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use flock_core::history::Location;
+use flock_core::overview::plural;
 use flock_core::watch::WatchState;
 use flock_core::{Command, Counts, Page};
 use gpui::{
@@ -326,7 +327,7 @@ impl Shell {
         if self.cluster_of(location).is_some() {
             return Skeleton::rows().into_any_element();
         }
-        let scope = format!("{} clusters", self.state.snapshot.clusters.len());
+        let scope = plural(self.state.snapshot.clusters.len(), "cluster", "clusters");
         div()
             .flex()
             .flex_col()

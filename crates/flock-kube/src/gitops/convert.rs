@@ -18,6 +18,8 @@ const READY: &str = "Ready";
 const SEPARATOR: &str = " · ";
 const VALUES_MAX: usize = 40;
 const DEFAULT_BRANCH: &str = "master";
+const ANY_VERSION: &str = "*";
+const LATEST_VERSION: &str = "latest version";
 const DEPLOYED: &str = "deployed";
 const SUCCEEDED_SUFFIX: &str = "Succeeded";
 const UID_POINTER: &str = "/metadata/uid";
@@ -402,7 +404,7 @@ fn every(parsed: &Parsed) -> Option<String> {
     let interval = parsed.spec_str("/interval")?;
     let timeout = parsed.spec_str("/timeout").map(|t| format!("timeout {t}"));
     let prune = (parsed.object.spec.get("prune").and_then(Value::as_bool) == Some(true))
-        .then(|| "prune".to_owned());
+        .then(|| "prunes deleted objects".to_owned());
     let parts: Vec<String> = std::iter::once(interval.to_owned())
         .chain(timeout)
         .chain(prune)
@@ -433,11 +435,10 @@ fn spec_rows(parsed: &Parsed, objects: &[Parsed]) -> Vec<SpecRow> {
                 .spec_str("/path")
                 .map(|p| p.trim_start_matches("./").to_owned());
             push("path", path);
-            push("every", every(parsed));
+            push("interval", every(parsed));
         }
         ObjectKind::HelmRelease => {
-            let (chart, version) = chart(parsed);
-            push("chart", Some(format!("{chart}{SEPARATOR}{version}")));
+            push("chart", Some(chart_row(parsed)));
             let source = parsed
                 .object
                 .spec
@@ -446,13 +447,13 @@ fn spec_rows(parsed: &Parsed, objects: &[Parsed]) -> Vec<SpecRow> {
                 .and_then(Value::as_str)
                 .map(str::to_owned);
             push("source", source);
-            push("every", every(parsed));
+            push("interval", every(parsed));
             push("upgrade", remediation(parsed));
         }
         ObjectKind::GitRepository => {
             push("url", parsed.spec_str("/url").map(redact::credentials));
-            push("ref", reference_row(parsed));
-            push("every", every(parsed));
+            push("reference", reference_row(parsed));
+            push("interval", every(parsed));
             push(
                 "secret",
                 parsed.spec_str("/secretRef/name").map(str::to_owned),
@@ -460,16 +461,16 @@ fn spec_rows(parsed: &Parsed, objects: &[Parsed]) -> Vec<SpecRow> {
         }
         ObjectKind::HelmRepository => {
             push("url", parsed.spec_str("/url").map(redact::credentials));
-            push("every", every(parsed));
+            push("interval", every(parsed));
         }
         ObjectKind::HelmChart => {
             push("chart", parsed.spec_str("/chart").map(str::to_owned));
-            push("every", every(parsed));
+            push("interval", every(parsed));
         }
         ObjectKind::OCIRepository => {
             push("url", parsed.spec_str("/url").map(redact::credentials));
-            push("ref", reference_row(parsed));
-            push("every", every(parsed));
+            push("reference", reference_row(parsed));
+            push("interval", every(parsed));
         }
     }
     rows
@@ -487,6 +488,22 @@ fn remediation(parsed: &Parsed) -> Option<String> {
         .map(|s| format!("remediate {s}"));
     let parts: Vec<String> = retries.into_iter().chain(strategy).collect();
     (!parts.is_empty()).then(|| parts.join(SEPARATOR))
+}
+
+fn chart_row(parsed: &Parsed) -> String {
+    let (chart, version) = chart(parsed);
+    let resolved = parsed.object.last_attempted_revision.is_some();
+    let version = match (resolved, version.as_str()) {
+        (_, "") => String::new(),
+        (true, resolved) => resolved.to_owned(),
+        (false, ANY_VERSION) => LATEST_VERSION.to_owned(),
+        (false, constraint) => format!("version matching {constraint}"),
+    };
+    [chart, version]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(SEPARATOR)
 }
 
 fn chart(parsed: &Parsed) -> (String, String) {
@@ -847,6 +864,40 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn chart_rows_read_in_words_without_dangling_separators() {
+        let release = |spec: Value, revision: Option<&str>| {
+            let mut status = json!({});
+            if let Some(revision) = revision {
+                status = json!({"lastAttemptedRevision": revision});
+            }
+            let value = json!({
+                "apiVersion": "helm.toolkit.fluxcd.io/v2",
+                "kind": "HelmRelease",
+                "metadata": {"name": "podinfo", "namespace": "flux-system"},
+                "spec": spec,
+                "status": status,
+            });
+            chart_row(&parsed(&value))
+        };
+        let source_ref = || json!({"kind": "HelmRepository", "name": "repo"});
+        let chart = |version: Option<&str>| match version {
+            Some(v) => {
+                json!({"interval": "1m", "chart": {"spec": {"chart": "podinfo", "version": v, "sourceRef": source_ref()}}})
+            }
+            None => {
+                json!({"interval": "1m", "chart": {"spec": {"chart": "podinfo", "sourceRef": source_ref()}}})
+            }
+        };
+        assert_eq!(release(chart(Some("*")), None), "podinfo · latest version");
+        assert_eq!(
+            release(chart(Some("^6.0")), None),
+            "podinfo · version matching ^6.0"
+        );
+        assert_eq!(release(chart(Some("*")), Some("6.5.1")), "podinfo · 6.5.1");
+        assert_eq!(release(chart(None), None), "podinfo");
+    }
+
+    #[test]
     fn healthy_kustomization_reads_like_the_design() {
         let objects = [parsed(&git_repository())];
         let object = convert(&kustomization("apps", "True", "3e0ff8ae123b"), &objects);
@@ -877,7 +928,7 @@ pub(super) mod tests {
             [
                 ("source", "podinfo · master"),
                 ("path", "kustomize"),
-                ("every", "10m · prune"),
+                ("interval", "10m · prunes deleted objects"),
             ]
         );
         let inventory: Vec<(Status, String, Option<String>)> = object
@@ -897,7 +948,7 @@ pub(super) mod tests {
             ]
         );
         assert_eq!(object.history.len(), 1);
-        assert_eq!(object.history[0].count_label().as_deref(), Some("×72"));
+        assert_eq!(object.history[0].count_label().as_deref(), Some("72 times"));
         assert_eq!(object.history[0].message, "applied");
         assert!(!object.yaml.contains("managedFields"));
     }

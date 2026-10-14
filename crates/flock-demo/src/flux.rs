@@ -975,7 +975,10 @@ mod tests {
             .iter()
             .map(HistoryEntry::count_label)
             .collect();
-        assert_eq!(counts, [Some("×18".into()), None, Some("×142".into())]);
+        assert_eq!(
+            counts,
+            [Some("18 times".into()), None, Some("142 times".into())]
+        );
     }
 
     #[test]
