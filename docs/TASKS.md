@@ -77,3 +77,5 @@ Spec column points at `design/`.
 | TBL2b | one namespace memory per cluster and list in cluster preferences; pods and resource lists scoped again after #146 (#117) | claude | tables-namespace-unify | done |
 | TBL3 | actions on table rows (hover ⋯, right-click), inspectors keep the primary action; no summary sentence on list pages (#119, #120) | claude | tables-row-actions-2 | done |
 | SAFE3 | Compare apply-spec and Loco cancel-build/restart carry the UID the user saw; Compare follows clusters that connect after it opens (#141, #136) | claude | compare-safety | done |
+| UPD1 | release pipeline: `mise run release`, tag-triggered arm64 build, ed25519-signed zip on GitHub Releases | claude | auto-update | done |
+| UPD2 | in-app updater: check, verify, stage, restart to update; menu, palette, settings and status bar | claude | auto-update-app | in progress |
