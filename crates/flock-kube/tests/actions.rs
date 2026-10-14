@@ -12,7 +12,7 @@ use flock_kube::discovery::{DiscoverySources, KubeContext, discover};
 use flock_kube::settings::KubeSettings;
 use flock_kube::store::ClusterStore;
 use futures::FutureExt;
-use k8s_openapi::api::apps::v1::{ControllerRevision, Deployment, StatefulSet};
+use k8s_openapi::api::apps::v1::{ControllerRevision, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::core::v1::{ConfigMap, Node, Pod, PodTemplateSpec};
 use kube::api::{ApiResource, DynamicObject, GroupVersionKind};
 use kube::api::{DeleteParams, ListParams, Patch, PatchParams, PostParams};
@@ -40,11 +40,15 @@ const DEBUG_IMAGE: &str = "busybox:1.37";
 const ECHO_MARKER: &str = "flock-e2e-exec";
 const OTHER_CONTEXT: &str = "kind-fleet-b";
 const SCRATCH_DEPLOYMENT: &str = "flock-compare-e2e";
+const REVISION_ANNOTATION: &str = "deployment.kubernetes.io/revision";
+const SCRATCH_ROLLBACK: &str = "flock-restart-rollback-e2e";
 const SCRATCH_STATEFUL_SET: &str = "flock-rollback-e2e";
 const NEWER_IMAGE: &str = "busybox:1.36";
 const CTRL_C: u8 = 0x03;
 const FOREGROUND_SETTLE: Duration = Duration::from_secs(1);
 const SHELL_OUTPUT_TIMEOUT: Duration = Duration::from_secs(20);
+const SIZE_PROBE_ATTEMPTS: usize = 20;
+const SIZE_PROBE_WAIT: Duration = Duration::from_millis(500);
 const SHELL_SIZE: TermSize = TermSize { cols: 97, rows: 23 };
 
 fn enabled() -> bool {
@@ -93,8 +97,16 @@ impl Harness {
         if !enabled() {
             return None;
         }
-        let contexts: Option<Vec<KubeContext>> = names.iter().map(|n| kind_context(n)).collect();
-        let home = kind_only_home(&contexts?);
+        let contexts: Vec<KubeContext> = names
+            .iter()
+            .map(|name| {
+                let Some(context) = kind_context(name) else {
+                    panic!("{E2E_VAR}=1 needs KUBECONFIG with {name}");
+                };
+                context
+            })
+            .collect();
+        let home = kind_only_home(&contexts);
         let options = KubeConfigOptions {
             context: Some(CONTEXT.to_owned()),
             ..KubeConfigOptions::default()
@@ -233,6 +245,28 @@ async fn shell_output_until(events: &Receiver<ExecEvent>, marker: &str) -> Strin
     output
 }
 
+async fn await_tty_size(
+    input: &Sender<Vec<u8>>,
+    events: &Receiver<ExecEvent>,
+    size: &str,
+) -> Vec<ExecEvent> {
+    let mut seen = Vec::new();
+    for _ in 0..SIZE_PROBE_ATTEMPTS {
+        assert!(input.send(b"stty size\r".to_vec()).await.is_ok());
+        let mut output = String::new();
+        while let Ok(Ok(event)) = tokio::time::timeout(SIZE_PROBE_WAIT, events.recv()).await {
+            if let ExecEvent::Output(bytes) = &event {
+                output.push_str(&String::from_utf8_lossy(bytes));
+            }
+            seen.push(event);
+            if output.contains(size) {
+                return seen;
+            }
+        }
+    }
+    panic!("the shell never reported {size:?}: {seen:?}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn terminal_resizes_colours_edits_completes_and_cancels() {
     let Some(harness) = Harness::start().await else {
@@ -311,9 +345,12 @@ async fn exec_runs_a_shell_with_a_tty() {
         events,
     } = run_shell(&harness, target);
     assert!(resize.send(SHELL_SIZE).await.is_ok());
+    let size = format!("{} {}", SHELL_SIZE.rows, SHELL_SIZE.cols);
+    let mut seen = await_tty_size(&input, &events, &size).await;
     let script = format!("echo {ECHO_MARKER}-$((40 + 2)) $(stty size)\rexit\r");
     assert!(input.send(script.into_bytes()).await.is_ok());
-    let (seen, output) = exec_events(&events).await;
+    let (rest, output) = exec_events(&events).await;
+    seen.extend(rest);
     assert!(
         matches!(seen.first(), Some(ExecEvent::Started { .. })),
         "{seen:?}"
@@ -529,7 +566,6 @@ const KUSTOMIZATION: &str = "apps";
 const NODE: &str = "fleet-a-control-plane";
 const SCRATCH_CONFIGMAP: &str = "flock-actions-e2e";
 const SCRATCH_REPLACED: &str = "flock-replaced-e2e";
-const RESTARTED_AT: &str = "kubectl.kubernetes.io/restartedAt";
 const REQUESTED_AT: &str = "reconcile.fluxcd.io/requestedAt";
 const APPS_V1: &str = "apps/v1";
 const CORE_V1: &str = "v1";
@@ -543,7 +579,11 @@ async fn replicas(deployments: &Api<Deployment>) -> Option<i32> {
 }
 
 async fn template(deployments: &Api<Deployment>) -> Option<PodTemplateSpec> {
-    let deployment = deployments.get(PODINFO).await.ok()?;
+    template_of(deployments, PODINFO).await
+}
+
+async fn template_of(deployments: &Api<Deployment>, name: &str) -> Option<PodTemplateSpec> {
+    let deployment = deployments.get(name).await.ok()?;
     Some(deployment.spec?.template)
 }
 
@@ -632,27 +672,42 @@ async fn scale_up_then_back_down() {
     no_notices(&harness);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn restart_then_roll_back_to_the_original_template() {
-    let Some(harness) = Harness::start().await else {
-        return;
+async fn restart_and_rollback(harness: &Harness, deployments: &Api<Deployment>) {
+    let scratch = scratch_deployment(SCRATCH_ROLLBACK, DEBUG_IMAGE);
+    let created = deployments.create(&PostParams::default(), &scratch).await;
+    let Ok(created) = created else {
+        panic!("scratch deployment: {created:?}");
     };
-    let deployments: Api<Deployment> = Api::namespaced(harness.client.clone(), WEB_NAMESPACE);
-    let Some(original) = template(&deployments).await else {
-        panic!("web/podinfo template");
+    let Some(original) = template_of(deployments, SCRATCH_ROLLBACK).await else {
+        panic!("scratch template");
     };
-    let target = web_podinfo(&harness.client).await;
+    let sets: Api<ReplicaSet> = Api::namespaced(harness.client.clone(), DEBUG_NAMESPACE);
+    eventually(
+        "initial replica set revision",
+        || async { sets.list(&ListParams::default()).await.ok() },
+        |listed| {
+            listed.as_ref().is_some_and(|listed| {
+                listed.items.iter().any(|set| {
+                    set.metadata.owner_references.iter().flatten().any(|owner| {
+                        owner.controller == Some(true)
+                            && Some(&owner.uid) == created.metadata.uid.as_ref()
+                    }) && set
+                        .metadata
+                        .annotations
+                        .as_ref()
+                        .is_some_and(|annotations| annotations.contains_key(REVISION_ANNOTATION))
+                })
+            })
+        },
+    )
+    .await;
+    let target = resource("Deployment", Some(DEBUG_NAMESPACE), SCRATCH_ROLLBACK);
+    let target = seen_by(&harness.client, APPS_V1, target).await;
     harness.send(Command::RestartRollout(target.clone()));
     eventually(
         "restart annotation",
-        || template(&deployments),
-        |observed| {
-            let annotations = observed
-                .as_ref()
-                .and_then(|t| t.metadata.as_ref())
-                .and_then(|meta| meta.annotations.as_ref());
-            annotations.is_some_and(|annotations| annotations.contains_key(RESTARTED_AT))
-        },
+        || template_of(deployments, SCRATCH_ROLLBACK),
+        |observed| observed.as_ref() != Some(&original) && observed.is_some(),
     )
     .await;
     harness.send(Command::Rollback {
@@ -661,11 +716,38 @@ async fn restart_then_roll_back_to_the_original_template() {
     });
     eventually(
         "rollback",
-        || template(&deployments),
+        || template_of(deployments, SCRATCH_ROLLBACK),
         |observed| observed.as_ref() == Some(&original),
     )
     .await;
-    no_notices(&harness);
+    no_notices(harness);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restart_then_roll_back_to_the_original_template() {
+    let Some(harness) = Harness::start().await else {
+        return;
+    };
+    let deployments: Api<Deployment> = Api::namespaced(harness.client.clone(), DEBUG_NAMESPACE);
+    let _ = deployments
+        .delete(SCRATCH_ROLLBACK, &DeleteParams::default())
+        .await;
+    eventually(
+        "old rollback deployment gone",
+        || async { deployments.get_opt(SCRATCH_ROLLBACK).await.ok().flatten() },
+        Option::is_none,
+    )
+    .await;
+    let outcome = AssertUnwindSafe(restart_and_rollback(&harness, &deployments))
+        .catch_unwind()
+        .await;
+    let deleted = deployments
+        .delete(SCRATCH_ROLLBACK, &DeleteParams::default())
+        .await;
+    assert!(deleted.is_ok() || outcome.is_err(), "{deleted:?}");
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
 }
 
 fn scratch_stateful_set(image: &str) -> StatefulSet {
@@ -787,14 +869,14 @@ async fn client_for(name: &str) -> Client {
     client
 }
 
-fn scratch_deployment(image: &str) -> Deployment {
+fn scratch_deployment(name: &str, image: &str) -> Deployment {
     let Ok(deployment) = serde_json::from_value(json!({
-        "metadata": { "name": SCRATCH_DEPLOYMENT },
+        "metadata": { "name": name },
         "spec": {
             "replicas": 0,
-            "selector": { "matchLabels": { "app": SCRATCH_DEPLOYMENT } },
+            "selector": { "matchLabels": { "app": name } },
             "template": {
-                "metadata": { "labels": { "app": SCRATCH_DEPLOYMENT } },
+                "metadata": { "labels": { "app": name } },
                 "spec": { "containers": [{ "name": "main", "image": image, "command": ["sleep", "3600"] }] }
             }
         }
@@ -826,9 +908,8 @@ async fn recreate_scratch(deployments: &Api<Deployment>, image: &str) {
         Option::is_none,
     )
     .await;
-    let created = deployments
-        .create(&PostParams::default(), &scratch_deployment(image))
-        .await;
+    let scratch = scratch_deployment(SCRATCH_DEPLOYMENT, image);
+    let created = deployments.create(&PostParams::default(), &scratch).await;
     assert!(created.is_ok(), "{created:?}");
 }
 

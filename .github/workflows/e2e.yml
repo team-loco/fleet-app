@@ -3,6 +3,10 @@ name: e2e
 on:
   pull_request:
     paths:
+      - Cargo.toml
+      - Cargo.lock
+      - mise.toml
+      - crates/flock-core/**
       - crates/flock-kube/**
       - crates/flock-flux/**
       - crates/flock-loco/**
