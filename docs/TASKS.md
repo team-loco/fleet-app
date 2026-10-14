@@ -85,3 +85,4 @@ Spec column points at `design/`.
 | C167 | share multi-file kubeconfig isolation across E2E harnesses (#167) | codex | fix-167 | done |
 | HDR1 | one 32px title row with the traffic lights; collapsed sidebar hidden, lights and chevron lead the tab strip; singular node count (#165) | claude | header-traffic-lights | done |
 | SPLIT1 | split right: pane-owned screens and backend scopes, two panes, compact pane views (#77) | claude | split-panes | done (#170, split UI PR) |
+| SEL1 | selectable, copyable text: kit `Selectable`/`SelectableText` on the window text selection, ⌘C/⌘A, terminal drag-select (#127) | claude | selectable-text | done (#173, adoption PR) |

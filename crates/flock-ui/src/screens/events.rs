@@ -1,3 +1,4 @@
+use crate::kit::SelectableText;
 use flock_core::events::{self, Event, EventFilter, filter_counts, filter_events};
 use flock_core::resources::EVENT_LIST;
 use flock_core::settings::NamespaceSelection;
@@ -20,6 +21,7 @@ use crate::theme::{
 };
 
 const INSPECTOR_ID: &str = "event-inspector";
+const MESSAGE_SELECTOR: &str = "event-message";
 const NO_NAMESPACE: &str = "—";
 const ALL_NAMESPACES: &str = "All namespaces";
 
@@ -212,13 +214,13 @@ impl EventsScreen {
         let last_seen = seen(Some(event.age), details.last_seen.as_deref());
         let facts = KeyValue::new()
             .sans()
-            .row("Reason", event.reason.clone())
+            .text("Reason", event.reason.clone())
             .row("Type", StatusText::new(event.status, event_type(event)))
-            .row("Count", event.count.to_string())
-            .row("First seen", first_seen)
-            .row("Last seen", last_seen)
-            .row("Component", value(&details.source_component))
-            .row("Host", value(&details.source_host));
+            .text("Count", event.count.to_string())
+            .text("First seen", first_seen)
+            .text("Last seen", last_seen)
+            .text("Component", value(&details.source_component))
+            .text("Host", value(&details.source_host));
         let target = self
             .cluster
             .as_ref()
@@ -234,7 +236,7 @@ impl EventsScreen {
                     })
                     .into_any_element()
             }
-            None => div().child(value(&event.object)).into_any_element(),
+            None => SelectableText::new(value(&event.object)).into_any_element(),
         };
         let related = self
             .events
@@ -249,7 +251,7 @@ impl EventsScreen {
                         other.status,
                         format!("{} · {} ago", other.reason, age(other.age)),
                     ))
-                    .child(other.message.clone())
+                    .child(SelectableText::new(other.message.clone()))
             })
             .collect::<Vec<_>>();
         let related = if related.is_empty() {
@@ -262,7 +264,10 @@ impl EventsScreen {
             .actions(close)
             .section(
                 Some("Message"),
-                div().min_w_0().child(event.message.clone()),
+                div()
+                    .debug_selector(|| MESSAGE_SELECTOR.to_owned())
+                    .min_w_0()
+                    .child(SelectableText::new(event.message.clone())),
             )
             .section(Some("Details"), facts)
             .section(Some("Involved object"), object)
@@ -333,6 +338,7 @@ fn columns() -> Vec<Column<Event>> {
             .sort_by_key(|e: &Event| e.reason.clone()),
         Column::text("Object", |e: &Event| e.object.clone().into())
             .highlight()
+            .selectable()
             .mono()
             .flex(EVENT_OBJECT_WEIGHT, EVENT_OBJECT_MIN)
             .sort_by_key(|e: &Event| e.object.clone()),
@@ -354,6 +360,7 @@ fn columns() -> Vec<Column<Event>> {
             |_, palette| palette.fg2,
         )
         .highlight()
+        .selectable()
         .tooltip(|event: &Event| event.message.clone().into())
         .flex(EVENT_MESSAGE_WEIGHT, EVENT_MESSAGE_MIN),
         Column::colored_text("Age", |e: &Event| age(e.age).into(), |_, p| p.mute)

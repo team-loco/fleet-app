@@ -1,3 +1,4 @@
+use crate::kit::SelectableText;
 use std::ops::Range;
 
 use flock_core::workload::{Event, Pod};
@@ -455,7 +456,7 @@ fn event_row(event: &Event, palette: &Palette) -> AnyElement {
                 .min_w_0()
                 .truncate()
                 .text_color(palette.fg2)
-                .child(event.message.clone()),
+                .child(SelectableText::new(event.message.clone())),
         )
         .child(
             div()

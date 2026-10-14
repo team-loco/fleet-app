@@ -437,11 +437,11 @@ fn deployment_section(app: &Application, palette: &Palette) -> impl IntoElement 
     );
     let grid = KeyValue::new()
         .label_width(DETAIL_LABEL)
-        .row("Image", image)
-        .row("Deployment", rollout)
-        .row("Placement", app.placement.detail())
-        .row("Resources", resources)
-        .row("Health check", health);
+        .text("Image", image)
+        .text("Deployment", rollout)
+        .text("Placement", app.placement.detail())
+        .text("Resources", resources)
+        .text("Health check", health);
     div()
         .flex()
         .flex_col()
