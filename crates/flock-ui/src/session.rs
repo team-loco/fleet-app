@@ -91,6 +91,7 @@ mod tests {
                 active: 0,
             }],
             focused: 0,
+            ..SavedWindow::default()
         }
     }
 

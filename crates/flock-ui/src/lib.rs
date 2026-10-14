@@ -37,6 +37,8 @@ pub mod actions {
             CloseInspector,
             NewTab,
             CloseTab,
+            SplitRight,
+            OpenSelectedInSplit,
             NextTab,
             PreviousTab,
             GoBack,
@@ -54,6 +56,10 @@ pub mod actions {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, gpui::Action)]
     #[action(namespace = flock, no_json)]
     pub struct ActivateTab(pub usize);
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, gpui::Action)]
+    #[action(namespace = flock, no_json)]
+    pub struct FocusPane(pub usize);
 }
 
 pub fn init(

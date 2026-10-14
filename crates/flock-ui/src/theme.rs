@@ -83,6 +83,8 @@ pub const SWITCHER_GEAR: Pixels = px(26.);
 pub const SWITCHER_LIST: Pixels = px(420.);
 pub const PAGE_HEADER: Pixels = px(44.);
 pub const TAB_CLOSE: Pixels = px(14.);
+pub const SPLIT_BUTTON: Pixels = px(32.);
+pub const ICON_SPLIT: Pixels = px(14.);
 pub const STATUS_BAR: Pixels = px(26.);
 pub const ASIDE_WIDTH: Pixels = px(300.);
 pub const SETTINGS_COLUMN: Pixels = px(720.);
@@ -146,6 +148,7 @@ pub const HEX_FIELD: Pixels = px(96.);
 pub const CHECKBOX_TICK: Pixels = px(10.);
 
 pub const KV_LABEL: Pixels = px(72.);
+pub const FIELD_LABEL: Pixels = px(150.);
 pub const INSPECTOR: Pixels = px(360.);
 pub const INSPECTOR_MIN: Pixels = px(280.);
 pub const INSPECTOR_MAX: Pixels = px(900.);

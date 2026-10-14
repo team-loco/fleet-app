@@ -9,6 +9,9 @@ pub const LOGS_KIND: &str = "logs";
 pub const COMPARE_KIND: &str = "compare";
 pub const CLUSTER_KIND: &str = "cluster";
 pub const MAX_PANES: usize = 2;
+const PER_MILLE: u16 = 1000;
+const EVEN: u16 = PER_MILLE / 2;
+const NARROWEST: u16 = 100;
 const NAME_SEPARATOR: char = '-';
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -22,6 +25,37 @@ impl TabId {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PaneId(u64);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Divider(u16);
+
+impl Default for Divider {
+    fn default() -> Self {
+        Self(EVEN)
+    }
+}
+
+impl Divider {
+    pub fn at(share: f32) -> Self {
+        if !share.is_finite() {
+            return Self::default();
+        }
+        let scaled = (share * f32::from(PER_MILLE)).round();
+        let clamped = scaled.clamp(f32::from(NARROWEST), f32::from(PER_MILLE - NARROWEST));
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let per_mille = clamped as u16;
+        Self(per_mille)
+    }
+
+    pub fn share(self) -> f32 {
+        f32::from(self.0) / f32::from(PER_MILLE)
+    }
+
+    fn checked(self) -> Self {
+        Self(self.0.clamp(NARROWEST, PER_MILLE - NARROWEST))
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tab {
@@ -113,6 +147,7 @@ impl Pane {
 pub struct Panes {
     all: Vec<Pane>,
     focused: usize,
+    divider: Divider,
     next_id: u64,
     next_pane: u64,
 }
@@ -128,6 +163,7 @@ impl Panes {
         let mut panes = Self {
             all: Vec::new(),
             focused: 0,
+            divider: saved.divider.checked(),
             next_id: 0,
             next_pane: 0,
         };
@@ -165,7 +201,18 @@ impl Panes {
                 })
                 .collect(),
             focused: self.focused,
+            divider: self.divider,
         }
+    }
+
+    pub const fn divider(&self) -> Divider {
+        self.divider
+    }
+
+    pub fn set_divider(&mut self, divider: Divider) -> bool {
+        let changed = self.divider != divider;
+        self.divider = divider;
+        changed
     }
 
     pub fn panes(&self) -> &[Pane] {
@@ -237,6 +284,10 @@ impl Panes {
 
     pub fn split(&mut self) {
         let location = self.active().location.clone();
+        self.split_to(location);
+    }
+
+    pub fn split_to(&mut self, location: Location) {
         if self.all.len() < MAX_PANES {
             let pane = self.pane_at(location);
             let at = self.focused + 1;
@@ -353,6 +404,44 @@ impl Panes {
         true
     }
 
+    pub fn split_off(&mut self, id: TabId) -> bool {
+        let Some(pane_ix) = self.pane_of(id) else {
+            return false;
+        };
+        let alone = self.all.get(pane_ix).is_none_or(|pane| pane.tabs.len() < 2);
+        if self.all.len() >= MAX_PANES || alone {
+            return false;
+        }
+        let Some(tab) = self.take(pane_ix, id) else {
+            return false;
+        };
+        let pane = Pane {
+            id: self.allocate_pane(),
+            tabs: vec![tab],
+            active: 0,
+        };
+        self.all.insert(pane_ix + 1, pane);
+        self.focused = pane_ix + 1;
+        true
+    }
+
+    pub fn join(&mut self, id: TabId) -> bool {
+        if self.all.len() < 2 || self.pane_of(id).is_none() {
+            return false;
+        }
+        let mut panes = std::mem::take(&mut self.all).into_iter();
+        let Some(mut joined) = panes.next() else {
+            return false;
+        };
+        for pane in panes {
+            joined.tabs.extend(pane.tabs);
+        }
+        joined.active = joined.position(id).unwrap_or_default();
+        self.all.push(joined);
+        self.focused = 0;
+        true
+    }
+
     pub fn move_tab(&mut self, id: TabId, pane: usize, to: usize) -> bool {
         let Some(from_pane) = self.pane_of(id) else {
             return false;
@@ -412,6 +501,7 @@ pub struct SavedPane {
 pub struct SavedWindow {
     pub panes: Vec<SavedPane>,
     pub focused: usize,
+    pub divider: Divider,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -799,6 +889,54 @@ mod tests {
     }
 
     #[test]
+    fn splitting_off_a_tab_moves_it_into_a_new_right_pane() {
+        let mut panes = Panes::default();
+        let home = panes.active().id();
+        assert!(!panes.split_off(home));
+        let nodes = panes.open(at(Page::Nodes));
+        assert!(panes.split_off(home));
+        assert_eq!(pane_ids(&panes, 0), [nodes]);
+        assert_eq!(pane_ids(&panes, 1), [home]);
+        assert_eq!(panes.focused_index(), 1);
+        assert!(!panes.split_off(nodes));
+    }
+
+    #[test]
+    fn joining_keeps_every_tab_in_one_pane_with_the_chosen_one_active() {
+        let mut panes = Panes::default();
+        let home = panes.active().id();
+        panes.split();
+        let right = panes.active().id();
+        let pods = panes.open(at(Page::Pods));
+        assert!(panes.join(right));
+        assert_eq!(panes.panes().len(), 1);
+        assert_eq!(pane_ids(&panes, 0), [home, right, pods]);
+        assert_eq!(panes.active().id(), right);
+        assert!(!panes.join(right));
+    }
+
+    #[test]
+    fn the_divider_keeps_both_panes_visible_and_survives_a_restore() {
+        assert_eq!(Divider::default().share(), 0.5);
+        assert_eq!(Divider::at(0.25).share(), 0.25);
+        assert_eq!(Divider::at(0.01), Divider::at(0.1));
+        assert_eq!(Divider::at(1.5), Divider::at(0.9));
+        assert_eq!(Divider::at(f32::NAN), Divider::default());
+        let mut panes = Panes::default();
+        panes.split();
+        assert!(panes.set_divider(Divider::at(0.3)));
+        assert!(!panes.set_divider(Divider::at(0.3)));
+        let saved = panes.saved();
+        assert_eq!(Panes::restore(&saved).divider(), Divider::at(0.3));
+        let text = r#"{"panes":[],"focused":0,"divider":2}"#;
+        let odd: SavedWindow = serde_json::from_str(text).unwrap_or_default();
+        assert_eq!(Panes::restore(&odd).divider(), Divider::at(0.1));
+        let old: SavedWindow =
+            serde_json::from_str(r#"{"panes":[],"focused":0}"#).unwrap_or_default();
+        assert_eq!(old.divider, Divider::default());
+    }
+
+    #[test]
     fn split_windows_save_and_restore_both_panes() {
         let mut panes = Panes::default();
         panes.open(at(Page::Nodes));
@@ -834,6 +972,7 @@ mod tests {
                 active: 4,
             }],
             focused: 3,
+            ..SavedWindow::default()
         });
         assert_eq!(empty, Panes::default());
         let clamped = Panes::restore(&SavedWindow {
@@ -842,6 +981,7 @@ mod tests {
                 active: 7,
             }],
             focused: 0,
+            ..SavedWindow::default()
         });
         assert_eq!(clamped.active().location(), &at(Page::Nodes));
     }

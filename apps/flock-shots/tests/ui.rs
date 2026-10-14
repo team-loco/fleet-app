@@ -1303,6 +1303,7 @@ fn a_restored_tab_whose_cluster_is_gone_says_so() -> anyhow::Result<()> {
             active: 1,
         }],
         focused: 0,
+        ..SavedWindow::default()
     };
     ui.restore(&saved)?;
     assert_eq!(ui.state().location(), &gone);
@@ -1311,5 +1312,172 @@ fn a_restored_tab_whose_cluster_is_gone_says_so() -> anyhow::Result<()> {
     ui.click("tab-show-flock")?;
     assert_eq!(ui.state().location(), &Location::default());
     assert!(ui.bounds("cluster-unavailable").is_none());
+    Ok(())
+}
+
+fn pane_count(ui: &Ui) -> usize {
+    ui.state().panes().panes().len()
+}
+
+fn focused_pane(ui: &Ui) -> usize {
+    ui.state().panes().focused_index()
+}
+
+fn pane_tabs(ui: &Ui, ix: usize) -> usize {
+    ui.state()
+        .panes()
+        .panes()
+        .get(ix)
+        .map_or(0, |pane| pane.tabs().len())
+}
+
+fn center(ui: &mut Ui, selector: &'static str) -> anyhow::Result<gpui::Point<Pixels>> {
+    ui.bounds(selector)
+        .map(|bounds| bounds.center())
+        .ok_or_else(|| anyhow::anyhow!("{selector} was not painted"))
+}
+
+#[test]
+fn command_backslash_and_the_strip_button_split_the_active_tab_to_the_right() -> anyhow::Result<()>
+{
+    let mut ui = Ui::open(Screen::Workload)?;
+    let location = ui.state().location().clone();
+    assert!(ui.bounds("split-right").is_some());
+    ui.press("cmd-\\")?;
+    assert_eq!(pane_count(&ui), 2);
+    assert_eq!(focused_pane(&ui), 1);
+    assert_eq!(ui.state().location(), &location);
+    assert!(ui.bounds("pane-1-tab-0").is_some());
+    assert!(ui.bounds("workload-full-view").is_some());
+    ui.press("cmd-alt-1")?;
+    assert_eq!(focused_pane(&ui), 0);
+    ui.click("tab-1")?;
+    ui.click("pane-1-split-right")?;
+    assert_eq!(pane_count(&ui), 2);
+    assert_eq!(focused_pane(&ui), 0);
+    assert_eq!(pane_tabs(&ui, 0), 3);
+    assert_eq!(ui.state().location(), &location);
+    ui.press("cmd-alt-2")?;
+    assert_eq!(focused_pane(&ui), 1);
+    Ok(())
+}
+
+#[test]
+fn clicking_a_pane_focuses_it_and_the_sidebar_follows_its_cluster() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Split)?;
+    assert_eq!(pane_count(&ui), 2);
+    assert_eq!(focused_pane(&ui), 0);
+    let east = ui.state().location().cluster.clone();
+    ui.click("pane-1")?;
+    assert_eq!(focused_pane(&ui), 1);
+    let west = ui.state().location().cluster.clone();
+    assert_eq!(west, Some(ClusterId::new("prod-eu-west")));
+    assert_ne!(east, west);
+    ui.click("nav-pods")?;
+    let right = ui.state().location().clone();
+    assert_eq!((right.page, right.cluster), (Page::Pods, west));
+    let left = ui
+        .state()
+        .panes()
+        .panes()
+        .first()
+        .map(|pane| pane.active().location().clone());
+    assert_eq!(left.and_then(|l| l.cluster), east);
+    ui.click("tab-1")?;
+    assert_eq!(focused_pane(&ui), 0);
+    assert_eq!(ui.state().location().page, Page::Logs);
+    Ok(())
+}
+
+#[test]
+fn command_w_closes_the_focused_panes_tabs_and_then_the_pane() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Split)?;
+    ui.click("pane-1-tab-1")?;
+    ui.press("cmd-w")?;
+    assert_eq!(pane_count(&ui), 2);
+    assert_eq!(pane_tabs(&ui, 1), 1);
+    ui.press("cmd-w")?;
+    assert_eq!(pane_count(&ui), 1);
+    assert_eq!(pane_tabs(&ui, 0), 3);
+    assert!(ui.bounds("pane-1").is_none());
+    assert!(ui.bounds("workload-full-view").is_none());
+    Ok(())
+}
+
+#[test]
+fn tabs_move_between_panes_by_menu_and_by_drag() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Split)?;
+    ui.right_click("tab-2")?;
+    ui.click("tab-menu-item-0")?;
+    assert_eq!((pane_tabs(&ui, 0), pane_tabs(&ui, 1)), (2, 3));
+    assert_eq!(focused_pane(&ui), 1);
+    assert_eq!(ui.state().location().page, Page::Kustomizations);
+    let from = center(&mut ui, "pane-1-tab-0")?;
+    let to = center(&mut ui, "tab-1")?;
+    ui.drag("pane-1-tab-0", to - from)?;
+    assert_eq!((pane_tabs(&ui, 0), pane_tabs(&ui, 1)), (3, 2));
+    assert_eq!(focused_pane(&ui), 0);
+    assert_eq!(
+        ui.state().location().cluster,
+        Some(ClusterId::new("prod-eu-west"))
+    );
+    ui.click("workload-full-view")?;
+    assert_eq!(pane_count(&ui), 1);
+    assert_eq!(pane_tabs(&ui, 0), 5);
+    assert!(ui.bounds("workload-full-view").is_none());
+    ui.right_click("tab-0")?;
+    ui.click("tab-menu-item-0")?;
+    assert_eq!((pane_tabs(&ui, 0), pane_tabs(&ui, 1)), (4, 1));
+    Ok(())
+}
+
+#[test]
+fn dragging_the_divider_resizes_the_panes_and_is_restored() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Split)?;
+    let before = ui.bounds("pane-0").map(|b| b.size.width);
+    ui.drag("panes-divider", gpui::point(gpui::px(-200.), gpui::px(0.)))?;
+    let after = ui.bounds("pane-0").map(|b| b.size.width);
+    assert!(after < before);
+    let saved = ui.state().panes().saved();
+    assert!(saved.divider.share() < 0.5);
+    let mut again = Ui::open(Screen::Workload)?;
+    again.restore(&saved)?;
+    assert_eq!(pane_count(&again), 2);
+    assert_eq!(again.state().panes().divider(), saved.divider);
+    assert_eq!(again.bounds("pane-0").map(|b| b.size.width), after);
+    Ok(())
+}
+
+#[test]
+fn command_shift_enter_opens_a_palette_result_in_a_split() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.press("cmd-p")?;
+    ui.type_text("Nodes")?;
+    ui.press("cmd-shift-enter")?;
+    assert_eq!(pane_count(&ui), 2);
+    assert_eq!(focused_pane(&ui), 1);
+    assert_eq!(ui.state().location().page, Page::Nodes);
+    let left = ui
+        .state()
+        .panes()
+        .panes()
+        .first()
+        .map(|pane| pane.active().location().page);
+    assert_eq!(left, Some(Page::ClusterOverview));
+    Ok(())
+}
+
+#[test]
+fn split_panes_render_compact_logs_and_kustomization_views() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Split)?;
+    ui.click("tab-1")?;
+    ui.click("pane-1-tab-1")?;
+    assert!(ui.bounds("flux-full-view").is_some());
+    assert!(ui.bounds("tab-logs-follow").is_none());
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    ui.save_png(&dir.join("split-logs-kustomization.png"))?;
+    ui.click("flux-full-view")?;
+    assert_eq!(pane_count(&ui), 1);
+    assert!(ui.bounds("flux-reconcile").is_some());
     Ok(())
 }

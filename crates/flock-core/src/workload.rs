@@ -7,6 +7,9 @@ const MILLIS_PER_CORE: u32 = 1000;
 const KIB: u64 = 1024;
 const MIB: u64 = KIB * KIB;
 const GIB: u64 = MIB * KIB;
+const NONE: &str = "—";
+const FIELD_SEPARATOR: &str = " · ";
+const LIMIT_SEPARATOR: &str = " / ";
 const NUMBER_WORDS: [&str; 10] = [
     "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
 ];
@@ -41,6 +44,23 @@ impl WorkloadKind {
             Self::Deployment => true,
             Self::StatefulSet => true,
             Self::DaemonSet => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Field {
+    pub label: &'static str,
+    pub value: String,
+    pub status: Option<Status>,
+}
+
+impl Field {
+    fn new(label: &'static str, value: String) -> Self {
+        Self {
+            label,
+            value,
+            status: None,
         }
     }
 }
@@ -107,6 +127,48 @@ impl Workload {
             (false, true) => Status::Warn,
             (false, false) => Status::Progress,
         }
+    }
+
+    pub fn fields(&self) -> Vec<Field> {
+        let status = self.status();
+        let ready = Field {
+            status: (status != Status::Ok).then_some(status),
+            ..Field::new("Ready", format!("{}/{}", self.ready(), self.desired))
+        };
+        let image = self.image().map_or_else(|| NONE.to_owned(), str::to_owned);
+        let revision = self.current_revision().map_or_else(
+            || NONE.to_owned(),
+            |revision| {
+                let age = time::age(revision.age);
+                format!("{}{FIELD_SEPARATOR}{age} ago", revision.number)
+            },
+        );
+        let container = self.containers.first();
+        let pair = |request: Option<&String>, limit: Option<&String>| {
+            let request = request.map_or(NONE, String::as_str);
+            let limit = limit.map_or(NONE, String::as_str);
+            format!("{request}{LIMIT_SEPARATOR}{limit}")
+        };
+        let cpu = pair(
+            container.and_then(|c| c.requests.cpu.as_ref()),
+            container.and_then(|c| c.limits.cpu.as_ref()),
+        );
+        let memory = pair(
+            container.and_then(|c| c.requests.memory.as_ref()),
+            container.and_then(|c| c.limits.memory.as_ref()),
+        );
+        let mut fields = vec![
+            ready,
+            Field::new("Image", image),
+            Field::new("Revision", revision),
+            Field::new("Replicas", self.desired.to_string()),
+            Field::new("CPU req / limit", cpu),
+            Field::new("Memory req / limit", memory),
+        ];
+        if let Some(owner) = &self.managed_by {
+            fields.push(Field::new("Managed by", owner.name.clone()));
+        }
+        fields
     }
 
     pub fn sentence(&self) -> String {
@@ -580,6 +642,52 @@ pub(crate) mod tests {
 
     pub(crate) fn crashing(name: &str) -> Pod {
         pod(name, CRASH_LOOP, Status::Err, false)
+    }
+
+    #[test]
+    fn compact_fields_name_readiness_image_revision_and_resources() {
+        let mut w = workload(vec![crashing("a"), running("b"), running("c")], true);
+        w.containers.push(ContainerSpec {
+            name: "api".into(),
+            image: "checkout-api".into(),
+            ports: Vec::new(),
+            requests: Resources {
+                cpu: Some("500m".into()),
+                memory: Some("512Mi".into()),
+            },
+            limits: Resources {
+                cpu: Some("1".into()),
+                memory: None,
+            },
+            readiness: None,
+            env: Vec::new(),
+        });
+        w.managed_by = Some(ResourceRef {
+            kind: "Kustomization".into(),
+            name: "apps-payments".into(),
+            ..w.target.clone()
+        });
+        let fields = w.fields();
+        let shown: Vec<(&str, &str)> = fields
+            .iter()
+            .map(|field| (field.label, field.value.as_str()))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("Ready", "2/3"),
+                ("Image", "checkout-api:2.37"),
+                ("Revision", "37 · 1h ago"),
+                ("Replicas", "3"),
+                ("CPU req / limit", "500m / 1"),
+                ("Memory req / limit", "512Mi / —"),
+                ("Managed by", "apps-payments"),
+            ]
+        );
+        assert_eq!(fields.first().and_then(|f| f.status), Some(Status::Err));
+        let healthy = workload(vec![running("a"), running("b"), running("c")], false);
+        assert_eq!(healthy.fields().first().and_then(|f| f.status), None);
+        assert_eq!(healthy.fields().len(), 6);
     }
 
     #[test]

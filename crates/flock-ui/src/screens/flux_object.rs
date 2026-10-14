@@ -15,6 +15,7 @@ use crate::kit::{
     MenuItem, PageHeader, Prose, SectionHeader, SectionLabel, Segmented, StatusGlyph, Table,
     TableEvent, Toast, confirm, parse_unified, toast,
 };
+use crate::screens::{FullView, full_view_link};
 use crate::theme::{
     ASIDE_WIDTH, ActiveTheme, FONT_MONO, FONT_SANS, LINE_PROSE, Palette, ROW_DOCUMENT,
     ROW_TABLE_MIN, RULE, SPACE_2, SPACE_3, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_MONO,
@@ -63,6 +64,7 @@ pub struct FluxObjectPage {
     history: Entity<Table<HistoryEntry>>,
     releases: Entity<Table<HelmRevision>>,
     dependents: Entity<Table<FluxObject>>,
+    compact: Option<FullView>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -124,8 +126,26 @@ impl FluxObjectPage {
             history,
             releases,
             dependents,
+            compact: None,
             _subscriptions: subscriptions,
         }
+    }
+
+    pub fn set_compact(&mut self, compact: Option<FullView>, cx: &mut Context<Self>) {
+        if self.compact.is_some() != compact.is_some() {
+            cx.notify();
+        }
+        self.compact = compact;
+    }
+
+    fn compact_header(object: &FluxObject, open: &FullView, cx: &mut Context<Self>) -> AnyElement {
+        PageHeader::new(object.key.name.clone())
+            .mono()
+            .status(object.status(), object.phase.label())
+            .sentence(Self::sentence(object, cx))
+            .meta(Self::meta(object, cx))
+            .footer(full_view_link("flux-full-view", open))
+            .into_any_element()
     }
 
     pub fn set_page(&mut self, page: Option<FluxPage>, cx: &mut Context<Self>) {
@@ -627,7 +647,15 @@ impl Render for FluxObjectPage {
         if std::mem::take(&mut self.wants_focus) {
             window.focus(&self.focus, cx);
         }
+        let compact = self.compact.clone();
         let content = self.page.clone().map(|page| {
+            if let Some(open) = &compact {
+                return div()
+                    .flex()
+                    .flex_col()
+                    .size_full()
+                    .child(Self::compact_header(&page.object, open, cx));
+            }
             let aside = Self::aside(&page, &palette, cx);
             let aside = InspectorPane::new("flux-inspector", aside).width(ASIDE_WIDTH);
             div()

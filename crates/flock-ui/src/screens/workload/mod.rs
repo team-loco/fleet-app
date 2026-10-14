@@ -20,9 +20,11 @@ use crate::kit::{
     Skeleton, StatusText, Table, TableEvent, Terminal, TextFieldState, Toast, Width, confirm,
     min_row_width, slide_in, toast,
 };
+use crate::screens::{FullView, full_view_link};
 use crate::theme::{
-    ActiveTheme, FONT_MONO, LINE_PROSE, Palette, RADIUS, ROW_TABLE, RULE, SPACE_1, SPACE_2,
-    SPACE_3, SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_CONTROL, TEXT_GLYPH, TEXT_MONO, TEXT_SMALL,
+    ActiveTheme, FIELD_LABEL, FONT_MONO, LINE_PROSE, Palette, RADIUS, ROW_TABLE, RULE, SPACE_1,
+    SPACE_2, SPACE_3, SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_CONTROL, TEXT_GLYPH, TEXT_MONO,
+    TEXT_SMALL,
 };
 
 pub const KEY_CONTEXT: &str = "Workload";
@@ -92,6 +94,8 @@ pub struct WorkloadScreen {
     workload: Option<Workload>,
     unavailable: bool,
     pods: Entity<Table<Pod>>,
+    compact_pods: Entity<Table<Pod>>,
+    compact: Option<FullView>,
     menu: Entity<ActionMenu>,
     pod: Option<String>,
     container: usize,
@@ -135,6 +139,12 @@ impl WorkloadScreen {
                 .row_key(|pod: &Pod| pod.name.clone().into())
                 .fit_content()
         });
+        let compact_pods = cx.new(|cx| {
+            Table::new("compact-pods", compact_pod_columns(), cx)
+                .headerless()
+                .row_key(|pod: &Pod| pod.name.clone().into())
+                .fit_content()
+        });
         let menu = cx.new(|cx| {
             ActionMenu::new("workload-actions", cx).labeled(ACTIONS, Some(ACTIONS_KEYS.into()))
         });
@@ -160,6 +170,8 @@ impl WorkloadScreen {
             workload: None,
             unavailable: false,
             pods,
+            compact_pods,
+            compact: None,
             menu,
             pod: None,
             container: 0,
@@ -180,6 +192,50 @@ impl WorkloadScreen {
 
     pub fn target(&self) -> &ResourceRef {
         &self.target
+    }
+
+    pub fn set_compact(&mut self, compact: Option<FullView>, cx: &mut Context<Self>) {
+        if self.compact.is_some() != compact.is_some() {
+            cx.notify();
+        }
+        self.compact = compact;
+    }
+
+    fn compact_view(
+        &self,
+        workload: &Workload,
+        open: &FullView,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let palette = *cx.palette();
+        let cluster = div()
+            .text_size(TEXT_SMALL)
+            .text_color(palette.mute)
+            .child(workload.target.cluster.to_string());
+        let header = PageHeader::new(workload.target.name.clone())
+            .mono()
+            .status(workload.status(), workload.ready_label())
+            .action(cluster)
+            .sentence(workload.sentence())
+            .footer(full_view_link("workload-full-view", open));
+        let fields: Vec<AnyElement> = workload
+            .fields()
+            .into_iter()
+            .map(|field| field_row(field, &palette))
+            .collect();
+        div()
+            .id("workload-compact")
+            .flex()
+            .flex_col()
+            .size_full()
+            .overflow_y_scroll()
+            .child(header)
+            .child(div().flex().flex_col().children(fields))
+            .child(Rule::horizontal())
+            .child(SectionHeader::new(PODS))
+            .child(Rule::horizontal())
+            .child(self.compact_pods.clone())
+            .into_any_element()
     }
 
     pub fn set_yaml(&mut self, yaml: Option<&str>, cx: &mut Context<Self>) {
@@ -238,6 +294,8 @@ impl WorkloadScreen {
         let selected = pod
             .as_ref()
             .and_then(|name| pods.iter().position(|p| &p.name == name));
+        self.compact_pods
+            .update(cx, |table, cx| table.set_rows(pods.clone(), cx));
         self.pods.update(cx, |table, cx| {
             table.set_rows(pods, cx);
             table.select(selected, cx);
@@ -692,6 +750,60 @@ fn default_pod(pods: &[Pod]) -> Option<String> {
     failing.or(pods.first()).map(|pod| pod.name.clone())
 }
 
+fn field_row(field: flock_core::workload::Field, palette: &Palette) -> AnyElement {
+    let color = field
+        .status
+        .map_or(palette.fg, |status| palette.status(status));
+    div()
+        .flex()
+        .items_center()
+        .gap(SPACE_3)
+        .min_h(ROW_TABLE)
+        .px(SPACE_8)
+        .border_t(RULE)
+        .border_color(palette.line)
+        .text_size(TEXT_BODY)
+        .child(
+            div()
+                .w(FIELD_LABEL)
+                .flex_none()
+                .text_color(palette.mute)
+                .truncate()
+                .child(field.label),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .font_family(FONT_MONO)
+                .text_size(TEXT_MONO)
+                .text_color(color)
+                .child(field.value),
+        )
+        .into_any_element()
+}
+
+fn compact_pod_columns() -> Vec<Column<Pod>> {
+    vec![
+        Column::text("Name", |p: &Pod| p.name.clone().into())
+            .mono()
+            .flex(NAME_WEIGHT, NAME_MIN),
+        Column::new("Status", |p: &Pod, _| {
+            StatusText::new(p.status, p.phase.clone()).into_any_element()
+        })
+        .mono()
+        .fixed(STATUS_WIDTH),
+        Column::colored_text(
+            "Restarts",
+            |p: &Pod| p.restarts().to_string().into(),
+            |_, palette| palette.mute,
+        )
+        .mono()
+        .end()
+        .fixed(RESTARTS_WIDTH),
+    ]
+}
+
 fn pod_columns() -> Vec<Column<Pod>> {
     vec![
         Column::text("Name", |p: &Pod| p.name.clone().into())
@@ -885,6 +997,9 @@ impl Render for WorkloadScreen {
                 .on_click(cx.listener(|this, _, _, cx| this.watch(cx)));
             return root.child(ErrorState::new(&unavailable_note(&self.target), retry));
         };
+        if let Some(open) = &self.compact {
+            return root.child(self.compact_view(&workload, open, cx));
+        }
         let main = div()
             .id("workload-main")
             .flex()
