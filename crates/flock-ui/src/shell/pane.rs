@@ -242,9 +242,12 @@ impl Shell {
 
     pub(super) fn resize_panes(&mut self, share: f32, cx: &mut Context<Self>) {
         if self.state.panes_mut().set_divider(Divider::at(share)) {
-            self.save_tabs(cx);
             cx.notify();
         }
+    }
+
+    pub(super) fn finish_resize_panes(&mut self, cx: &mut Context<Self>) {
+        self.save_tabs(cx);
     }
 
     pub(super) fn full_view(&self, ix: usize, cx: &Context<Self>) -> Option<FullView> {
