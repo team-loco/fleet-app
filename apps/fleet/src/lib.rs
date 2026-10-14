@@ -2,7 +2,7 @@ use clap::ValueEnum;
 use fleet_core::history::Location;
 use fleet_core::tabs::{SavedPane, SavedWindow};
 use fleet_core::{AddClusterStep, ClusterId, Command, FluxKey, FluxKind, Page, ResourceRef};
-use fleet_ui::actions::{NewWindow, OpenSettings, Quit};
+use fleet_ui::actions::{CheckForUpdates, NewWindow, OpenSettings, Quit};
 use fleet_ui::theme::Appearance;
 use fleet_ui::{Gallery, GalleryPage, Shell, Store};
 use gpui::{AnyView, App, AppContext as _, Entity, Menu, MenuItem, Window};
@@ -24,6 +24,7 @@ const FLUX_NAMESPACE: &str = "flux-system";
 
 pub const APP_ID: &str = "dev.fleet.app";
 pub const APP_NAME: &str = "Fleet";
+pub const CHECK_FOR_UPDATES_ITEM: &str = "Check for Updates…";
 const SETTINGS_ITEM: &str = "Settings…";
 const NEW_WINDOW_ITEM: &str = "New Window";
 const QUIT_ITEM: &str = "Quit Fleet";
@@ -31,6 +32,8 @@ const BUNDLE_EXTENSION: &str = "app";
 
 pub fn menus() -> Vec<Menu> {
     vec![Menu::new(APP_NAME).items([
+        MenuItem::action(CHECK_FOR_UPDATES_ITEM, CheckForUpdates),
+        MenuItem::separator(),
         MenuItem::action(SETTINGS_ITEM, OpenSettings),
         MenuItem::separator(),
         MenuItem::action(NEW_WINDOW_ITEM, NewWindow),

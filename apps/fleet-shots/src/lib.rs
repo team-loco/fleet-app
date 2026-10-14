@@ -385,6 +385,16 @@ impl Ui {
         self.cx.read(read)
     }
 
+    pub fn update_app<R>(&mut self, update: impl FnOnce(&mut App) -> R) -> R {
+        self.cx.update(|_, cx| update(cx))
+    }
+
+    pub fn dispatch(&mut self, action: Box<dyn gpui::Action>) -> anyhow::Result<()> {
+        self.cx
+            .update(|window, cx| window.dispatch_action(action, cx));
+        self.settle()
+    }
+
     fn center(&mut self, selector: &'static str) -> anyhow::Result<Point<Pixels>> {
         self.bounds(selector)
             .map(|bounds| bounds.center())
@@ -467,7 +477,7 @@ impl Ui {
         self.settle()
     }
 
-    fn settle(&mut self) -> anyhow::Result<()> {
+    pub fn settle(&mut self) -> anyhow::Result<()> {
         let dispatcher = self.cx.background_executor.clone();
         settle(
             &self.cx,

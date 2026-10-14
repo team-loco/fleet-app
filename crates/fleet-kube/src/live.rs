@@ -767,6 +767,7 @@ impl Live {
             Command::SetPreferences(id, preferences) => {
                 return self.set_preferences(id, preferences);
             }
+            Command::CheckForUpdates => {}
             Command::SetRefresh(refresh) => self.settings.apply_refresh(refresh),
             Command::Connect(id) => self.reconnect(id),
             Command::Reauthenticate(id) => self.reconnect(id),

@@ -24,6 +24,7 @@ gpui-platform = { workspace = true, features = ["test-support"] }
 image.workspace = true
 
 [dev-dependencies]
+fleet-update.workspace = true
 tempfile.workspace = true
 
 [lints]

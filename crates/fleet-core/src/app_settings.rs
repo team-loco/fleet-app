@@ -21,6 +21,7 @@ pub struct AppSettings {
     pub secondary: Highlight,
     pub refresh: Refresh,
     pub notifications: Notifications,
+    pub updates: Updates,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -253,6 +254,56 @@ impl Default for Notifications {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Updates {
+    pub automatic: bool,
+    pub interval: CheckInterval,
+    pub prereleases: bool,
+}
+
+impl Default for Updates {
+    fn default() -> Self {
+        Self {
+            automatic: true,
+            interval: CheckInterval::Hours6,
+            prereleases: false,
+        }
+    }
+}
+
+const HOUR: u64 = 60 * 60;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CheckInterval {
+    #[serde(rename = "1h")]
+    Hours1,
+    #[serde(rename = "6h")]
+    Hours6,
+    #[serde(rename = "24h")]
+    Hours24,
+}
+
+impl CheckInterval {
+    pub const ALL: [Self; 3] = [Self::Hours1, Self::Hours6, Self::Hours24];
+
+    pub const fn duration(self) -> Duration {
+        match self {
+            Self::Hours1 => Duration::from_secs(HOUR),
+            Self::Hours6 => Duration::from_secs(6 * HOUR),
+            Self::Hours24 => Duration::from_secs(24 * HOUR),
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Hours1 => "1h",
+            Self::Hours6 => "6h",
+            Self::Hours24 => "24h",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,6 +319,10 @@ mod tests {
             Duration::from_millis(500)
         );
         assert_eq!(SnapshotCap::Seconds1.label(), "1s");
+        for interval in CheckInterval::ALL {
+            let hours = interval.duration().as_secs() / HOUR;
+            assert_eq!(interval.label(), format!("{hours}h"));
+        }
     }
 
     #[test]
@@ -290,6 +345,11 @@ mod tests {
                 warnings: true,
             },
             inspector_widths: BTreeMap::from([("resource-inspector".to_owned(), 640)]),
+            updates: Updates {
+                automatic: false,
+                interval: CheckInterval::Hours24,
+                prereleases: true,
+            },
         };
         let json = serde_json::to_string(&settings).unwrap_or_default();
         assert!(json.contains("\"theme\":\"dark\""), "{json}");
@@ -299,6 +359,7 @@ mod tests {
             "{json}"
         );
         assert!(json.contains("\"secondary\":\"teal\""), "{json}");
+        assert!(json.contains("\"interval\":\"24h\""), "{json}");
         let read: Result<AppSettings, _> = serde_json::from_str(&json);
         assert_eq!(read.ok(), Some(settings));
     }
@@ -332,5 +393,8 @@ mod tests {
             ..AppSettings::default()
         };
         assert_eq!(read.ok(), Some(expected));
+        let updates = AppSettings::default().updates;
+        assert!(updates.automatic);
+        assert!(!updates.prereleases);
     }
 }

@@ -1177,3 +1177,74 @@ fn the_sidebar_names_its_scope_and_collapses_to_a_bare_chevron() -> anyhow::Resu
     assert!(ui.bounds("expand-sidebar").is_some());
     Ok(())
 }
+
+struct GatedSource {
+    gate: async_channel::Receiver<()>,
+}
+
+impl fleet_update::Source for GatedSource {
+    fn releases(&self, _: bool) -> fleet_update::Result<Vec<fleet_update::release::Release>> {
+        self.gate
+            .recv_blocking()
+            .map_err(|error| fleet_update::Error::Network(error.to_string()))?;
+        Ok(Vec::new())
+    }
+
+    fn fetch(&self, _: &str, _: u64) -> fleet_update::Result<Vec<u8>> {
+        Err(fleet_update::Error::Http(404))
+    }
+}
+
+fn menu_action(name: &str) -> anyhow::Result<Box<dyn gpui::Action>> {
+    fleet::menus()
+        .into_iter()
+        .flat_map(|menu| menu.items)
+        .find_map(|item| match item {
+            gpui::MenuItem::Action {
+                name: label,
+                action,
+                ..
+            } if label.as_ref() == name => Some(action),
+            _ => None,
+        })
+        .ok_or_else(|| anyhow::anyhow!("no {name} menu item"))
+}
+
+#[test]
+fn check_for_updates_from_the_menu_shows_checking_then_up_to_date() -> anyhow::Result<()> {
+    use fleet_core::UpdaterState;
+    use fleet_ui::updater;
+
+    let mut ui = Ui::open(Screen::Fleet)?;
+    let (open, gate) = async_channel::bounded(1);
+    let config = fleet_update::Config {
+        current: fleet_update::version::parse(updater::version())?,
+        identifier: fleet::APP_ID.to_owned(),
+        bundle_name: format!("{}.app", fleet::APP_NAME),
+        target: fleet_update::Target::Manual,
+        public_key: fleet_update::signature::PUBLIC_KEY.to_owned(),
+        max_download: 1 << 20,
+        max_text: 1 << 10,
+    };
+    let service = fleet_update::Updater::new(GatedSource { gate }, config, Box::new(|_| Ok(())));
+    let (requests, request_rx) = async_channel::unbounded();
+    let (status_tx, statuses) = async_channel::unbounded();
+    fleet_update::spawn(service, request_rx, status_tx)?;
+    ui.update_app(|cx| updater::install(requests, statuses, cx));
+    assert!(ui.bounds(updater::STATUS_ITEM).is_none());
+
+    ui.dispatch(menu_action(fleet::CHECK_FOR_UPDATES_ITEM)?)?;
+    let checking = ui.read_app(|cx| updater::status(cx).state.clone());
+    assert_eq!(checking, UpdaterState::Checking);
+    assert!(ui.bounds(updater::STATUS_ITEM).is_some());
+
+    open.send_blocking(())?;
+    ui.settle()?;
+    let done = ui.read_app(|cx| updater::status(cx).clone());
+    assert_eq!(done.state, UpdaterState::UpToDate);
+    assert!(done.checked.is_some());
+    let notices = ui.read_app(fleet_ui::kit::toast_titles);
+    assert_eq!(notices, ["Fleet is up to date"]);
+    assert!(ui.bounds(updater::STATUS_ITEM).is_none());
+    Ok(())
+}

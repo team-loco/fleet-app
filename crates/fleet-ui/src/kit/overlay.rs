@@ -153,6 +153,15 @@ pub fn toast(toast: Toast, cx: &mut App) {
     layer(cx).update(cx, |overlays, cx| overlays.push(toast, cx));
 }
 
+pub fn toast_titles(cx: &App) -> Vec<SharedString> {
+    let overlays = layer(cx);
+    let shown = &overlays.read(cx).toasts;
+    shown
+        .iter()
+        .map(|shown| shown.toast.title.clone())
+        .collect()
+}
+
 impl Overlays {
     fn open(&mut self, dialog: ConfirmDialog, window: &mut Window, cx: &mut Context<Self>) {
         self.next += 1;

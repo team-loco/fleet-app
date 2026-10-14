@@ -9,7 +9,7 @@ use fleet::{
     bind_keys, bundled, menus, parse_object, root_view,
 };
 use fleet_core::Status;
-use fleet_core::{Backend, ClusterId, Command};
+use fleet_core::{Backend, ClusterId, Command, Receiver, Sender, UpdaterRequest, UpdaterStatus};
 use fleet_demo::DemoBackend;
 use fleet_kube::LiveBackend;
 use fleet_kube::app_settings::SettingsStore;
@@ -20,6 +20,7 @@ use fleet_ui::actions::{NewWindow, Quit};
 use fleet_ui::kit::{Toast, toast};
 use fleet_ui::theme::{Appearance, TRAFFIC_LIGHT_X, TRAFFIC_LIGHT_Y};
 use fleet_ui::{NewWindowRequest, Root, Shell, Store, assets};
+use fleet_update::{GitHub, Updater, signature::PUBLIC_KEY};
 use gpui::{
     App, AppContext as _, Bounds, Size, TitlebarOptions, WindowBounds, WindowOptions, point, px,
     size,
@@ -30,6 +31,14 @@ const MIN_WIDTH: f32 = 720.;
 const MIN_HEIGHT: f32 = 480.;
 const LOG_SNAPSHOTS_VAR: &str = "FLEET_LOG_SNAPSHOTS";
 const SETTINGS_SET_ASIDE: &str = "Settings could not be read";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
+const BUNDLE_EXTENSION: &str = ".app";
+const UPDATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+const MAX_UPDATE_ZIP: u64 = 256 << 20;
+const MAX_UPDATE_TEXT: u64 = 4 << 10;
+
+type UpdaterChannels = (Sender<UpdaterRequest>, Receiver<UpdaterStatus>);
 
 #[derive(Parser, Debug)]
 #[command(
@@ -100,13 +109,23 @@ fn main() -> anyhow::Result<()> {
         cluster: args.cluster.map(ClusterId::new),
         object: args.object,
     };
+    let self_update = start_updater();
     let failure = Rc::new(RefCell::new(None));
     let failed = failure.clone();
     gpui_platform::application()
         .with_assets(assets::Assets)
         .run(move |cx: &mut App| {
             fleet_ui::prefs::init(prefs_dir.as_deref(), cx);
-            let launched = launch(cx, forced, settings, update_rx, command_tx, screen, &preset);
+            let launched = launch(
+                cx,
+                forced,
+                settings,
+                self_update,
+                update_rx,
+                command_tx,
+                screen,
+                &preset,
+            );
             if let Err(error) = launched {
                 failed.replace(Some(error));
                 cx.quit();
@@ -115,9 +134,7 @@ fn main() -> anyhow::Result<()> {
     failure.take().map_or(Ok(()), Err)
 }
 
-fn log_snapshots(
-    updates: async_channel::Receiver<fleet_core::Update>,
-) -> async_channel::Receiver<fleet_core::Update> {
+fn log_snapshots(updates: Receiver<fleet_core::Update>) -> Receiver<fleet_core::Update> {
     let (forward_tx, forward_rx) = async_channel::unbounded();
     std::thread::spawn(move || {
         while let Ok(update) = updates.recv_blocking() {
@@ -153,6 +170,38 @@ fn log_snapshots(
     forward_rx
 }
 
+fn start_updater() -> Option<UpdaterChannels> {
+    let started = updater_config().and_then(|config| {
+        let user_agent = format!("{APP_NAME}/{VERSION}");
+        let source = GitHub::new(REPOSITORY, UPDATE_TIMEOUT, &user_agent)?;
+        let relaunch: fleet_update::Relaunch = Box::new(fleet_update::install::relaunch);
+        let updater = Updater::new(source, config, relaunch);
+        let (request_tx, request_rx) = async_channel::unbounded();
+        let (status_tx, status_rx) = async_channel::unbounded();
+        fleet_update::spawn(updater, request_rx, status_tx)
+            .map_err(fleet_update::Error::io("updater thread"))?;
+        Ok((request_tx, status_rx))
+    });
+    started
+        .inspect_err(|error| tracing::warn!(%error, "update checks are off"))
+        .ok()
+}
+
+fn updater_config() -> fleet_update::Result<fleet_update::Config> {
+    let target = std::env::current_exe().map_or(fleet_update::Target::Manual, |exe| {
+        fleet_update::install::target(&exe)
+    });
+    Ok(fleet_update::Config {
+        current: fleet_update::version::parse(VERSION)?,
+        identifier: APP_ID.to_owned(),
+        bundle_name: format!("{APP_NAME}{BUNDLE_EXTENSION}"),
+        target,
+        public_key: PUBLIC_KEY.to_owned(),
+        max_download: MAX_UPDATE_ZIP,
+        max_text: MAX_UPDATE_TEXT,
+    })
+}
+
 fn data_dir(data_dir: Option<PathBuf>, sources: &DiscoverySources) -> anyhow::Result<PathBuf> {
     match (data_dir, &sources.home) {
         (Some(dir), _) => Ok(dir),
@@ -179,12 +228,14 @@ fn install_settings(store: SettingsStore, cx: &mut App) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn launch(
     cx: &mut App,
     forced: Option<Appearance>,
     settings: Option<SettingsStore>,
-    updates: async_channel::Receiver<fleet_core::Update>,
-    commands: async_channel::Sender<Command>,
+    self_update: Option<UpdaterChannels>,
+    updates: Receiver<fleet_core::Update>,
+    commands: Sender<Command>,
     screen: Screen,
     preset: &Preset,
 ) -> anyhow::Result<()> {
@@ -192,6 +243,9 @@ fn launch(
     cx.set_app_identity(APP_ID, APP_NAME);
     if let Some(settings) = settings {
         install_settings(settings, cx);
+    }
+    if let Some((requests, statuses)) = self_update {
+        fleet_ui::updater::install(requests, statuses, cx);
     }
     bind_keys(cx);
     cx.set_menus(menus());
@@ -286,6 +340,7 @@ mod tests {
             launch(
                 cx,
                 Some(Appearance::Dark),
+                None,
                 None,
                 updates,
                 commands,

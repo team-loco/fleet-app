@@ -84,6 +84,7 @@ impl Shell {
             )
             .child(div().min_w_0().truncate().child(left))
             .child(div().flex_1())
+            .children(crate::updater::status_item(cx))
             .children(self.forwards(cx))
             .children(self.loco_agent(&palette))
             .child(self.switcher.clone())
