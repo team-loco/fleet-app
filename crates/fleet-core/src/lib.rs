@@ -28,6 +28,7 @@ pub mod state;
 pub mod status;
 pub mod stream;
 pub mod switcher;
+pub mod tabs;
 pub mod time;
 pub mod watch;
 pub mod workload;

@@ -817,10 +817,17 @@ impl<R: 'static> Table<R> {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if event.is_middle_click() {
+            cx.emit(TableEvent::Opened(row));
+        }
+        if !event.standard_click() {
+            return;
+        }
         window.focus(&self.focus, cx);
         self.selected = Some(row);
         cx.emit(TableEvent::Selected(row));
-        if self.click_opens || event.click_count() > 1 {
+        let new_tab = event.modifiers().platform;
+        if self.click_opens || new_tab || event.click_count() > 1 {
             cx.emit(TableEvent::Opened(row));
         }
         cx.notify();
@@ -1030,6 +1037,9 @@ impl<R: 'static> Table<R> {
             })
             .when(!selected, |row| row.hover(move |style| style.bg(hover)))
             .on_click(cx.listener(move |this, event, window, cx| {
+                this.click_row(ix, event, window, cx);
+            }))
+            .on_aux_click(cx.listener(move |this, event, window, cx| {
                 this.click_row(ix, event, window, cx);
             }))
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {

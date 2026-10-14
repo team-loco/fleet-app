@@ -4,13 +4,15 @@ mod page;
 mod sidebar;
 mod status_bar;
 pub(crate) mod switcher;
+mod tabs;
 
 use fleet_core::palette::{COMPARE_KEY, LOGS_KEY, OWNER_KEY, resource_commands};
 use fleet_core::resource::short_kind;
 use fleet_core::{AddClusterStep, AppState, Command, Page, Sender, Status, Update};
 use gpui::{
     App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
-    ParentElement, Render, Styled, Subscription, Task, Window, div,
+    KeyDownEvent, MouseButton, MouseDownEvent, ParentElement, Render, Styled, Subscription, Task,
+    Window, div,
 };
 
 use crate::Store;
@@ -27,6 +29,7 @@ use crate::screens::compare::CompareScreen;
 use crate::screens::fleet::FleetScreen;
 use crate::screens::flux_object::FluxObjectPage;
 use crate::screens::gitops::GitOpsScreen;
+use crate::screens::logs::LogsScreen;
 use crate::screens::pods::PodsScreen;
 use crate::screens::settings::SettingsScreen;
 use crate::screens::workload::WorkloadScreen;
@@ -46,6 +49,9 @@ pub struct Shell {
     window_id: u64,
     commands: Sender<Command>,
     pending: Vec<Command>,
+    new_tab_gesture: bool,
+    announce: bool,
+    tab_strip: tabs::TabStrip,
     sidebar_generation: usize,
     focus: FocusHandle,
     fleet: Entity<FleetScreen>,
@@ -58,6 +64,7 @@ pub struct Shell {
     switcher: Entity<ClusterSwitcher>,
     _switcher_events: Subscription,
     workload: Option<(Entity<WorkloadScreen>, Subscription)>,
+    logs: Option<(Entity<LogsScreen>, Subscription)>,
     flux_object: Entity<FluxObjectPage>,
     #[cfg(feature = "loco")]
     loco: Entity<crate::screens::loco::LocoScreens>,
@@ -136,11 +143,7 @@ impl Shell {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         theme::follow_window(window, cx);
-        let palette = cx.new(|cx| CommandPalette::new(window, cx));
-        let palette_events =
-            cx.subscribe_in(&palette, window, |this, palette, event, window, cx| {
-                this.palette_event(palette, event, window, cx);
-            });
+        let (palette, palette_events) = Self::new_palette(window, cx);
         let (switcher, switcher_events) = Self::new_switcher(window, cx);
         let pages = ClusterPages::new(window, cx, Self::screen_event);
         let flux_object = cx.new(FluxObjectPage::new);
@@ -153,6 +156,9 @@ impl Shell {
             window_id,
             commands,
             pending: initial,
+            new_tab_gesture: false,
+            announce: false,
+            tab_strip: tabs::TabStrip::default(),
             sidebar_generation: 0,
             focus,
             fleet,
@@ -165,6 +171,7 @@ impl Shell {
             switcher,
             _switcher_events: switcher_events,
             workload: None,
+            logs: None,
             flux_object,
             #[cfg(feature = "loco")]
             loco,
@@ -195,6 +202,17 @@ impl Shell {
         cx.subscribe(screen, |this, _, command: &Command, cx| {
             this.dispatch(command.clone(), cx);
         })
+    }
+
+    fn new_palette(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (Entity<CommandPalette>, Subscription) {
+        let palette = cx.new(|cx| CommandPalette::new(window, cx));
+        let events = cx.subscribe_in(&palette, window, |this, palette, event, window, cx| {
+            this.palette_event(palette, event, window, cx);
+        });
+        (palette, events)
     }
 
     fn new_switcher(
@@ -236,6 +254,12 @@ impl Shell {
                 palette.update(cx, |palette, cx| palette.close(window, cx));
                 self.dispatch(command.clone(), cx);
             }
+            PaletteEvent::NewTab(command) => {
+                if self.state.window_commands(command).is_some() {
+                    palette.update(cx, |palette, cx| palette.close(window, cx));
+                    self.dispatch(Command::NewTab(Box::new(command.clone())), cx);
+                }
+            }
             PaletteEvent::NewWindow(command) => {
                 if let Some(commands) = self.state.window_commands(command) {
                     palette.update(cx, |palette, cx| palette.close(window, cx));
@@ -254,6 +278,9 @@ impl Shell {
         }
         self.state.update(update);
         self.run_pending(window, cx);
+        if self.loaded && std::mem::take(&mut self.announce) {
+            self.show_active(cx);
+        }
         let snapshot = &self.state.snapshot;
         self.fleet
             .update(cx, |fleet, cx| fleet.set_snapshot(snapshot, cx));
@@ -287,6 +314,12 @@ impl Shell {
         }
     }
 
+    pub fn restore_tabs(&mut self, saved: &fleet_core::tabs::SavedWindow, cx: &mut Context<Self>) {
+        self.state.restore(saved);
+        self.announce = true;
+        cx.notify();
+    }
+
     pub fn state(&self) -> &AppState {
         &self.state
     }
@@ -312,7 +345,7 @@ impl Shell {
 
     fn sync_palette(&self, cx: &mut Context<Self>) {
         let snapshot = &self.state.snapshot;
-        let current = self.state.cluster.as_ref();
+        let current = self.state.location().cluster.as_ref();
         self.palette.update(cx, |palette, cx| {
             palette.set_context(snapshot, current, cx);
         });
@@ -344,7 +377,7 @@ impl Shell {
             .is_none_or(|settings| settings.preferences.confirm_destructive);
         let preferences = self.cluster_preferences();
         self.pages.sync(
-            self.state.page,
+            self.state.location().page,
             cluster,
             &self.state.snapshot,
             confirm_destructive,
@@ -396,6 +429,63 @@ impl Shell {
     }
 
     fn dispatch(&mut self, command: Command, cx: &mut Context<Self>) {
+        let command = self.with_gesture(command);
+        let before = self.state.location().clone();
+        if let Command::NewTab(inner) = &command {
+            self.ui_effects(inner, cx);
+            self.state.apply(&command);
+            self.show_active(cx);
+            return;
+        }
+        self.ui_effects(&command, cx);
+        self.state.apply(&command);
+        if let Command::OpenResource(target) = &command {
+            self.pages.reveal(target, cx);
+        }
+        self.keys.refocus |= self.state.location() != &before;
+        self.sync_page(cx);
+        self.track_load(cx);
+        self.send(command);
+        self.sync_palette(cx);
+        cx.notify();
+    }
+
+    fn with_gesture(&mut self, command: Command) -> Command {
+        let navigates = self.state.window_commands(&command).is_some();
+        let fresh = !matches!(command, Command::NewTab(_));
+        if navigates && fresh && std::mem::take(&mut self.new_tab_gesture) {
+            return Command::NewTab(Box::new(command));
+        }
+        command
+    }
+
+    pub(super) fn show_active(&mut self, cx: &mut Context<Self>) {
+        let location = self.state.location().clone();
+        for command in location.commands() {
+            self.send(command);
+        }
+        if let Some(resource) = &location.resource {
+            self.pages.reveal(resource, cx);
+        }
+        self.keys.refocus = true;
+        self.sync_page(cx);
+        self.track_load(cx);
+        self.sync_palette(cx);
+        cx.notify();
+    }
+
+    pub(super) fn close_tab(&mut self, id: fleet_core::tabs::TabId, cx: &mut Context<Self>) {
+        let active = self.state.panes().active().id();
+        if self.state.panes_mut().close(id) {
+            if active == id {
+                self.show_active(cx);
+            } else {
+                cx.notify();
+            }
+        }
+    }
+
+    fn ui_effects(&mut self, command: &Command, cx: &mut Context<Self>) {
         match command {
             Command::ForWindow(_, _) => {}
             Command::WindowClosed(_) => {}
@@ -410,7 +500,9 @@ impl Shell {
             #[cfg(feature = "loco")]
             Command::Loco(_) => {}
             Command::CopySpec { .. } => {}
-            Command::ShowClusterSettings(ref cluster) => {
+            Command::NewTab(_) => {}
+            Command::OpenLogs { .. } => {}
+            Command::ShowClusterSettings(cluster) => {
                 self.settings
                     .update(cx, |settings, cx| settings.open(cluster, cx));
             }
@@ -421,7 +513,7 @@ impl Shell {
             Command::ConfirmContext(_) => {}
             Command::Disconnect(_) => {}
             Command::PortForward {
-                ref service,
+                service,
                 local,
                 remote,
             } => {
@@ -438,7 +530,7 @@ impl Shell {
                 toast(Toast::new(Status::Ok, title).detail(detail), cx);
             }
             Command::StopPortForward { .. } => {}
-            Command::OpenCommit(ref sha) => {
+            Command::OpenCommit(sha) => {
                 self.changes.update(cx, |changes, cx| changes.open(sha, cx));
             }
             Command::Cordon(_) => {}
@@ -460,20 +552,10 @@ impl Shell {
             Command::OpenFluxObject(_) => {}
             Command::Flux(..) => {}
         }
-        self.state.apply(&command);
-        if let Command::OpenResource(target) = &command {
-            self.pages.reveal(target, cx);
-        }
-        self.sync_page(cx);
-        self.track_load(cx);
-        self.send(command);
-        self.sync_palette(cx);
-        self.record_visit();
-        cx.notify();
     }
 
     fn run_shortcut(&mut self, key: &str, cx: &mut Context<Self>) {
-        let Some(resource) = self.state.resource.as_ref() else {
+        let Some(resource) = self.state.location().resource.as_ref() else {
             return;
         };
         let command = resource_commands(&self.state.snapshot, resource)
@@ -486,10 +568,10 @@ impl Shell {
     }
 
     fn sync_page(&self, cx: &mut Context<Self>) {
-        let page = self.state.page;
+        let page = self.state.location().page;
         self.fleet.update(cx, |fleet, cx| fleet.set_page(page, cx));
         self.sync_pages(cx);
-        let flux = self.state.flux_object.as_ref();
+        let flux = self.state.location().flux_object.as_ref();
         let object = flux.and_then(|key| self.state.snapshot.flux_page(key));
         self.flux_object
             .update(cx, |screen, cx| screen.set_page(object, cx));
@@ -497,12 +579,12 @@ impl Shell {
         self.loco
             .update(cx, |loco, cx| loco.set_context(&self.state, cx));
         let snapshot = &self.state.snapshot;
-        let resource = self.state.resource.as_ref();
+        let resource = self.state.location().resource.as_ref();
         self.compare.update(cx, |compare, cx| {
             compare.set_snapshot(snapshot, resource, cx);
         });
-        let cluster = self.state.cluster.as_ref();
-        let resource = self.state.resource.as_ref();
+        let cluster = self.state.location().cluster.as_ref();
+        let resource = self.state.location().resource.as_ref();
         let preferences = self.cluster_preferences();
         self.pods.update(cx, |pods, cx| {
             pods.set_context(cluster, resource, &preferences, cx);
@@ -519,14 +601,17 @@ impl Shell {
     }
 
     pub fn filter_bar(&self, cx: &App) -> Option<Entity<FilterBar>> {
-        if self.state.workload().is_some() || self.state.flux_object.is_some() {
+        if self.state.workload().is_some() || self.state.location().flux_object.is_some() {
             return None;
         }
         #[cfg(feature = "loco")]
-        if crate::screens::loco::owns(self.state.page) {
-            return self.loco.read(cx).filter_bar(self.state.page, cx);
+        if crate::screens::loco::owns(self.state.location().page) {
+            return self
+                .loco
+                .read(cx)
+                .filter_bar(self.state.location().page, cx);
         }
-        match self.state.page {
+        match self.state.location().page {
             Page::Pods => Some(self.pods.read(cx).filter_bar().clone()),
             Page::Changes => Some(self.changes.read(cx).filter_bar().clone()),
             Page::GitOps => Some(self.gitops.read(cx).filter_bar().clone()),
@@ -557,6 +642,13 @@ impl Render for Shell {
             .track_focus(&self.focus)
             .on_action(cx.listener(|this, _: &FocusFilter, window, cx| {
                 this.focus_filter(window, cx);
+            }))
+            .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, _| {
+                this.new_tab_gesture =
+                    event.modifiers.platform || event.button == MouseButton::Middle;
+            }))
+            .capture_key_down(cx.listener(|this, _: &KeyDownEvent, _, _| {
+                this.new_tab_gesture = false;
             }));
         Self::key_actions(root, cx)
             .on_action(cx.listener(|this, _: &OpenSettings, _, cx| {
@@ -594,7 +686,15 @@ impl Render for Shell {
                     .flex_1()
                     .min_h_0()
                     .child(self.sidebar(window, cx))
-                    .child(page),
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .child(self.tab_strip(cx))
+                            .child(div().flex().flex_1().min_h_0().child(page)),
+                    ),
             )
             .child(self.status_bar(cx))
             .child(self.palette.clone())
@@ -637,7 +737,7 @@ mod tests {
                     crate::actions::OpenSelectedNewWindow,
                     Some("CommandPalette"),
                 ),
-                KeyBinding::new("cmd-w", crate::actions::CloseWindow, None),
+                KeyBinding::new("cmd-shift-w", crate::actions::CloseWindow, None),
             ]);
         });
         let (backend, updates) = async_channel::unbounded();
@@ -670,7 +770,7 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(first.read_with(cx, |shell, _| shell.state.clone()), before);
         assert_eq!(
-            second.read_with(cx, |shell, _| shell.state.page),
+            second.read_with(cx, |shell, _| shell.state.location().page),
             Page::GitOps
         );
         let mut snapshot = fleet_core::Snapshot::default();
@@ -699,7 +799,7 @@ mod tests {
             second.read_with(cx, |shell, _| shell.state.snapshot.clone()),
             snapshot
         );
-        cx.simulate_keystrokes(second_window, "cmd-w");
+        cx.simulate_keystrokes(second_window, "cmd-shift-w");
         assert_eq!(cx.read(|cx| cx.windows().len()), 1);
         drop(second);
         cx.run_until_parked();

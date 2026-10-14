@@ -12,8 +12,21 @@ Generated from the binding table in `crates/fleet-ui/src/keymap.rs`; run `mise r
 | ⌘⇧C | Switch cluster |
 | ⌘, | Settings |
 | ⌘N | New window |
-| ⌘W | Close the inspector, then the dock, then the window |
+| ⌘⇧W | Close the window |
 | ⌘Q | Quit Fleet |
+
+## Tabs
+
+| Keys | Action |
+|---|---|
+| ⌘T | New tab on Fleet home |
+| ⌘W | Close the tab |
+| ⌃Tab / ⌥⌘→ | Next tab |
+| ⌃⇧Tab / ⌥⌘← | Previous tab |
+| ⌘1 / ⌘2 / ⌘3 / ⌘4 / ⌘5 / ⌘6 / ⌘7 / ⌘8 / ⌘9 | Select tab 1 to 9 |
+| ⌘-click / middle click | Open a page, row or result in a new tab |
+| middle click | Close the tab under the pointer |
+| drag | Reorder tabs |
 
 ## View
 
@@ -21,8 +34,8 @@ Generated from the binding table in `crates/fleet-ui/src/keymap.rs`; run `mise r
 |---|---|
 | ⌘B | Toggle the sidebar |
 | ⌘J | Toggle the bottom dock |
-| ⌘1 | Focus the sidebar |
-| ⌘2 | Focus the page's list |
+| ⌘⇧E | Focus the sidebar |
+| ⌘E | Focus the page's list |
 | Tab / ⇧Tab | Next or previous focus area |
 | / | Focus the page filter |
 | ⌘F | Focus the page filter |
@@ -33,8 +46,6 @@ Generated from the binding table in `crates/fleet-ui/src/keymap.rs`; run `mise r
 |---|---|
 | ⌘[ | Back |
 | ⌘] | Forward |
-| ⌃Tab | Next recent page |
-| ⌃⇧Tab | Previous recent page |
 
 ## Lists and tables
 
@@ -60,6 +71,7 @@ Generated from the binding table in `crates/fleet-ui/src/keymap.rs`; run `mise r
 
 | Keys | Action |
 |---|---|
+| ⌘↵ | Open the result in a new tab |
 | ⌥↵ | Open the result in a new window |
 
 ## Workload page
@@ -68,7 +80,7 @@ Generated from the binding table in `crates/fleet-ui/src/keymap.rs`; run `mise r
 |---|---|
 | ⌘. | Actions |
 | ⌘L | Logs |
-| ⌘T | Terminal |
+| ⌃` | Terminal |
 | ⌘Y | YAML |
 
 ## Terminal

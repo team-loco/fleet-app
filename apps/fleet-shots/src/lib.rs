@@ -102,6 +102,7 @@ enum Step {
         at: Point<Pixels>,
         button: MouseButton,
         count: usize,
+        modifiers: Modifiers,
     },
     Hover(Point<Pixels>),
     Scroll(Point<Pixels>, Point<Pixels>),
@@ -111,21 +112,31 @@ enum Step {
     },
 }
 
-fn mouse_down(position: Point<Pixels>, button: MouseButton, count: usize) -> PlatformInput {
+fn mouse_down(
+    position: Point<Pixels>,
+    button: MouseButton,
+    count: usize,
+    modifiers: Modifiers,
+) -> PlatformInput {
     PlatformInput::MouseDown(MouseDownEvent {
         button,
         position,
-        modifiers: Modifiers::none(),
+        modifiers,
         click_count: count,
         first_mouse: false,
     })
 }
 
-fn mouse_up(position: Point<Pixels>, button: MouseButton, count: usize) -> PlatformInput {
+fn mouse_up(
+    position: Point<Pixels>,
+    button: MouseButton,
+    count: usize,
+    modifiers: Modifiers,
+) -> PlatformInput {
     PlatformInput::MouseUp(MouseUpEvent {
         button,
         position,
-        modifiers: Modifiers::none(),
+        modifiers,
         click_count: count,
     })
 }
@@ -156,10 +167,15 @@ fn apply(step: &Step, window: &mut Window, cx: &mut App) -> anyhow::Result<()> {
                 window.dispatch_keystroke(parse(&key)?, cx);
             }
         }
-        Step::Click { at, button, count } => {
+        Step::Click {
+            at,
+            button,
+            count,
+            modifiers,
+        } => {
             for count in 1..=*count {
-                window.dispatch_event(mouse_down(*at, *button, count), cx);
-                window.dispatch_event(mouse_up(*at, *button, count), cx);
+                window.dispatch_event(mouse_down(*at, *button, count, *modifiers), cx);
+                window.dispatch_event(mouse_up(*at, *button, count, *modifiers), cx);
             }
         }
         Step::Scroll(position, delta) => {
@@ -177,9 +193,10 @@ fn apply(step: &Step, window: &mut Window, cx: &mut App) -> anyhow::Result<()> {
         }
         Step::Drag { from, to } => {
             window.dispatch_event(mouse_move(*from, None), cx);
-            window.dispatch_event(mouse_down(*from, MouseButton::Left, SINGLE), cx);
+            let none = Modifiers::none();
+            window.dispatch_event(mouse_down(*from, MouseButton::Left, SINGLE, none), cx);
             window.dispatch_event(mouse_move(*to, Some(MouseButton::Left)), cx);
-            window.dispatch_event(mouse_up(*to, MouseButton::Left, SINGLE), cx);
+            window.dispatch_event(mouse_up(*to, MouseButton::Left, SINGLE, none), cx);
         }
     }
     Ok(())
@@ -362,15 +379,23 @@ impl Ui {
     }
 
     pub fn click(&mut self, selector: &'static str) -> anyhow::Result<()> {
-        self.click_with(selector, MouseButton::Left, SINGLE)
+        self.click_with(selector, MouseButton::Left, SINGLE, Modifiers::none())
     }
 
     pub fn double_click(&mut self, selector: &'static str) -> anyhow::Result<()> {
-        self.click_with(selector, MouseButton::Left, DOUBLE)
+        self.click_with(selector, MouseButton::Left, DOUBLE, Modifiers::none())
     }
 
     pub fn right_click(&mut self, selector: &'static str) -> anyhow::Result<()> {
-        self.click_with(selector, MouseButton::Right, SINGLE)
+        self.click_with(selector, MouseButton::Right, SINGLE, Modifiers::none())
+    }
+
+    pub fn middle_click(&mut self, selector: &'static str) -> anyhow::Result<()> {
+        self.click_with(selector, MouseButton::Middle, SINGLE, Modifiers::none())
+    }
+
+    pub fn cmd_click(&mut self, selector: &'static str) -> anyhow::Result<()> {
+        self.click_with(selector, MouseButton::Left, SINGLE, Modifiers::command())
     }
 
     fn click_with(
@@ -378,9 +403,15 @@ impl Ui {
         selector: &'static str,
         button: MouseButton,
         count: usize,
+        modifiers: Modifiers,
     ) -> anyhow::Result<()> {
         let at = self.center(selector)?;
-        self.run(Step::Click { at, button, count })
+        self.run(Step::Click {
+            at,
+            button,
+            count,
+            modifiers,
+        })
     }
 
     pub fn hover(&mut self, selector: &'static str) -> anyhow::Result<()> {

@@ -1,8 +1,10 @@
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{ClusterId, Page, ResourceRef, Snapshot, Status, Uid, time};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum FluxKind {
     Kustomization,
     HelmRelease,
@@ -51,7 +53,7 @@ impl FluxKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct FluxKey {
     pub cluster: ClusterId,
     pub kind: FluxKind,

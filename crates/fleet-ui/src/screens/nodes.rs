@@ -16,6 +16,7 @@ use crate::kit::{
     KeyValue, MenuItem, MetaLine, Meter, MiniMeter, Presence, SectionLabel, StatusGlyph,
     StatusText, Table, TableEvent, chip_label, confirm, slide_in, slide_out,
 };
+use crate::screens::new_tab_item;
 use crate::theme::{
     ActiveTheme, FONT_MONO, INSPECTOR, Palette, SPACE_2, SPACE_3, SPACE_4, SPACE_5, TEXT_MONO,
     TEXT_SMALL,
@@ -363,6 +364,13 @@ fn node_items(
     screen: WeakEntity<NodesScreen>,
 ) -> Vec<MenuItem> {
     let target = node_target(node, cluster);
+    let open_screen = screen.clone();
+    let open = new_tab_item(
+        Command::OpenResource(target.target.clone()),
+        move |command, cx| {
+            let _ = open_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+        },
+    );
     let (label, description, command) = if node.schedulable {
         (
             "Cordon",
@@ -385,6 +393,7 @@ fn node_items(
     .description(description);
     let detail = format!("{} · {}", target.target.cluster, target.target.name);
     vec![
+        open,
         toggle,
         MenuItem::new("Drain…", move |window, cx| {
             let screen = screen.clone();

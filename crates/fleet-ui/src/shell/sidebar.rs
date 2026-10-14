@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 
 use fleet_core::{ClusterSummary, Command, Counts, NavSection, Page};
 use gpui::{
-    Animation, AnimationExt, AnyElement, Context, ElementId, FontWeight, Hsla, InteractiveElement,
-    IntoElement, MouseButton, ParentElement, Pixels, StatefulInteractiveElement, Styled, Window,
-    div, ease_out_quint, prelude::FluentBuilder, svg,
+    Animation, AnimationExt, AnyElement, ClickEvent, Context, ElementId, FontWeight, Hsla,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
+    StatefulInteractiveElement, Styled, Window, div, ease_out_quint, prelude::FluentBuilder, svg,
 };
 
 use super::Shell;
@@ -27,7 +27,7 @@ impl Shell {
             .keys
             .sidebar_focus
             .is_focused(window)
-            .then(|| self.keys.nav_cursor.unwrap_or(self.state.page));
+            .then(|| self.keys.nav_cursor.unwrap_or(self.state.location().page));
         let content = if open {
             self.sidebar_open(cursor, &palette, cx).into_any_element()
         } else {
@@ -62,7 +62,7 @@ impl Shell {
     }
 
     pub(super) fn selected_cluster(&self) -> Option<&ClusterSummary> {
-        let id = self.state.cluster.as_ref()?;
+        let id = self.state.location().cluster.as_ref()?;
         self.state.snapshot.cluster(id)
     }
 
@@ -82,7 +82,7 @@ impl Shell {
         let sections = self
             .state
             .snapshot
-            .nav_sections(self.state.cluster.as_ref());
+            .nav_sections(self.state.location().cluster.as_ref());
         let counts = self.nav_counts();
         let mut items: Vec<AnyElement> = Vec::new();
         for section in sections {
@@ -91,7 +91,7 @@ impl Shell {
             }
             items.extend(section_rows(
                 section,
-                self.state.page,
+                self.state.location().page,
                 cursor,
                 counts,
                 palette,
@@ -180,6 +180,11 @@ fn section_rows(
                 .children(badges)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.dispatch(Command::SelectPage(page), cx);
+                }))
+                .on_aux_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                    if event.is_middle_click() {
+                        this.dispatch(Command::SelectPage(page), cx);
+                    }
                 }))
                 .into_any_element()
         })

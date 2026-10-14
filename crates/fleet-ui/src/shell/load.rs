@@ -21,12 +21,12 @@ pub(super) struct LoadClock {
 
 impl Shell {
     fn tracked(&self) -> Option<(ClusterId, Page)> {
-        let page = self.state.page;
-        let cluster = self.state.cluster.clone()?;
+        let page = self.state.location().page;
+        let cluster = self.state.location().cluster.clone()?;
         let tracked = !page.is_fleet()
             && page != Page::Compare
-            && self.state.resource.is_none()
-            && self.state.flux_object.is_none();
+            && self.state.location().resource.is_none()
+            && self.state.location().flux_object.is_none();
         tracked.then_some((cluster, page))
     }
 
@@ -85,7 +85,7 @@ impl Shell {
         let state = self.page_state()?;
         let cluster = self.selected_cluster()?;
         let id = cluster.id.clone();
-        let page = self.state.page;
+        let page = self.state.location().page;
         let element = match state {
             WatchState::Synced => {
                 if self.state.snapshot.page_rows(&id, page) != Some(0) {

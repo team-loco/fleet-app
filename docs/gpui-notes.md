@@ -124,6 +124,22 @@ shipped `fleet` binary never links it (`mise run bundle:loco` builds `-p fleet` 
   no rounded window corners or shadow (the old `screencapture -l` included the window frame), and the
   appearance is always forced, never read from the OS.
 
+## Tabs
+
+- The tab strip (`shell/tabs.rs`) uses gpui drag and drop: `on_drag(DraggedTab, ..)` builds the
+  preview view, every tab and the trailing filler take `on_drop::<DraggedTab>`. The Ui helper's
+  `drag` (down, one move past `DRAG_THRESHOLD`, up) is enough to trigger it.
+- `on_click` only fires for the left button; middle clicks arrive through `on_aux_click`
+  (`ClickEvent::is_middle_click`), and right clicks too, so aux handlers check the button.
+- ⌘-click opens in a new tab without plumbing through every screen: the shell root
+  `capture_any_mouse_down` records whether the press had ⌘ or was the middle button, and the next
+  navigation command dispatched from that click is wrapped in `Command::NewTab`. A key press
+  clears it. Tables emit `Opened` for ⌘-clicks and middle clicks so row opens reach the shell.
+- ⌘↵ inside a `TextField` never reaches a parent key context: the input binds `secondary-enter`
+  itself, so the palette reads `InputEvent::PressEnter { secondary: true }`.
+- `ScrollHandle::scroll_to_item` on the strip runs only when the active tab changes, so wheel
+  scrolling the strip is not undone on the next frame.
+
 ## Lints
 
 `clippy::pedantic` is on; `match_same_arms` is allowed because AGENTS.md wants one arm per meaning, and

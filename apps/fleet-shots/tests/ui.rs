@@ -11,11 +11,11 @@ const EXPECTED_HEIGHT: u32 = 1800;
 #[test]
 fn command_k_opens_the_palette_and_enter_runs_the_top_hit() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Fleet)?;
-    assert_eq!(ui.state().page, Page::Overview);
+    assert_eq!(ui.state().location().page, Page::Overview);
     ui.press("cmd-k")?;
     ui.type_text("gitops")?;
     ui.press("enter")?;
-    assert_eq!(ui.state().page, Page::GitOps);
+    assert_eq!(ui.state().location().page, Page::GitOps);
     Ok(())
 }
 
@@ -28,7 +28,7 @@ fn command_b_collapses_the_sidebar_to_a_narrow_strip() -> anyhow::Result<()> {
     assert_eq!(open, Some(SIDEBAR));
     ui.press("cmd-b")?;
     assert!(!ui.state().sidebar_open);
-    assert_eq!(ui.state().cluster, before.cluster);
+    assert_eq!(ui.state().location().cluster, before.location().cluster);
     let collapsed = ui.bounds("sidebar").map(|bounds| bounds.size.width);
     assert_eq!(collapsed, Some(SIDEBAR_COLLAPSED));
     assert!(ui.bounds("expand-sidebar").is_some());
@@ -66,8 +66,8 @@ fn clicking_the_switcher_opens_it_and_a_row_selects_that_cluster() -> anyhow::Re
     assert!(ui.read(Shell::switcher_open));
     ui.click("switcher-row-2")?;
     let state = ui.state();
-    assert_eq!(state.cluster, Some(second.id));
-    assert_eq!(state.page, Page::ClusterOverview);
+    assert_eq!(state.location().cluster, Some(second.id));
+    assert_eq!(state.location().page, Page::ClusterOverview);
     assert!(!ui.read(Shell::switcher_open));
     assert_eq!(state.snapshot.connected(), connected);
     Ok(())
@@ -81,13 +81,13 @@ fn typing_in_the_switcher_filters_and_enter_selects() -> anyhow::Result<()> {
     assert!(ui.read(Shell::switcher_open));
     ui.type_text("stag")?;
     ui.press("enter")?;
-    assert_eq!(ui.state().cluster, Some(staging));
+    assert_eq!(ui.state().location().cluster, Some(staging));
     ui.press("cmd-shift-c")?;
     ui.type_text("all")?;
     ui.press("enter")?;
     let state = ui.state();
-    assert_eq!(state.cluster, None);
-    assert_eq!(state.page, Page::Overview);
+    assert_eq!(state.location().cluster, None);
+    assert_eq!(state.location().page, Page::Overview);
     Ok(())
 }
 
@@ -96,14 +96,14 @@ fn arrow_keys_move_from_the_current_cluster() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     let first = cluster_at(&ui, 0)?;
     let second = cluster_at(&ui, 1)?;
-    assert_eq!(ui.state().cluster, Some(first.id));
+    assert_eq!(ui.state().location().cluster, Some(first.id));
     ui.press("cmd-shift-c down enter")?;
-    assert_eq!(ui.state().cluster, Some(second.id));
+    assert_eq!(ui.state().location().cluster, Some(second.id));
     ui.press("cmd-shift-c up up enter")?;
-    assert_eq!(ui.state().cluster, None);
+    assert_eq!(ui.state().location().cluster, None);
     ui.press("cmd-shift-c escape")?;
     assert!(!ui.read(Shell::switcher_open));
-    assert_eq!(ui.state().cluster, None);
+    assert_eq!(ui.state().location().cluster, None);
     Ok(())
 }
 
@@ -117,7 +117,7 @@ fn cluster_actions_open_from_the_switcher() -> anyhow::Result<()> {
     assert!(ui.read(Shell::switcher_open));
     ui.press("cmd-.")?;
     ui.click("switcher-action-0")?;
-    assert_eq!(ui.state().page, Page::ClusterSettings);
+    assert_eq!(ui.state().location().page, Page::ClusterSettings);
     assert!(!ui.read(Shell::switcher_open));
     Ok(())
 }
@@ -131,7 +131,10 @@ fn the_loco_section_shows_only_for_clusters_running_loco() -> anyhow::Result<()>
     ui.press("cmd-shift-c")?;
     ui.type_text("staging")?;
     ui.press("enter")?;
-    assert_eq!(ui.state().cluster, Some(ClusterId::new("staging")));
+    assert_eq!(
+        ui.state().location().cluster,
+        Some(ClusterId::new("staging"))
+    );
     assert!(ui.bounds(platform).is_none());
     Ok(())
 }
@@ -161,8 +164,8 @@ fn clicking_a_cluster_row_selects_that_cluster() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("the demo has fewer than two clusters"))?;
     ui.click("fleet-clusters-row-1")?;
     let state = ui.state();
-    assert_eq!(state.cluster, Some(second));
-    assert_eq!(state.page, Page::ClusterOverview);
+    assert_eq!(state.location().cluster, Some(second));
+    assert_eq!(state.location().page, Page::ClusterOverview);
     Ok(())
 }
 
@@ -190,7 +193,7 @@ fn option_enter_requests_a_window_with_the_cluster_page_without_navigating_the_s
     assert_eq!(
         ui.take_new_window(),
         Some(vec![
-            Command::SelectCluster(before.cluster.clone()),
+            Command::SelectCluster(before.location().cluster.clone()),
             Command::SelectPage(Page::Nodes)
         ])
     );
@@ -204,7 +207,7 @@ fn command_comma_opens_settings_and_its_controls_change_the_app_settings() -> an
     use fleet_core::app_settings::{PollInterval, ThemeChoice};
     let mut ui = Ui::open(Screen::Cluster)?;
     ui.press("cmd-,")?;
-    assert_eq!(ui.state().page, Page::Settings);
+    assert_eq!(ui.state().location().page, Page::Settings);
     let current = |ui: &Ui| ui.read(|_, cx| fleet_ui::settings::current(cx).clone());
     assert_eq!(current(&ui).theme, ThemeChoice::System);
     ui.click("settings-theme-2")?;
@@ -215,7 +218,7 @@ fn command_comma_opens_settings_and_its_controls_change_the_app_settings() -> an
     ui.click("settings-notify")?;
     assert!(!current(&ui).notifications.enabled);
     ui.click("settings-clusters")?;
-    assert_eq!(ui.state().page, Page::ClusterSettings);
+    assert_eq!(ui.state().location().page, Page::ClusterSettings);
     Ok(())
 }
 
@@ -261,7 +264,7 @@ fn dragging_a_column_border_resizes_it_and_remembers_it_per_cluster() -> anyhow:
     ui.press("cmd-k")?;
     ui.type_text("deployments")?;
     ui.press("enter")?;
-    assert_eq!(ui.state().page, Page::Deployments);
+    assert_eq!(ui.state().location().page, Page::Deployments);
     assert!((handle_x(&mut ui, 0)? - before).abs() < 1.);
     ui.press("cmd-shift-c")?;
     ui.type_text(SAMPLE)?;
@@ -347,7 +350,7 @@ fn right_clicking_a_row_opens_its_actions_and_destructive_ones_confirm() -> anyh
     let mut ui = Ui::open(Screen::Resources)?;
     let before = ui.state();
     ui.right_click(selector(format!("{DEPLOYMENTS}-row-1")))?;
-    ui.click(selector(format!("{DEPLOYMENTS}-row-menu-item-0")))?;
+    ui.click(selector(format!("{DEPLOYMENTS}-row-menu-item-1")))?;
     assert!(ui.bounds("dialog-cancel").is_some());
     ui.click("dialog-cancel")?;
     assert_eq!(ui.state(), before);
@@ -371,7 +374,7 @@ fn command_p_quick_opens_a_page_and_command_shift_p_runs_a_command() -> anyhow::
     ui.press("cmd-p")?;
     ui.type_text("nodes")?;
     ui.press("enter")?;
-    assert_eq!(ui.state().page, Page::Nodes);
+    assert_eq!(ui.state().location().page, Page::Nodes);
     assert!(ui.state().sidebar_open);
     ui.press("cmd-shift-p")?;
     ui.type_text("toggle sidebar")?;
@@ -381,28 +384,24 @@ fn command_p_quick_opens_a_page_and_command_shift_p_runs_a_command() -> anyhow::
 }
 
 #[test]
-fn back_forward_and_control_tab_walk_the_visited_pages() -> anyhow::Result<()> {
+fn back_and_forward_walk_the_visited_pages() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
-    assert_eq!(ui.state().page, Page::ClusterOverview);
+    assert_eq!(ui.state().location().page, Page::ClusterOverview);
     ui.press("cmd-p")?;
     ui.type_text("nodes")?;
     ui.press("enter")?;
     ui.press("cmd-p")?;
     ui.type_text("events")?;
     ui.press("enter")?;
-    assert_eq!(ui.state().page, Page::Events);
+    assert_eq!(ui.state().location().page, Page::Events);
     ui.press("cmd-[")?;
-    assert_eq!(ui.state().page, Page::Nodes);
+    assert_eq!(ui.state().location().page, Page::Nodes);
     ui.press("cmd-[")?;
-    assert_eq!(ui.state().page, Page::ClusterOverview);
+    assert_eq!(ui.state().location().page, Page::ClusterOverview);
     ui.press("cmd-]")?;
-    assert_eq!(ui.state().page, Page::Nodes);
-    ui.press("ctrl-tab")?;
-    assert_eq!(ui.state().page, Page::ClusterOverview);
-    ui.press("ctrl-tab")?;
-    assert_eq!(ui.state().page, Page::Events);
-    ui.press("ctrl-shift-tab")?;
-    assert_eq!(ui.state().page, Page::ClusterOverview);
+    assert_eq!(ui.state().location().page, Page::Nodes);
+    ui.press("cmd-] cmd-]")?;
+    assert_eq!(ui.state().location().page, Page::Events);
     Ok(())
 }
 
@@ -422,10 +421,10 @@ fn arrow_keys_home_end_and_type_ahead_move_through_a_table() -> anyhow::Result<(
         anyhow::bail!("the demo has too few clusters");
     };
     let mut open = |keys: &str| -> anyhow::Result<Option<ClusterId>> {
-        ui.press(&format!("cmd-2 {keys} enter"))?;
-        let cluster = ui.state().cluster;
+        ui.press(&format!("cmd-e {keys} enter"))?;
+        let cluster = ui.state().location().cluster.clone();
         ui.press("cmd-[")?;
-        assert_eq!(ui.state().page, Page::Overview);
+        assert_eq!(ui.state().location().page, Page::Overview);
         Ok(cluster)
     };
     assert_eq!(open("down")?.as_ref(), Some(first));
@@ -434,30 +433,29 @@ fn arrow_keys_home_end_and_type_ahead_move_through_a_table() -> anyhow::Result<(
     assert_eq!(open("end up home")?.as_ref(), Some(first));
     assert_eq!(open("home pagedown")?.as_ref(), Some(last));
     assert_eq!(open("end pageup")?.as_ref(), Some(first));
-    ui.press("cmd-2 home")?;
+    ui.press("cmd-e home")?;
     ui.type_text("stag")?;
     ui.press("enter")?;
-    assert_eq!(ui.state().cluster, Some(ClusterId::new("staging")));
+    assert_eq!(
+        ui.state().location().cluster,
+        Some(ClusterId::new("staging"))
+    );
     Ok(())
 }
 
 #[test]
-fn escape_and_command_w_close_the_inspector_before_the_window() -> anyhow::Result<()> {
+fn escape_closes_the_inspector_and_keeps_the_page() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Nodes)?;
-    ui.press("cmd-2 down")?;
+    ui.press("cmd-e down")?;
     assert!(ui.bounds("close-node").is_some());
     ui.press("escape")?;
     assert!(ui.bounds("close-node").is_none());
-    ui.press("cmd-2 down")?;
-    assert!(ui.bounds("close-node").is_some());
-    ui.press("cmd-w")?;
-    assert!(ui.bounds("close-node").is_none());
-    assert_eq!(ui.state().page, Page::Nodes);
+    assert_eq!(ui.state().location().page, Page::Nodes);
     Ok(())
 }
 
 #[test]
-fn command_j_toggles_the_dock_and_command_w_closes_it_first() -> anyhow::Result<()> {
+fn command_j_toggles_the_dock() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Workload)?;
     let dock = |ui: &Ui| ui.read(Shell::dock_open);
     assert_eq!(dock(&ui), Some(true));
@@ -465,31 +463,29 @@ fn command_j_toggles_the_dock_and_command_w_closes_it_first() -> anyhow::Result<
     assert_eq!(dock(&ui), Some(false));
     ui.press("cmd-j")?;
     assert_eq!(dock(&ui), Some(true));
-    ui.press("cmd-w")?;
-    assert_eq!(dock(&ui), Some(false));
     assert!(ui.state().workload().is_some());
     Ok(())
 }
 
 #[test]
-fn command_1_focuses_the_sidebar_where_arrows_and_enter_pick_a_page() -> anyhow::Result<()> {
+fn command_shift_e_focuses_the_sidebar_where_arrows_and_enter_pick_a_page() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
-    ui.press("cmd-1 down down enter")?;
-    assert_eq!(ui.state().page, Page::Namespaces);
-    ui.press("cmd-1 end enter")?;
+    ui.press("cmd-shift-e down down enter")?;
+    assert_eq!(ui.state().location().page, Page::Namespaces);
+    ui.press("cmd-shift-e end enter")?;
     let last = ui.read(|shell, _| {
         shell
             .state()
             .snapshot
-            .nav_sections(shell.state().cluster.as_ref())
+            .nav_sections(shell.state().location().cluster.as_ref())
             .last()
             .and_then(|s| s.pages.last().copied())
     });
-    assert_eq!(Some(ui.state().page), last);
-    ui.press("cmd-1 home")?;
+    assert_eq!(Some(ui.state().location().page), last);
+    ui.press("cmd-shift-e home")?;
     ui.type_text("ev")?;
     ui.press("enter")?;
-    assert_eq!(ui.state().page, Page::Events);
+    assert_eq!(ui.state().location().page, Page::Events);
     Ok(())
 }
 
@@ -509,7 +505,7 @@ fn event_row_opens_inspector_enter_reopens_and_escape_closes() -> anyhow::Result
         ui.press("down enter")?;
         assert!(ui.bounds("close-event").is_some());
         ui.click("event-object")?;
-        assert_eq!(ui.state().page, Page::Pods);
+        assert_eq!(ui.state().location().page, Page::Pods);
     }
     Ok(())
 }
@@ -548,7 +544,9 @@ fn events_namespace_choice_is_kept_per_cluster_in_preferences() -> anyhow::Resul
     let mut ui = Ui::open(Screen::Events)?;
     let cluster = ui
         .state()
+        .location()
         .cluster
+        .clone()
         .ok_or_else(|| anyhow::anyhow!("cluster"))?;
     ui.click("events-namespace")?;
     ui.click("events-namespace-option-0")?;
@@ -627,7 +625,7 @@ fn open_deployments(ui: &mut Ui, cluster: &str) -> anyhow::Result<()> {
     ui.press("cmd-k")?;
     ui.type_text("deployments")?;
     ui.press("enter")?;
-    assert_eq!(ui.state().page, Page::Deployments);
+    assert_eq!(ui.state().location().page, Page::Deployments);
     Ok(())
 }
 
@@ -668,10 +666,10 @@ fn overview_sections_navigate_to_their_lists() -> anyhow::Result<()> {
         ("overview-cronjobs", Page::CronJobs),
     ] {
         let mut ui = Ui::open(Screen::Cluster)?;
-        let cluster = ui.state().cluster;
+        let cluster = ui.state().location().cluster.clone();
         ui.click(selector)?;
-        assert_eq!(ui.state().page, page);
-        assert_eq!(ui.state().cluster, cluster);
+        assert_eq!(ui.state().location().page, page);
+        assert_eq!(ui.state().location().cluster, cluster);
     }
     Ok(())
 }
@@ -680,9 +678,9 @@ fn overview_sections_navigate_to_their_lists() -> anyhow::Result<()> {
 fn overview_sections_accept_keyboard_activation() -> anyhow::Result<()> {
     for key in ["enter", "space"] {
         let mut ui = Ui::open(Screen::Cluster)?;
-        ui.press("cmd-2")?;
+        ui.press("cmd-e")?;
         ui.press(key)?;
-        assert_eq!(ui.state().page, Page::Pods);
+        assert_eq!(ui.state().location().page, Page::Pods);
     }
     Ok(())
 }
@@ -733,14 +731,14 @@ fn flux_pages_list_their_objects_and_open_one_on_double_click() -> anyhow::Resul
     for page in [Page::Kustomizations, Page::HelmReleases, Page::Sources] {
         let selector: &'static str = format!("nav-{}", page.label().to_lowercase()).leak();
         ui.click(selector)?;
-        assert_eq!(ui.state().page, page);
+        assert_eq!(ui.state().location().page, page);
         assert!(
             ui.bounds("flux-list-row-0").is_some(),
             "{page:?} shows no Flux objects"
         );
     }
     ui.double_click("flux-list-row-0")?;
-    let opened = ui.state().flux_object;
+    let opened = ui.state().location().flux_object.clone();
     assert_eq!(opened.map(|key| key.kind.page()), Some(Page::Sources));
     Ok(())
 }
@@ -864,7 +862,7 @@ fn row_menus_carry_each_objects_actions_and_inspectors_keep_only_the_primary() -
     assert!(nodes.bounds("node-actions").is_none());
     nodes.right_click("nodes-row-1")?;
     assert!(nodes.bounds("nodes-row-menu-item-0").is_some());
-    nodes.click("nodes-row-menu-item-1")?;
+    nodes.click("nodes-row-menu-item-2")?;
     assert!(nodes.bounds("dialog-cancel").is_some());
     nodes.click("dialog-cancel")?;
 
@@ -877,8 +875,8 @@ fn row_menus_carry_each_objects_actions_and_inspectors_keep_only_the_primary() -
 
     let mut fleet = Ui::open(Screen::Fleet)?;
     fleet.right_click("fleet-clusters-row-0")?;
-    fleet.click("fleet-clusters-row-menu-item-0")?;
-    assert_eq!(fleet.state().page, Page::ClusterSettings);
+    fleet.click("fleet-clusters-row-menu-item-1")?;
+    assert_eq!(fleet.state().location().page, Page::ClusterSettings);
     Ok(())
 }
 
@@ -895,5 +893,152 @@ fn list_pages_open_on_the_filter_without_a_summary_sentence() -> anyhow::Result<
         assert!(filter, "{screen:?} has no filter bar");
         assert!(ui.bounds("page-actions").is_none(), "{screen:?}");
     }
+    Ok(())
+}
+
+fn tab_pages(ui: &Ui) -> Vec<Page> {
+    ui.state()
+        .panes()
+        .focused()
+        .tabs()
+        .iter()
+        .map(|tab| tab.location().page)
+        .collect()
+}
+
+fn active_tab(ui: &Ui) -> usize {
+    ui.state().panes().focused().active_index()
+}
+
+#[test]
+fn keyboard_opens_switches_and_closes_tabs() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    assert!(ui.bounds("tab-0").is_some());
+    ui.press("cmd-t")?;
+    assert_eq!(tab_pages(&ui), [Page::ClusterOverview, Page::Overview]);
+    assert_eq!(active_tab(&ui), 1);
+    ui.press("cmd-t")?;
+    assert_eq!(tab_pages(&ui).len(), 3);
+    ui.press("cmd-1")?;
+    assert_eq!(ui.state().location().page, Page::ClusterOverview);
+    ui.press("ctrl-tab")?;
+    assert_eq!(active_tab(&ui), 1);
+    ui.press("ctrl-shift-tab ctrl-shift-tab")?;
+    assert_eq!(active_tab(&ui), 2);
+    ui.press("cmd-alt-right")?;
+    assert_eq!(active_tab(&ui), 0);
+    ui.press("cmd-alt-left")?;
+    assert_eq!(active_tab(&ui), 2);
+    ui.press("cmd-9")?;
+    assert_eq!(active_tab(&ui), 2);
+    ui.press("cmd-w cmd-w")?;
+    assert_eq!(tab_pages(&ui), [Page::ClusterOverview]);
+    ui.press("cmd-w")?;
+    assert_eq!(tab_pages(&ui), [Page::Overview]);
+    assert_eq!(ui.read_app(|cx| cx.windows().len()), 1);
+    Ok(())
+}
+
+#[test]
+fn sidebar_clicks_navigate_the_active_tab_and_command_or_middle_click_open_new_ones()
+-> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("nav-nodes")?;
+    assert_eq!(tab_pages(&ui), [Page::Nodes]);
+    ui.cmd_click("nav-pods")?;
+    assert_eq!(tab_pages(&ui), [Page::Nodes, Page::Pods]);
+    assert_eq!(active_tab(&ui), 1);
+    ui.press("cmd-1")?;
+    ui.cmd_click("nav-pods")?;
+    assert_eq!(tab_pages(&ui), [Page::Nodes, Page::Pods]);
+    assert_eq!(active_tab(&ui), 1);
+    ui.middle_click("nav-events")?;
+    assert_eq!(tab_pages(&ui), [Page::Nodes, Page::Pods, Page::Events]);
+    ui.click("nav-namespaces")?;
+    assert_eq!(tab_pages(&ui), [Page::Nodes, Page::Pods, Page::Namespaces]);
+    Ok(())
+}
+
+#[test]
+fn the_tab_strip_switches_closes_and_reorders_with_the_mouse() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.cmd_click("nav-nodes")?;
+    ui.cmd_click("nav-pods")?;
+    assert_eq!(
+        tab_pages(&ui),
+        [Page::ClusterOverview, Page::Nodes, Page::Pods]
+    );
+    ui.click("tab-0")?;
+    assert_eq!(active_tab(&ui), 0);
+    assert!(ui.bounds("tab-close-0").is_some());
+    let width = ui
+        .bounds("tab-1")
+        .map(|bounds| bounds.size.width)
+        .ok_or_else(|| anyhow::anyhow!("tab-1 was not painted"))?;
+    ui.drag("tab-0", gpui::point(width * 1.5, gpui::px(0.)))?;
+    assert_eq!(
+        tab_pages(&ui),
+        [Page::Nodes, Page::ClusterOverview, Page::Pods]
+    );
+    assert_eq!(ui.state().location().page, Page::ClusterOverview);
+    ui.middle_click("tab-2")?;
+    assert_eq!(tab_pages(&ui), [Page::Nodes, Page::ClusterOverview]);
+    ui.click("tab-close-1")?;
+    assert_eq!(tab_pages(&ui), [Page::Nodes]);
+    Ok(())
+}
+
+#[test]
+fn each_tab_walks_its_own_history() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("nav-nodes")?;
+    ui.press("cmd-t")?;
+    ui.click("nav-gitops")?;
+    ui.press("cmd-[")?;
+    assert_eq!(ui.state().location().page, Page::Overview);
+    ui.press("cmd-[")?;
+    assert_eq!(ui.state().location().page, Page::Overview);
+    ui.press("cmd-1 cmd-[")?;
+    assert_eq!(ui.state().location().page, Page::ClusterOverview);
+    Ok(())
+}
+
+#[test]
+fn command_enter_in_the_palette_and_row_menus_open_new_tabs() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Resources)?;
+    ui.right_click(selector(format!("{DEPLOYMENTS}-row-1")))?;
+    ui.click(selector(format!("{DEPLOYMENTS}-row-menu-item-0")))?;
+    assert_eq!(tab_pages(&ui), [Page::Deployments, Page::Deployments]);
+    assert_eq!(active_tab(&ui), 1);
+    assert!(ui.state().workload().is_some());
+    ui.press("cmd-1")?;
+    ui.cmd_click(selector(format!("{DEPLOYMENTS}-row-1")))?;
+    assert_eq!(tab_pages(&ui).len(), 2);
+    assert_eq!(active_tab(&ui), 1);
+    ui.press("cmd-k")?;
+    ui.type_text("nodes")?;
+    ui.press("cmd-enter")?;
+    assert_eq!(
+        tab_pages(&ui),
+        [Page::Deployments, Page::Deployments, Page::Nodes]
+    );
+    assert_eq!(active_tab(&ui), 2);
+    Ok(())
+}
+
+#[test]
+fn the_workload_dock_opens_a_pods_logs_in_a_tab() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Workload)?;
+    ui.click("logs-open-tab")?;
+    let state = ui.state();
+    let location = state.location();
+    assert_eq!(location.page, Page::Logs);
+    assert!(location.container.is_some());
+    assert_eq!(
+        tab_pages(&ui),
+        [Page::Deployments, Page::Logs, Page::Kustomizations, Page::Deployments]
+    );
+    assert_eq!(active_tab(&ui), 1);
+    assert!(ui.bounds("tab-logs-follow").is_some());
     Ok(())
 }

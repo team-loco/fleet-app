@@ -88,8 +88,9 @@ impl LocoScreens {
     }
 
     pub fn set_context(&mut self, state: &AppState, cx: &mut Context<Self>) {
-        self.page = state.page;
+        self.page = state.location().page;
         let loco = state
+            .location()
             .cluster
             .as_ref()
             .and_then(|id| state.snapshot.loco.get(id));

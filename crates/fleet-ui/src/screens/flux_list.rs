@@ -7,6 +7,7 @@ use gpui::{
 
 use super::ScreenEvent;
 use crate::kit::{Column, FilterBar, FilterEvent, MenuItem, Table, TableEvent, chip_label};
+use crate::screens::new_tab_item;
 
 const NAME_WEIGHT: f32 = 1.;
 const NAME_MIN: Pixels = px(220.);
@@ -162,7 +163,12 @@ fn row_items(object: &FluxObject, screen: &WeakEntity<FluxListScreen>) -> Vec<Me
         )
         .description("Stop Flux applying changes here until resumed.")
     };
+    let open_screen = screen.clone();
+    let open = new_tab_item(Command::OpenFluxObject(key.clone()), move |command, cx| {
+        let _ = open_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+    });
     let mut items = vec![
+        open,
         MenuItem::new("Reconcile", emit(reconcile))
             .description("Ask Flux to apply the current revision now."),
         suspend,

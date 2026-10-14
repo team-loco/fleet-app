@@ -8,6 +8,7 @@ pub mod fleet;
 mod flux_list;
 pub(crate) mod flux_object;
 pub mod gitops;
+pub mod logs;
 mod namespaces;
 mod nodes;
 mod overview;
@@ -21,7 +22,7 @@ use gpui::{
     AnyElement, App, AppContext, Context, Entity, FocusHandle, IntoElement, Subscription, Window,
 };
 
-use crate::kit::FilterBar;
+use crate::kit::{FilterBar, MenuItem};
 
 pub use events::EventsScreen;
 pub use flux_list::FluxListScreen;
@@ -31,6 +32,14 @@ pub use overview::OverviewScreen;
 pub use resources::ResourcesScreen;
 
 pub const NODE_KIND: &str = "Node";
+pub const OPEN_IN_NEW_TAB: &str = "Open in new tab";
+const NEW_TAB_DESCRIPTION: &str = "Keep this page and open it in a tab beside it.";
+
+pub fn new_tab_item(open: Command, emit: impl Fn(Command, &mut App) + 'static) -> MenuItem {
+    let command = Command::NewTab(Box::new(open));
+    MenuItem::new(OPEN_IN_NEW_TAB, move |_, cx| emit(command.clone(), cx))
+        .description(NEW_TAB_DESCRIPTION)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenEvent {
