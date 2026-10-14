@@ -1,4 +1,4 @@
-# Shoal design handoff (GPUI)
+# Flock design handoff (GPUI)
 
 Native desktop app for debugging Kubernetes clusters, with first-class Loco support behind a build flag.
 Each screen is in `screens/`: the markup holds the layout and inline styles, and the `<script>` holds the sample data and interactions. These files need the design canvas's runtime, so they won't render on their own in a browser. Read them as a spec and rebuild in GPUI; don't port the HTML.
@@ -22,11 +22,11 @@ Each screen is in `screens/`: the markup holds the layout and inline styles, and
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- One sidebar, 200px, under the 28px strip (window controls). Its header row names the scope (All clusters on Fleet home, or the cluster name) with the collapse chevron. ⌘B collapses it to 76px: the strip, then an expand chevron over the scope name drawn as a vertical label.
-- On Fleet home the sidebar holds Overview, Problems, GitOps and Changes; in a cluster it holds that cluster's pages. The LOCO section appears only on clusters running Loco.
-- The status bar starts with the fleet problem counts (✕ 3 ▲ 6, a link to Fleet home), then the scope's facts (distro · region · version), then the Loco agent link when present. The cluster switcher sits at the right end, after a 1px rule: the current cluster's status glyph and name, or All clusters on Fleet home, with an up chevron. A click or ⌘⇧C opens a 290px menu above it, anchored to the right edge: All clusters (⌘0), a rule, every cluster (glyph, name, problem counts or "auth expired" / "offline"), a rule, then Add cluster…. The current scope is highlighted with `sel`; hovering a row reveals its gear button (Cluster settings). Switching never disconnects a cluster.
+- One sidebar, 200px, under the 28px strip (window controls). Its header row names the scope (All clusters on Flock home, or the cluster name) with the collapse chevron. ⌘B collapses it to 76px: the strip, then an expand chevron over the scope name drawn as a vertical label.
+- On Flock home the sidebar holds Overview, Problems, GitOps and Changes; in a cluster it holds that cluster's pages. The LOCO section appears only on clusters running Loco.
+- The status bar starts with the all-clusters problem counts (✕ 3 ▲ 6, a link to Flock home), then the scope's facts (distro · region · version), then the Loco agent link when present. The cluster switcher sits at the right end, after a 1px rule: the current cluster's status glyph and name, or All clusters on Flock home, with an up chevron. A click or ⌘⇧C opens a 290px menu above it, anchored to the right edge: All clusters (⌘0), a rule, every cluster (glyph, name, problem counts or "auth expired" / "offline"), a rule, then Add cluster…. The current scope is highlighted with `sel`; hovering a row reveals its gear button (Cluster settings). Switching never disconnects a cluster.
 - Plain cluster names with a status glyph. No icons or avatars.
-- Every content area has a pane tab strip (`PaneTabs`, 32px, `chrome` background). A tab is one open view: a Fleet page (Overview, GitOps, Changes), a cluster page or object (deploy, ks, loco, …) or a pod's logs. Each tab shows the object's status glyph when it has one, a mono kind label (`fleet`, `deploy`, `ks`, `logs`, `loco`), the name, and the short cluster name in mute. The active tab takes the `editor` background and joins the content; in the focused pane it also gets a 1px `acc` line on top. The close × shows on the active tab. The strip ends with a Split right button (⌘\).
+- Every content area has a pane tab strip (`PaneTabs`, 32px, `chrome` background). A tab is one open view: a Flock page (Overview, GitOps, Changes), a cluster page or object (deploy, ks, loco, …) or a pod's logs. Each tab shows the object's status glyph when it has one, a mono kind label (`flock`, `deploy`, `ks`, `logs`, `loco`), the name, and the short cluster name in mute. The active tab takes the `editor` background and joins the content; in the focused pane it also gets a 1px `acc` line on top. The close × shows on the active tab. The strip ends with a Split right button (⌘\).
 - Split right divides the content area into side-by-side panes of equal width, separated by a 1px `line2` rule; each pane has its own tab strip and can show a different cluster. Clicking a tab focuses its pane. The sidebar and the status-bar switcher follow the focused pane. ⌘W closes the active tab.
 - No breadcrumbs, no panel-layout buttons. ⌘K opens the command palette from the keyboard; there is no visible button for it.
 - One visible primary action per page (for example Reconcile). Everything else goes in a ⋯ / Actions menu, each item with a one-line description.
@@ -64,8 +64,8 @@ Row heights: 24–28px for tables, 26px for nav rows. Use virtualized lists (`un
 - `LocoRoutes`: listeners on Gateway `eg`, then HTTPRoutes with problems first (no ready endpoints, BackendNotFound).
 - Open question: the cluster only knows `resource-<uuid>`. The design assumes friendly names come from the user's `loco login` session against the Loco API.
 
-**Triage flow**: `Fleet` → `Command` (⌘K) → `Workload` → `Kustomization` → `Changes`
-- `Fleet`: clusters table, problems grouped by cluster, recent GitOps commits with per-cluster outcome.
+**Triage flow**: `Flock` → `Command` (⌘K) → `Workload` → `Kustomization` → `Changes`
+- `Flock`: clusters table, problems grouped by cluster, recent GitOps commits with per-cluster outcome.
 - `Workload`: deployment page with pods, rollout history linked to commits, resolved env vars (flags a missing secret key), and a logs/events/terminal dock.
 - `Kustomization`: Flux object page with one-sentence status, managed objects, history, the same Kustomization on other clusters, and Spec at the bottom.
 - `Changes`: commits with per-cluster outcome, plus a full diff with source and per-cluster rendered views.

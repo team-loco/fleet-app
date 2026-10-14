@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 
 root = pathlib.Path(__file__).resolve().parents[2]
-output = root / "crates/fleet-flux/src/generated"
+output = root / "crates/flock-flux/src/generated"
 output.mkdir(parents=True, exist_ok=True)
 resources = {
     "helmreleases.helm.toolkit.fluxcd.io": ("helm_release", "v2"),
@@ -18,7 +18,7 @@ resources = {
 }
 export = subprocess.check_output(["flux", "install", "--export"], text=True)
 found = set()
-with tempfile.TemporaryDirectory(prefix="fleet-flux-") as temporary:
+with tempfile.TemporaryDirectory(prefix="flock-flux-") as temporary:
     for document in re.split(r"^---\s*$", export, flags=re.MULTILINE):
         if not re.search(r"^kind: CustomResourceDefinition$", document, re.MULTILINE):
             continue

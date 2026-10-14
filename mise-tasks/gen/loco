@@ -2,13 +2,13 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 loco_core="${LOCO_CORE:-../core}"
-mkdir -p crds/loco crates/fleet-loco/src/generated
+mkdir -p crds/loco crates/flock-loco/src/generated
 for resource in applications builds; do
   source_crd="$loco_core/controller/config/crd/bases/infra.loco.io_${resource}.yaml"
   target_crd="crds/loco/infra.loco.io_${resource}.yaml"
   cp "$source_crd" "$target_crd"
   if [[ "$resource" == applications ]]; then phase=ApplicationStatusPhase; else phase=BuildStatusPhase; fi
-  printf 'use super::%s;\n' "$phase" > "crates/fleet-loco/src/generated/${resource}.rs"
-  kopium --elide "$phase" --filename "$target_crd" --derive PartialEq | sed '/^[[:space:]]*\/\//d' >> "crates/fleet-loco/src/generated/${resource}.rs"
+  printf 'use super::%s;\n' "$phase" > "crates/flock-loco/src/generated/${resource}.rs"
+  kopium --elide "$phase" --filename "$target_crd" --derive PartialEq | sed '/^[[:space:]]*\/\//d' >> "crates/flock-loco/src/generated/${resource}.rs"
 done
-cargo fmt --manifest-path crates/fleet-loco/Cargo.toml
+cargo fmt --manifest-path crates/flock-loco/Cargo.toml

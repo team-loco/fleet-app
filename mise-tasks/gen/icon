@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-#MISE description="Generate the macOS Fleet icon from assets/fleet-logo.png"
+#MISE description="Generate the macOS Flock icon from assets/flock-logo.png"
 set -euo pipefail
 
 root="$(git rev-parse --show-toplevel)"
-resources="$root/apps/fleet/resources"
+resources="$root/apps/flock/resources"
 scratch="$(mktemp -d)"
-iconset="$scratch/Fleet.iconset"
+iconset="$scratch/Flock.iconset"
 trap 'rm -rf "$scratch"' EXIT
 mkdir -p "$resources" "$iconset"
-uv run --with pillow --with numpy python "$root/mise-tasks/gen/icon.py" "$root/assets/fleet-logo.png" "$resources/Fleet.png" "$iconset"
-iconutil -c icns "$iconset" -o "$resources/Fleet.icns"
+uv run --with pillow --with numpy python "$root/mise-tasks/gen/icon.py" "$root/assets/flock-logo.png" "$resources/Flock.png" "$iconset"
+iconutil -c icns "$iconset" -o "$resources/Flock.icns"

@@ -1,15 +1,15 @@
 [workspace]
 resolver = "3"
 members = [
-  "apps/fleet",
-  "apps/fleet-shots",
-  "crates/fleet-core",
-  "crates/fleet-demo",
-  "crates/fleet-flux",
-  "crates/fleet-kube",
-  "crates/fleet-loco",
-  "crates/fleet-ui",
-  "crates/fleet-update",
+  "apps/flock",
+  "apps/flock-shots",
+  "crates/flock-core",
+  "crates/flock-demo",
+  "crates/flock-flux",
+  "crates/flock-kube",
+  "crates/flock-loco",
+  "crates/flock-ui",
+  "crates/flock-update",
 ]
 
 [workspace.package]
@@ -17,18 +17,18 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
 license = "Apache-2.0"
-repository = "https://github.com/team-loco/fleet-app"
+repository = "https://github.com/team-loco/flock-app"
 publish = false
 
 [workspace.dependencies]
-fleet = { path = "apps/fleet" }
-fleet-core = { path = "crates/fleet-core" }
-fleet-demo = { path = "crates/fleet-demo" }
-fleet-flux = { path = "crates/fleet-flux" }
-fleet-kube = { path = "crates/fleet-kube" }
-fleet-loco = { path = "crates/fleet-loco" }
-fleet-ui = { path = "crates/fleet-ui" }
-fleet-update = { path = "crates/fleet-update" }
+flock = { path = "apps/flock" }
+flock-core = { path = "crates/flock-core" }
+flock-demo = { path = "crates/flock-demo" }
+flock-flux = { path = "crates/flock-flux" }
+flock-kube = { path = "crates/flock-kube" }
+flock-loco = { path = "crates/flock-loco" }
+flock-ui = { path = "crates/flock-ui" }
+flock-update = { path = "crates/flock-update" }
 
 anyhow = "1.0.104"
 async-channel = "2.5.0"

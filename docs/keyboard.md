@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-Generated from the binding table in `crates/fleet-ui/src/keymap.rs`; run `mise run gen:keys` after changing it. The same table binds the keys and draws the Keyboard shortcuts section of Settings (⌘,).
+Generated from the binding table in `crates/flock-ui/src/keymap.rs`; run `mise run gen:keys` after changing it. The same table binds the keys and draws the Keyboard shortcuts section of Settings (⌘,).
 
 ## General
 
@@ -14,13 +14,13 @@ Generated from the binding table in `crates/fleet-ui/src/keymap.rs`; run `mise r
 | ⌘, | Settings |
 | ⌘N | New window |
 | ⌘⇧W | Close the window |
-| ⌘Q | Quit Fleet |
+| ⌘Q | Quit Flock |
 
 ## Tabs
 
 | Keys | Action |
 |---|---|
-| ⌘T | New tab on Fleet home |
+| ⌘T | New tab on Flock home |
 | ⌘W | Close the tab |
 | ⌃Tab / ⌥⌘→ | Next tab |
 | ⌃⇧Tab / ⌥⌘← | Previous tab |

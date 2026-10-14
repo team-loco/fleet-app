@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Build dist/Fleet.app for Apple silicon and zip it as dist/Flock-<version>-arm64.zip"
+#MISE description="Build dist/Flock.app for Apple silicon and zip it as dist/Flock-<version>-arm64.zip"
 set -euo pipefail
 
 asset_prefix="Flock"
@@ -11,9 +11,9 @@ if [ "$(uname -m)" != "$arch" ]; then
   exit 1
 fi
 mise-tasks/bundle "$@"
-cargo build --release --package fleet-update --bin fleet-sign
-app="$root/dist/Fleet.app"
-lipo "$app/Contents/MacOS/fleet" -verify_arch "$arch"
+cargo build --release --package flock-update --bin flock-sign
+app="$root/dist/Flock.app"
+lipo "$app/Contents/MacOS/flock" -verify_arch "$arch"
 version="$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")"
 zip="$root/dist/$asset_prefix-$version-$arch.zip"
 rm -f "$zip" "$zip.sha256" "$zip.sig"

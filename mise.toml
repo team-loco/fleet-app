@@ -20,19 +20,19 @@ description = "Build the workspace"
 run = "cargo build --workspace"
 
 [tasks.run]
-description = "Run Fleet against your kubeconfig"
-run = "cargo run -p fleet"
+description = "Run Flock against your kubeconfig"
+run = "cargo run -p flock"
 
 [tasks.demo]
-description = "Run Fleet on the design's sample data"
-run = "cargo run -p fleet -- --demo"
+description = "Run Flock on the design's sample data"
+run = "cargo run -p flock -- --demo"
 
 [tasks."run:loco"]
-description = "Run Fleet with Loco support on sample data"
-run = "cargo run -p fleet --features loco -- --demo"
+description = "Run Flock with Loco support on sample data"
+run = "cargo run -p flock --features loco -- --demo"
 
 [tasks."bundle:loco"]
-description = "Build and ad-hoc sign dist/Fleet.app with Loco support"
+description = "Build and ad-hoc sign dist/Flock.app with Loco support"
 run = "mise-tasks/bundle --features loco"
 
 [tasks.fmt]
@@ -43,14 +43,14 @@ run = "cargo fmt --all --check"
 description = "Clippy with warnings denied, with and without Loco"
 run = [
   "cargo clippy --workspace --all-targets -- -D warnings",
-  "cargo clippy --workspace --all-targets --features fleet/loco -- -D warnings",
+  "cargo clippy --workspace --all-targets --features flock/loco -- -D warnings",
 ]
 
 [tasks.test]
 description = "Run tests with and without Loco"
 run = [
   "cargo nextest run --workspace --no-tests=pass",
-  "cargo nextest run --workspace --no-tests=pass --features fleet/loco",
+  "cargo nextest run --workspace --no-tests=pass --features flock/loco",
 ]
 
 [tasks.typos]
@@ -66,8 +66,8 @@ description = "Everything a PR needs"
 depends = ["fmt", "lint", "test", "typos", "deny"]
 
 [env]
-FLEET_SCALE_IMAGE = "registry.k8s.io/pause:3.10"
+FLOCK_SCALE_IMAGE = "registry.k8s.io/pause:3.10"
 
 [tasks."gen:keys"]
 description = "Regenerate docs/keyboard.md from the binding table"
-run = "FLEET_UPDATE_DOCS=1 cargo test -p fleet-ui --lib keymap::tests::docs_are_generated_from_the_table"
+run = "FLOCK_UPDATE_DOCS=1 cargo test -p flock-ui --lib keymap::tests::docs_are_generated_from_the_table"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Show all Flux scenario objects in both Fleet clusters"
+#MISE description="Show all Flux scenario objects in both Flock clusters"
 set -euo pipefail
 
 CLUSTERS=(fleet-a fleet-b)

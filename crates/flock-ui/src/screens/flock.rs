@@ -1,0 +1,638 @@
+use flock_core::changes::{ChangesLog, Commit, Lane, outcome_label};
+use flock_core::home::{Problem, Severity, group_problems, problem_counts};
+use flock_core::{ClusterId, ClusterSummary, Command, Counts, FlockHome, Page, Snapshot, Status};
+use gpui::{
+    AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla, IntoElement,
+    ParentElement, Pixels, Render, SharedString, Styled, Subscription, Window, div,
+    prelude::FluentBuilder, px, relative,
+};
+
+use crate::kit::status_symbols;
+use crate::kit::{
+    Column, Link, SectionHeader, Segmented, StatusGlyph, StatusText, Table, TableEvent,
+};
+use crate::screens::new_tab_item;
+use crate::shell::switcher::{Run, cluster_items};
+use crate::theme::{
+    ActiveTheme, FONT_MONO, METER_MINI, METER_MINI_WIDTH, Palette, ROW_TABLE, ROW_TABLE_MAX, RULE,
+    SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_CONTROL, TEXT_SMALL,
+};
+
+const CLUSTER_NAME_MIN: Pixels = px(140.);
+const CLUSTER_STATE: Pixels = px(128.);
+const CLUSTER_VERSION: Pixels = px(76.);
+const CLUSTER_NODES: Pixels = px(54.);
+const CLUSTER_PODS: Pixels = px(108.);
+const CLUSTER_USAGE: Pixels = px(92.);
+const CLUSTER_FLUX: Pixels = px(108.);
+const CLUSTER_REVISION: Pixels = px(84.);
+const CLUSTER_PROBLEMS: Pixels = px(92.);
+const CLUSTER_NAME_WEIGHT: f32 = 1.3;
+
+const PROBLEM_GLYPH: Pixels = px(14.);
+const PROBLEM_KIND: Pixels = px(104.);
+const PROBLEM_OBJECT_MIN: Pixels = px(220.);
+const PROBLEM_OBJECT_WEIGHT: f32 = 1.1;
+const PROBLEM_MESSAGE_MIN: Pixels = px(280.);
+const PROBLEM_MESSAGE_WEIGHT: f32 = 2.;
+const PROBLEM_AGE: Pixels = px(44.);
+
+const COMMIT_SHA: Pixels = px(72.);
+const COMMIT_MESSAGE_MIN: Pixels = px(260.);
+const COMMIT_AUTHOR: Pixels = px(120.);
+const COMMIT_AGE: Pixels = px(40.);
+const COMMIT_LANE: Pixels = px(74.);
+
+const PERCENT_MAX: f32 = 100.;
+const MISSING: &str = "—";
+const NOT_TARGETED: &str = "–";
+const ALL_CHANGES: &str = "All changes →";
+const RECENT_COMMITS: usize = 3;
+
+#[derive(Clone)]
+enum ProblemRow {
+    Group {
+        cluster: SharedString,
+        counts: Counts,
+    },
+    Item(Problem),
+}
+
+pub struct FlockScreen {
+    home: FlockHome,
+    changes: ChangesLog,
+    clusters: Vec<ClusterSummary>,
+    lanes: Vec<Lane>,
+    severity: Severity,
+    problems_only: bool,
+    cluster_table: Entity<Table<ClusterSummary>>,
+    problem_table: Entity<Table<ProblemRow>>,
+    commit_table: Entity<Table<Commit>>,
+    _subscriptions: [Subscription; 3],
+}
+
+impl EventEmitter<Command> for FlockScreen {}
+
+impl FlockScreen {
+    pub fn list_focus(&self, page: Page, cx: &gpui::App) -> gpui::FocusHandle {
+        match page {
+            Page::Problems => gpui::Focusable::focus_handle(&self.problem_table, cx),
+            _ => gpui::Focusable::focus_handle(&self.cluster_table, cx),
+        }
+    }
+
+    pub fn new(cx: &mut Context<Self>) -> Self {
+        let screen = cx.weak_entity();
+        let run: Run = std::rc::Rc::new(move |command, cx| {
+            let _ = screen.update(cx, |_, cx| cx.emit(command));
+        });
+        let cluster_table = cx.new(|cx| {
+            Table::new("flock-clusters", cluster_columns(), cx)
+                .row_actions(move |cluster: &ClusterSummary| {
+                    let open_run = run.clone();
+                    let open = Command::SelectCluster(Some(cluster.id.clone()));
+                    let mut items = vec![new_tab_item(open, move |command, cx| {
+                        open_run(command, cx);
+                    })];
+                    items.extend(cluster_items(cluster, &run));
+                    items
+                })
+                .type_ahead(|c: &ClusterSummary| c.name.clone().into())
+                .row_height(ROW_TABLE_MAX)
+                .column_gap(SPACE_7)
+                .click_opens()
+                .fit_content()
+        });
+        let problem_table = cx.new(|cx| {
+            Table::new("flock-problems", problem_columns(), cx)
+                .headerless()
+                .row_height(ROW_TABLE)
+                .inset(SPACE_8 + SPACE_6)
+                .span_rows(group_row)
+                .click_opens()
+                .empty("Nothing needs attention.")
+                .fit_content()
+        });
+        let commit_table = commit_table(&[], cx);
+        let subscriptions = [
+            cx.subscribe(&cluster_table, |_, table, event, cx| {
+                cluster_opened(&table, event, cx);
+            }),
+            cx.subscribe(&problem_table, |_, table, event, cx| {
+                problem_opened(&table, event, cx);
+            }),
+            cx.subscribe(&commit_table, |_, table, event: &TableEvent, cx| {
+                commit_opened(&table, event, cx);
+            }),
+        ];
+        Self {
+            home: FlockHome::default(),
+            changes: ChangesLog::default(),
+            clusters: Vec::new(),
+            lanes: Vec::new(),
+            severity: Severity::All,
+            problems_only: false,
+            cluster_table,
+            problem_table,
+            commit_table,
+            _subscriptions: subscriptions,
+        }
+    }
+
+    pub fn set_snapshot(&mut self, snapshot: &Snapshot, cx: &mut Context<Self>) {
+        self.clusters.clone_from(&snapshot.clusters);
+        self.home.clone_from(&snapshot.home);
+        let clusters = self.clusters.clone();
+        self.cluster_table
+            .update(cx, |table, cx| table.set_rows(clusters, cx));
+        self.changes.clone_from(&snapshot.changes);
+        if self.lanes != self.changes.lanes {
+            self.lanes.clone_from(&self.changes.lanes);
+            let columns = commit_columns(&self.lanes);
+            self.commit_table
+                .update(cx, |table, cx| table.set_columns(columns, cx));
+        }
+        let commits = self.changes.recent(RECENT_COMMITS).to_vec();
+        self.commit_table
+            .update(cx, |table, cx| table.set_rows(commits, cx));
+        self.refresh_problems(cx);
+    }
+
+    pub fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        self.problems_only = page == Page::Problems;
+        cx.notify();
+    }
+
+    fn set_severity(&mut self, severity: Severity, cx: &mut Context<Self>) {
+        self.severity = severity;
+        self.refresh_problems(cx);
+    }
+
+    fn refresh_problems(&mut self, cx: &mut Context<Self>) {
+        let rows = problem_rows(&self.home.problems, self.severity, &self.clusters);
+        self.problem_table
+            .update(cx, |table, cx| table.set_rows(rows, cx));
+        cx.notify();
+    }
+
+    fn clusters_section(&self) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .child(SectionHeader::new("Clusters").count(self.clusters.len().to_string()))
+            .child(self.cluster_table.clone())
+    }
+
+    fn problems_section(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+        let totals = problem_counts(&self.home.problems);
+        let selected = Severity::ALL
+            .iter()
+            .position(|s| *s == self.severity)
+            .unwrap_or_default();
+        let filter = Severity::ALL
+            .iter()
+            .fold(Segmented::new("severity"), |seg, s| seg.option(s.label()))
+            .selected(selected)
+            .on_select(cx.listener(|this, ix: &usize, _, cx| {
+                let severity = Severity::ALL.get(*ix).copied().unwrap_or_default();
+                this.set_severity(severity, cx);
+            }));
+        div()
+            .flex()
+            .flex_col()
+            .child(
+                SectionHeader::new("Problems")
+                    .annotation(badges(&totals, SPACE_3, palette))
+                    .end(filter),
+            )
+            .child(
+                div()
+                    .border_t(RULE)
+                    .border_color(palette.line)
+                    .child(self.problem_table.clone()),
+            )
+    }
+
+    fn changes_section(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+        let all = Link::new("all-changes", ALL_CHANGES).on_click(cx.listener(|_, _, _, cx| {
+            cx.emit(Command::SelectPage(Page::Changes));
+        }));
+        div()
+            .flex()
+            .flex_col()
+            .pb(SPACE_8)
+            .child(
+                SectionHeader::new("Recent GitOps changes")
+                    .count(self.changes.source_label())
+                    .end(div().text_size(TEXT_CONTROL).child(all)),
+            )
+            .child(
+                div()
+                    .border_t(RULE)
+                    .border_color(palette.line)
+                    .child(self.commit_table.clone()),
+            )
+    }
+}
+
+impl Render for FlockScreen {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = *cx.palette();
+        let problems = self.problems_section(&palette, cx).into_any_element();
+        if self.problems_only {
+            return div().flex().flex_col().child(problems);
+        }
+        let clusters = self.clusters_section().into_any_element();
+        let changes = self.changes_section(&palette, cx);
+        div()
+            .flex()
+            .flex_col()
+            .child(clusters)
+            .child(problems)
+            .child(changes)
+    }
+}
+
+fn cluster_opened(
+    table: &Entity<Table<ClusterSummary>>,
+    event: &TableEvent,
+    cx: &mut Context<FlockScreen>,
+) {
+    let TableEvent::Opened(ix) = *event else {
+        return;
+    };
+    let id = table.read(cx).row(ix).map(|c| c.id.clone());
+    if let Some(id) = id {
+        cx.emit(Command::SelectCluster(Some(id)));
+    }
+}
+
+fn commit_opened(table: &Entity<Table<Commit>>, event: &TableEvent, cx: &mut Context<FlockScreen>) {
+    let TableEvent::Opened(ix) = *event else {
+        return;
+    };
+    let sha = table.read(cx).row(ix).map(|c| c.sha.clone());
+    if let Some(sha) = sha {
+        cx.emit(Command::OpenCommit(sha));
+    }
+}
+
+fn problem_opened(
+    table: &Entity<Table<ProblemRow>>,
+    event: &TableEvent,
+    cx: &mut Context<FlockScreen>,
+) {
+    let TableEvent::Opened(ix) = *event else {
+        return;
+    };
+    let target = match table.read(cx).row(ix) {
+        Some(ProblemRow::Item(problem)) => Some(problem.target.clone()),
+        Some(ProblemRow::Group { .. }) => None,
+        None => None,
+    };
+    if let Some(target) = target {
+        cx.emit(Command::OpenResource(target));
+    }
+}
+
+fn problem_rows(
+    problems: &[Problem],
+    severity: Severity,
+    clusters: &[ClusterSummary],
+) -> Vec<ProblemRow> {
+    group_problems(problems, severity)
+        .into_iter()
+        .flat_map(|group| {
+            let name = clusters
+                .iter()
+                .find(|c| &c.id == group.cluster)
+                .map_or_else(|| group.cluster.to_string(), |c| c.name.clone());
+            let head = ProblemRow::Group {
+                cluster: name.into(),
+                counts: group.counts(),
+            };
+            let items = group.problems.into_iter().cloned().map(ProblemRow::Item);
+            std::iter::once(head).chain(items)
+        })
+        .collect()
+}
+
+fn badges(counts: &Counts, gap: Pixels, palette: &Palette) -> impl IntoElement {
+    let items = counts.badges().into_iter().map(|(status, n)| {
+        div()
+            .text_color(palette.status(status))
+            .child(status_symbols(format!("{} {n}", status.glyph())))
+    });
+    div()
+        .flex()
+        .flex_none()
+        .gap(gap)
+        .font_family(FONT_MONO)
+        .text_size(TEXT_SMALL)
+        .whitespace_nowrap()
+        .children(items)
+}
+
+fn group_row(row: &ProblemRow, palette: &Palette) -> Option<AnyElement> {
+    let ProblemRow::Group { cluster, counts } = row else {
+        return None;
+    };
+    let element = div()
+        .flex()
+        .items_center()
+        .gap(SPACE_5)
+        .size_full()
+        .px(SPACE_8)
+        .bg(palette.panel)
+        .text_size(TEXT_BODY)
+        .child(
+            div()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(cluster.clone()),
+        )
+        .child(badges(counts, SPACE_4, palette))
+        .into_any_element();
+    Some(element)
+}
+
+fn dimmed(cluster: &ClusterSummary, palette: &Palette) -> Hsla {
+    if cluster.metrics.is_some() {
+        palette.fg
+    } else {
+        palette.mute
+    }
+}
+
+fn text(value: impl Into<SharedString>, color: Hsla) -> AnyElement {
+    div()
+        .truncate()
+        .text_color(color)
+        .child(status_symbols(value))
+        .into_any_element()
+}
+
+fn mini_meter(percent: Option<u8>, palette: &Palette) -> AnyElement {
+    let fraction = percent.map_or(0., |p| f32::from(p) / PERCENT_MAX);
+    let label = percent.map_or_else(|| MISSING.to_owned(), |p| format!("{p}%"));
+    div()
+        .flex()
+        .items_center()
+        .gap(SPACE_4)
+        .child(
+            div()
+                .flex_none()
+                .w(METER_MINI_WIDTH)
+                .h(METER_MINI)
+                .bg(palette.line2)
+                .child(div().h_full().w(relative(fraction)).bg(palette.fg2)),
+        )
+        .child(label)
+        .into_any_element()
+}
+
+fn cluster_columns() -> Vec<Column<ClusterSummary>> {
+    vec![
+        Column::new("Cluster", |c: &ClusterSummary, palette| {
+            div()
+                .truncate()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(dimmed(c, palette))
+                .child(c.name.clone())
+                .into_any_element()
+        })
+        .flex(CLUSTER_NAME_WEIGHT, CLUSTER_NAME_MIN),
+        Column::new("State", |c: &ClusterSummary, _| {
+            StatusText::new(c.status, c.state.clone()).into_any_element()
+        })
+        .fixed(CLUSTER_STATE),
+        Column::new("Version", |c: &ClusterSummary, palette| {
+            text(
+                c.version.clone().unwrap_or_else(|| MISSING.into()),
+                palette.fg2,
+            )
+        })
+        .mono()
+        .fixed(CLUSTER_VERSION),
+        Column::new("Nodes", |c: &ClusterSummary, palette| {
+            let nodes = c
+                .nodes
+                .map_or_else(|| MISSING.to_owned(), |n| n.to_string());
+            text(nodes, dimmed(c, palette))
+        })
+        .mono()
+        .end()
+        .fixed(CLUSTER_NODES),
+        Column::new("Pods", pods_cell).mono().fixed(CLUSTER_PODS),
+        Column::new("CPU", |c: &ClusterSummary, palette| {
+            mini_meter(c.metrics.as_ref().and_then(|m| m.cpu_percent), palette)
+        })
+        .mono()
+        .fixed(CLUSTER_USAGE),
+        Column::new("Memory", |c: &ClusterSummary, palette| {
+            mini_meter(c.metrics.as_ref().and_then(|m| m.memory_percent), palette)
+        })
+        .mono()
+        .fixed(CLUSTER_USAGE),
+        Column::new("Flux", |c: &ClusterSummary, palette| match &c.metrics {
+            Some(m) => {
+                let status = m.flux.status();
+                let total = m.flux.total.unwrap_or_default();
+                let label = format!("{} {}/{total}", status.glyph(), m.flux_ready());
+                text(label, palette.status(status))
+            }
+            None => text(MISSING, palette.mute),
+        })
+        .mono()
+        .fixed(CLUSTER_FLUX),
+        Column::new("Revision", |c: &ClusterSummary, palette| match &c.metrics {
+            Some(m) if m.revision.held => text(m.revision.sha.clone(), palette.sus),
+            Some(m) => text(m.revision.sha.clone(), palette.fg2),
+            None => text(MISSING, palette.mute),
+        })
+        .mono()
+        .fixed(CLUSTER_REVISION),
+        Column::new("Problems", |c: &ClusterSummary, palette| {
+            badges(&c.problems, SPACE_4, palette).into_any_element()
+        })
+        .fixed(CLUSTER_PROBLEMS),
+    ]
+}
+
+fn pods_cell(cluster: &ClusterSummary, palette: &Palette) -> AnyElement {
+    let Some(metrics) = &cluster.metrics else {
+        return text(MISSING, palette.mute);
+    };
+    let total = metrics.pods.total.unwrap_or_default().to_string();
+    let worst = metrics.pods.badges().into_iter().next();
+    div()
+        .flex()
+        .gap(SPACE_3)
+        .whitespace_nowrap()
+        .child(total)
+        .when_some(worst, |cell, (status, n)| {
+            cell.child(
+                div()
+                    .text_color(palette.status(status))
+                    .child(status_symbols(format!("{} {n}", status.glyph()))),
+            )
+        })
+        .into_any_element()
+}
+
+fn problem_columns() -> Vec<Column<ProblemRow>> {
+    vec![
+        Column::new("", |row: &ProblemRow, _| match row {
+            ProblemRow::Item(p) => StatusGlyph::new(p.status).into_any_element(),
+            ProblemRow::Group { .. } => div().into_any_element(),
+        })
+        .fixed(PROBLEM_GLYPH),
+        Column::new("Kind", |row: &ProblemRow, palette| match row {
+            ProblemRow::Item(p) => text(p.target.kind.clone(), palette.mute),
+            ProblemRow::Group { .. } => div().into_any_element(),
+        })
+        .fixed(PROBLEM_KIND),
+        Column::new("Object", |row: &ProblemRow, palette| match row {
+            ProblemRow::Item(p) => text(p.target.to_string(), palette.fg),
+            ProblemRow::Group { .. } => div().into_any_element(),
+        })
+        .mono()
+        .flex(PROBLEM_OBJECT_WEIGHT, PROBLEM_OBJECT_MIN),
+        Column::new("Message", |row: &ProblemRow, palette| match row {
+            ProblemRow::Item(p) => text(p.message.clone(), palette.fg2),
+            ProblemRow::Group { .. } => div().into_any_element(),
+        })
+        .flex(PROBLEM_MESSAGE_WEIGHT, PROBLEM_MESSAGE_MIN),
+        Column::new("Age", |row: &ProblemRow, palette| match row {
+            ProblemRow::Item(p) => small(flock_core::time::age(p.age), palette.mute),
+            ProblemRow::Group { .. } => div().into_any_element(),
+        })
+        .mono()
+        .end()
+        .fixed(PROBLEM_AGE),
+    ]
+}
+
+fn small(value: impl Into<SharedString>, color: Hsla) -> AnyElement {
+    div()
+        .truncate()
+        .text_size(TEXT_SMALL)
+        .text_color(color)
+        .child(status_symbols(value))
+        .into_any_element()
+}
+
+fn outcome(commit: &Commit, cluster: &ClusterId) -> (Option<Status>, String) {
+    match commit.rollout_on(cluster) {
+        Some(rollout) => (
+            Some(rollout.status),
+            format!(
+                "{} {}",
+                rollout.status.glyph(),
+                outcome_label(rollout.status)
+            ),
+        ),
+        None => (None, NOT_TARGETED.to_owned()),
+    }
+}
+
+fn commit_columns(lanes: &[Lane]) -> Vec<Column<Commit>> {
+    let fixed = vec![
+        Column::new("Commit", |c: &Commit, palette| {
+            text(c.short_sha().to_owned(), palette.acc)
+        })
+        .mono()
+        .fixed(COMMIT_SHA),
+        Column::text("Message", |c: &Commit| c.message.clone().into()).flex(1., COMMIT_MESSAGE_MIN),
+        Column::new("Author", |c: &Commit, palette| {
+            small(c.author.clone(), palette.fg2)
+        })
+        .mono()
+        .fixed(COMMIT_AUTHOR),
+        Column::new("Age", |c: &Commit, palette| {
+            small(flock_core::time::age(c.age), palette.mute)
+        })
+        .mono()
+        .fixed(COMMIT_AGE),
+    ];
+    let lane_columns = lanes.iter().map(|lane| {
+        let cluster = lane.cluster.clone();
+        Column::new(lane.label.clone(), move |c: &Commit, palette| {
+            let (status, label) = outcome(c, &cluster);
+            let color = status.map_or(palette.mute, |status| palette.status(status));
+            small(label, color)
+        })
+        .mono()
+        .fixed(COMMIT_LANE)
+    });
+    fixed.into_iter().chain(lane_columns).collect()
+}
+
+fn commit_table(lanes: &[Lane], cx: &mut Context<FlockScreen>) -> Entity<Table<Commit>> {
+    let columns = commit_columns(lanes);
+    cx.new(|cx| {
+        Table::new("flock-commits", columns, cx)
+            .row_height(ROW_TABLE_MAX)
+            .click_opens()
+            .fit_content()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn outcomes_pair_glyph_and_word_from_the_rollout() {
+        let commit = Commit {
+            sha: "a41e07c3f91d".into(),
+            message: String::new(),
+            author: String::new(),
+            age: std::time::Duration::ZERO,
+            when: String::new(),
+            target: flock_core::changes::Target {
+                kind: flock_core::changes::TargetKind::Kustomization,
+                name: "apps".into(),
+            },
+            rollout: vec![flock_core::changes::Rollout {
+                cluster: ClusterId::new("east"),
+                status: Status::Suspended,
+                object: "apps".into(),
+                note: String::new(),
+            }],
+            views: Vec::new(),
+        };
+        assert_eq!(
+            outcome(&commit, &ClusterId::new("east")),
+            (Some(Status::Suspended), "‖ held".to_owned())
+        );
+        assert_eq!(
+            outcome(&commit, &ClusterId::new("west")),
+            (None, "–".to_owned())
+        );
+    }
+
+    #[test]
+    fn problem_rows_put_a_header_before_each_cluster() {
+        let snapshot = Snapshot::default();
+        assert!(problem_rows(&snapshot.home.problems, Severity::All, &[]).is_empty());
+        let problem = Problem {
+            status: Status::Warn,
+            target: flock_core::ResourceRef {
+                cluster: ClusterId::new("staging"),
+                kind: "Pod".into(),
+                namespace: Some("search".into()),
+                name: "search-indexer-0".into(),
+            },
+            message: String::new(),
+            age: std::time::Duration::ZERO,
+        };
+        let rows = problem_rows(&[problem.clone(), problem], Severity::All, &[]);
+        let shape: Vec<bool> = rows
+            .iter()
+            .map(|r| matches!(r, ProblemRow::Group { .. }))
+            .collect();
+        assert_eq!(shape, [true, false, false]);
+        assert!(problem_rows(&[], Severity::Errors, &[]).is_empty());
+    }
+}

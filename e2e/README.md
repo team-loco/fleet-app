@@ -1,4 +1,4 @@
-# Fleet live scenarios
+# Flock live scenarios
 
 These fixtures create two local kind clusters, `fleet-a` and `fleet-b`, with
 contexts `kind-fleet-a` and `kind-fleet-b` in the default kubeconfig. Each has
@@ -13,7 +13,7 @@ mise run e2e:status
 
 `up` reuses existing clusters, exports their contexts, and reapplies the
 fixtures. Every operation selects its context explicitly. Cluster creation or
-kubeconfig export can change the current context; Fleet can select both named
+kubeconfig export can change the current context; Flock can select both named
 contexts independently. Keep the clusters running for desktop testing.
 
 Flux reconciles asynchronously. `up` runs `e2e/verify` after applying both
@@ -24,15 +24,15 @@ appear. `status` prints
 `flux get all -A` for each cluster. Allow several minutes for image downloads,
 Helm installation timeouts, and crash backoff on the first run.
 
-| Scenario | fleet-a | fleet-b | Fleet screens |
+| Scenario | fleet-a | fleet-b | Flock screens |
 | --- | --- | --- | --- |
-| `HelmRelease/apps/podinfo` | Ready | Ready | Fleet home, HelmRelease page, GitOps grid |
-| `HelmRelease/payments/checkout-api` | Not Ready; pod crashes on `--fleet-invalid-flag` | Ready; no extra arguments | Fleet home, Workload logs/events, HelmRelease page, GitOps grid |
-| `Deployment/payments/stripe-webhook` | CreateContainerConfigError | CreateContainerConfigError | Fleet home, Workload environment/events |
+| `HelmRelease/apps/podinfo` | Ready | Ready | Flock home, HelmRelease page, GitOps grid |
+| `HelmRelease/payments/checkout-api` | Not Ready; pod crashes on `--flock-invalid-flag` | Ready; no extra arguments | Flock home, Workload logs/events, HelmRelease page, GitOps grid |
+| `Deployment/payments/stripe-webhook` | CreateContainerConfigError | CreateContainerConfigError | Flock home, Workload environment/events |
 | `HelmRelease/search/search-indexer` | Suspended | Suspended | HelmRelease page, GitOps grid |
 | `Kustomization/flux-system/apps` | Ready; podinfo deployed into `web` | Ready; podinfo deployed into `web` | Kustomization page and inventory, Changes, GitOps grid |
-| `Kustomization/flux-system/broken-kustomization` | ArtifactFailed; nonexistent path | ArtifactFailed; nonexistent path | Fleet home, Kustomization page, GitOps grid |
-| `Pod/apps/unschedulable` | Pending; FailedScheduling | Pending; FailedScheduling | Fleet home, Workload/pod events |
+| `Kustomization/flux-system/broken-kustomization` | ArtifactFailed; nonexistent path | ArtifactFailed; nonexistent path | Flock home, Kustomization page, GitOps grid |
+| `Pod/apps/unschedulable` | Pending; FailedScheduling | Pending; FailedScheduling | Flock home, Workload/pod events |
 
 The checkout release's only cluster-specific change is the extra invalid
 argument in `scenarios/fleet-a/checkout-api.yaml`. The chart's `extraArgs` value
@@ -49,7 +49,7 @@ logs. The separate checkout scenario provides crash logs.
 The public HelmRepository is `https://stefanprodan.github.io/podinfo`. The public
 GitRepository tracks `master` at `https://github.com/stefanprodan/podinfo`.
 The healthy Kustomization builds `./kustomize`; the broken one builds
-`./fleet-nonexistent-path`. Sources and generated HelmCharts should be Ready on
+`./flock-nonexistent-path`. Sources and generated HelmCharts should be Ready on
 both clusters. The suspended release has no deployed workload or Ready
 condition until resumed.
 
@@ -64,12 +64,12 @@ follow their published defaults; an upstream change can alter the fixtures.
 The verification script catches changes that break the expected states.
 
 `mise run e2e:test` is the one-command proof. It runs `e2e:up` (reusing existing
-clusters), `e2e/verify`, then every `FLEET_E2E` test with and without
-`--features fleet/loco`, against a temporary kubeconfig that holds only
-`kind-fleet-a` and `kind-fleet-b`. On macOS it also launches the real `fleet`
+clusters), `e2e/verify`, then every `FLOCK_E2E` test with and without
+`--features flock/loco`, against a temporary kubeconfig that holds only
+`kind-fleet-a` and `kind-fleet-b`. On macOS it also launches the real `flock`
 binary with a seeded data directory and waits for both clusters and the
 scenario problems to appear in a live snapshot (the app logs these when
-`FLEET_LOG_SNAPSHOTS` is set). `--skip-up` requires existing clusters;
+`FLOCK_LOG_SNAPSHOTS` is set). `--skip-up` requires existing clusters;
 `--no-teardown` keeps them (the default, except when `CI` is set).
 
 To remove both clusters when desktop testing is finished:
@@ -82,7 +82,7 @@ This deletes only `fleet-a` and `fleet-b` and their kind kubeconfig entries.
 
 ## Scale and snapshot performance
 
-`mise run e2e:scale` adds a disposable `fleet-scale` namespace to **kind-fleet-b only**.
+`mise run e2e:scale` adds a disposable `flock-scale` namespace to **kind-fleet-b only**.
 The task obtains a temporary kubeconfig directly from kind, uses an explicit context on every
 kubectl call, and never loads the user's kubeconfig. It creates 3,000 ConfigMaps with 1 KiB payloads,
 1,500 headless Services, 400 zero-replica Deployments (and their controller-created ReplicaSets),
@@ -110,5 +110,5 @@ The generator's boundary tests run with
 `mise exec -- python3 -m unittest discover -s e2e -p test_scale.py`.
 
 Always finish with `mise run e2e:scale:down`, then `e2e/verify` using a temporary kubeconfig containing
-only the two kind contexts. Teardown deletes only `fleet-scale` on kind-fleet-b and preserves the
+only the two kind contexts. Teardown deletes only `flock-scale` on kind-fleet-b and preserves the
 normal Flux scenarios. Benchmark setup fails if kind-fleet-b or the scale objects are missing.

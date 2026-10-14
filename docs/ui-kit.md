@@ -1,18 +1,18 @@
 # UI kit
 
-`fleet_ui::kit` holds the primitives every screen is built from. Use them instead of styling raw
-`div`s; all colours, sizes and radii come from `fleet_ui::theme` (`cx.palette()` and the `theme::*`
+`flock_ui::kit` holds the primitives every screen is built from. Use them instead of styling raw
+`div`s; all colours, sizes and radii come from `flock_ui::theme` (`cx.palette()` and the `theme::*`
 constants). If you need a value the theme lacks, add a named constant there.
 
-See every primitive running: `cargo run -p fleet -- --demo --screen kit` (`kit-overlays` opens
+See every primitive running: `cargo run -p flock -- --demo --screen kit` (`kit-overlays` opens
 the menu, confirm dialog and a toast; `kit-panes` shows charts, split, code, diff, dock and logs),
 `--appearance dark|light`. Screenshots:
-`mise run shot -- kit dark`. The gallery source (`crates/fleet-ui/src/gallery.rs`) is a working
+`mise run shot -- kit dark`. The gallery source (`crates/flock-ui/src/gallery.rs`) is a working
 usage example for everything below.
 
 ```rust
-use fleet_ui::kit::*;
-use fleet_ui::theme::{self, ActiveTheme};
+use flock_ui::kit::*;
+use flock_ui::theme::{self, ActiveTheme};
 ```
 
 Two kinds of primitive:
@@ -139,13 +139,13 @@ The one filter row every list page uses, always the first row above the list and
 order: an optional scope picker (namespace, or cluster on Changes), the text filter, status chips
 with counts, Clear, and `n of m` on the right while the list is narrowed. `/` focuses the current
 page's bar (the shell routes it; ignored while typing in a field or terminal), Esc in the field
-clears it. The text is parsed into `fleet_core::filter::TextFilter`: plain words must all match,
+clears it. The text is parsed into `flock_core::filter::TextFilter`: plain words must all match,
 `ns:<part>` matches the namespace, `l:key=value` / `label:key` match labels, as in the palette.
 
 ```rust
 let filter = cx.new(|cx| FilterBar::new("pod-filter", window, cx).scope(namespace_select.clone()));
 cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| this.refresh(cx)).detach();
-// in refresh: read the query and chip, filter rows in fleet-core, then report back
+// in refresh: read the query and chip, filter rows in flock-core, then report back
 let (query, chip) = { let bar = filter.read(cx); (bar.query().clone(), bar.chip()) };
 filter.update(cx, |bar, cx| {
     bar.set_chips(counts.map(|(f, n)| chip_label(f.label(), n)).collect(), cx);
@@ -268,8 +268,8 @@ plus text cell.
 Every header border is a resize handle (col-resize cursor, `{table}-resize-{ix}`): drag to resize down
 to `theme::COLUMN_MIN` (or the flex minimum), double-click to fit the column to its widest text (custom
 cells without `fit_by` go back to their design width). Widths are stored per scope and table id in
-`fleet_ui::prefs` (`view.json` in the Fleet data dir, memory only in demo and tests); call
-`table.set_scope(cluster.as_str(), cx)` on cluster pages, fleet pages use `prefs::FLEET_SCOPE`.
+`flock_ui::prefs` (`view.json` in the Flock data dir, memory only in demo and tests); call
+`table.set_scope(cluster.as_str(), cx)` on cluster pages, flock pages use `prefs::FLOCK_SCOPE`.
 
 ⌘-click and middle-click on a row emit `Opened` as well (the shell turns the resulting navigation
 into a new tab). Rows that open something put `screens::new_tab_item(command, emit)` ("Open in new
@@ -442,7 +442,7 @@ Inspector::new("node-inspector", "ip-10-4-31-12")
 ```
 
 Drag the left edge to resize between `theme::INSPECTOR_MIN` and `INSPECTOR_MAX`; double-click
-resets to the builder width. Width is saved per inspector id in the existing app settings (`settings.json` in the Fleet data
+resets to the builder width. Width is saved per inspector id in the existing app settings (`settings.json` in the Flock data
 dir). Custom panel layouts use `InspectorPane::new("kind", content).width(initial_width)` to get
 the same behavior.
 
@@ -464,7 +464,7 @@ motion drops the exit at once.
 
 ## Relative time
 
-`fleet_core::time::age(duration) -> "4s" | "2m" | "3h" | "9d" | "1y"` and
+`flock_core::time::age(duration) -> "4s" | "2m" | "3h" | "9d" | "1y"` and
 `age_since(then, now)` (future timestamps read as `0s`).
 
 Text columns may use `.tooltip(|row| row.message.clone().into())` to expose a full value on hover
@@ -482,6 +482,6 @@ completed initial list with no objects is `Synced`. The shell renders:
 - `EmptyState::new(sentence, action)`: no icon, one sentence and one `Button`
 - `ErrorState::new(reason, retry)`: status glyph, the backend reason on one line, Retry
 
-A page still pending after `fleet_core::watch::WATCH_SYNC_TIMEOUT` becomes an error naming the step
+A page still pending after `flock_core::watch::WATCH_SYNC_TIMEOUT` becomes an error naming the step
 it stalled on. Render the states headlessly with `mise run shot -- resources dark --state loading`
 (also `connecting`, `empty`, `error`); `Ui::with_state` drives them in interaction tests.

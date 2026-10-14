@@ -6,4 +6,4 @@ metadata:
 spec:
   values:
     extraArgs:
-      - --fleet-invalid-flag
+      - --flock-invalid-flag

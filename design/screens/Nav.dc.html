@@ -47,7 +47,7 @@
   </sc-if>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"mode":{"editor":"enum","options":["fleet","cluster"],"default":"fleet"},"active":{"editor":"enum","options":["overview","problems","gitops","changes","cl-overview","nodes","events","pods","deployments","kustomizations","helmreleases","loco-platform","loco-apps","loco-builds","loco-routes"],"default":"overview"},"loco":{"editor":"boolean","default":true},"resources":{"editor":"boolean","default":true},"$preview":{"width":200,"height":874}}'>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"mode":{"editor":"enum","options":["flock","cluster"],"default":"flock"},"active":{"editor":"enum","options":["overview","problems","gitops","changes","cl-overview","nodes","events","pods","deployments","kustomizations","helmreleases","loco-platform","loco-apps","loco-builds","loco-routes"],"default":"overview"},"loco":{"editor":"boolean","default":true},"resources":{"editor":"boolean","default":true},"$preview":{"width":200,"height":874}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
@@ -61,15 +61,15 @@ class Component extends DCLogic {
     return { theme: t, vars: t === 'light' ? L : D };
   }
   renderVals() {
-    const mode = this.props.mode ?? 'fleet';
-    const active = this.props.active ?? (mode === 'fleet' ? 'overview' : 'cl-overview');
+    const mode = this.props.mode ?? 'flock';
+    const active = this.props.active ?? (mode === 'flock' ? 'overview' : 'cl-overview');
     const E = (n) => ({ t: '✕ ' + n, c: 'var(--err)' });
     const W = (n) => ({ t: '▲ ' + n, c: 'var(--warn)' });
     const S = (n) => ({ t: '‖ ' + n, c: 'var(--sus)' });
     const N = (n) => ({ t: n, c: 'var(--mute)' });
-    const spec = mode === 'fleet' ? [
-      { key: 'overview', label: 'Overview', href: 'Fleet.dc.html' },
-      { key: 'problems', label: 'Problems', href: 'Fleet.dc.html', right: [E(3), W(6)] },
+    const spec = mode === 'flock' ? [
+      { key: 'overview', label: 'Overview', href: 'Flock.dc.html' },
+      { key: 'problems', label: 'Problems', href: 'Flock.dc.html', right: [E(3), W(6)] },
       { key: 'gitops', label: 'GitOps', href: 'Flux.dc.html', right: [E(1), S(1)] },
       { key: 'changes', label: 'Changes', href: 'Changes.dc.html' }
     ] : [
@@ -116,7 +116,7 @@ class Component extends DCLogic {
       items,
       open: res, closed: !res,
       width: res ? 'width:200px;' : 'width:76px;',
-      label: mode === 'fleet' ? 'All clusters' : 'prod-us-east',
+      label: mode === 'flock' ? 'All clusters' : 'prod-us-east',
       toggle: () => this.setState({ res: !res })
     };
   }

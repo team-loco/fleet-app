@@ -1,6 +1,6 @@
 ---
 name: code-quality
-description: Self-check or review a Fleet change before calling it done — definition of done, correctness, concurrency, gpui and kube-rs pitfalls, design fidelity. Load when finishing a unit, reviewing a diff, or refactoring.
+description: Self-check or review a Flock change before calling it done — definition of done, correctness, concurrency, gpui and kube-rs pitfalls, design fidelity. Load when finishing a unit, reviewing a diff, or refactoring.
 ---
 
 # Code quality
@@ -14,8 +14,8 @@ Verified by running, not by reading:
 1. `mise run check` passes (fmt, clippy `-D warnings` with and without `--features loco`, nextest, typos, deny)
 2. A new or changed test fails without the change and passes with it
 3. UI changes: the affected screen rendered headlessly in dark and light (`mise run shot -- <screen> dark`
-   and `light`) and compared with the matching `design/` file; interactions covered by a `fleet_shots::Ui`
-   test in `apps/fleet-shots/tests/ui.rs`. Never launch the app or drive it with synthetic input
+   and `light`) and compared with the matching `design/` file; interactions covered by a `flock_shots::Ui`
+   test in `apps/flock-shots/tests/ui.rs`. Never launch the app or drive it with synthetic input
 4. `docs/TASKS.md` row updated (status, PR)
 5. Anything skipped or failing is stated in the report with output
 
@@ -28,7 +28,7 @@ Verified by running, not by reading:
 
 ## Concurrency
 
-- Tokio lives in `fleet-kube`; gpui code never blocks on it. Cross with async channels only
+- Tokio lives in `flock-kube`; gpui code never blocks on it. Cross with async channels only
 - No locks held across `.await`; keep critical sections short
 - Every watcher, stream and port-forward is owned by a handle whose drop cancels it
 - Reconnects back off; a failing cluster never stalls the others

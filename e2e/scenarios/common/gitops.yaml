@@ -23,7 +23,7 @@ metadata:
 spec:
   interval: 1m
   retryInterval: 30s
-  path: ./fleet-nonexistent-path
+  path: ./flock-nonexistent-path
   prune: true
   targetNamespace: web
   sourceRef:

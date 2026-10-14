@@ -4,13 +4,13 @@ import os
 import sys
 from pathlib import Path
 
-NAMESPACE = "fleet-scale"
+NAMESPACE = "flock-scale"
 CONFIGMAPS = 3000
 SERVICES = 1500
 DEPLOYMENTS = 400
 EVENTS = 2000
 PODS = 200
-IMAGE = os.environ["FLEET_SCALE_IMAGE"]
+IMAGE = os.environ["FLOCK_SCALE_IMAGE"]
 PAYLOAD_BYTES = 1024
 BATCH_SIZE = 100
 
@@ -41,7 +41,7 @@ def objects():
         yield object_for(
             "Event", index,
             involvedObject={"apiVersion": "v1", "kind": "Pod", "namespace": NAMESPACE, "name": f"scale-pod-{index % PODS:04}"},
-            reason="ScaleProbe", message="Fleet scale scenario event", type="Normal", count=1,
+            reason="ScaleProbe", message="Flock scale scenario event", type="Normal", count=1,
         )
     for index in range(PODS):
         yield object_for("Pod", index, spec={

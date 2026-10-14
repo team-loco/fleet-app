@@ -41,7 +41,7 @@ fi
 sed -i '' "s/^version = \"$current\"$/version = \"$version\"/" Cargo.toml
 cargo update --workspace --quiet
 git commit --quiet -m "Release $tag" -- Cargo.toml Cargo.lock
-git tag -a "$tag" -m "Fleet $version"
+git tag -a "$tag" -m "Flock $version"
 git push --quiet origin HEAD:main
 git push --quiet origin "$tag"
 echo "pushed $tag; the release workflow builds and publishes it"

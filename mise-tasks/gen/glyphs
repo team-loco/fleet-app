@@ -1,5 +1,5 @@
 #!/usr/bin/env -S uv run --with fonttools python
-#MISE description="Rebuild the Apache-2.0 Fleet Status fonts from geometric outlines"
+#MISE description="Rebuild the Apache-2.0 Flock Status fonts from geometric outlines"
 import math
 from pathlib import Path
 import tomllib
@@ -19,10 +19,10 @@ CROSS_HALF_SIZE = 190
 REGULAR_STROKE = 80
 MEDIUM_STROKE = 100
 FONT_EPOCH = 2082844800
-FAMILY = "Fleet Status"
+FAMILY = "Flock Status"
 ROOT = Path(__file__).resolve().parents[2]
-FONTS = ROOT / "crates/fleet-ui/assets/fonts"
-COPYRIGHT = "Copyright 2026 Fleet contributors"
+FONTS = ROOT / "crates/flock-ui/assets/fonts"
+COPYRIGHT = "Copyright 2026 Flock contributors"
 LICENSE = "Licensed under the Apache License, Version 2.0"
 LICENSE_URL = "https://www.apache.org/licenses/LICENSE-2.0"
 
@@ -112,9 +112,9 @@ def generate(weight, stroke, version):
         "styleName": weight,
         "typographicFamily": FAMILY,
         "typographicSubfamily": weight,
-        "uniqueFontIdentifier": f"FleetStatus-{weight}-{version}",
+        "uniqueFontIdentifier": f"FlockStatus-{weight}-{version}",
         "fullName": f"{FAMILY} {weight}",
-        "psName": f"FleetStatus-{weight}",
+        "psName": f"FlockStatus-{weight}",
         "version": f"Version {version}",
         "copyright": COPYRIGHT,
         "licenseDescription": LICENSE,
@@ -131,7 +131,7 @@ def generate(weight, stroke, version):
     font.font["head"].created = FONT_EPOCH
     font.font["head"].modified = FONT_EPOCH
     font.font.recalcTimestamp = False
-    filename = "FleetStatus.ttf" if weight == "Regular" else "FleetStatus-Medium.ttf"
+    filename = "FlockStatus.ttf" if weight == "Regular" else "FlockStatus-Medium.ttf"
     font.save(FONTS / filename)
 
 
