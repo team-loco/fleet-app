@@ -44,6 +44,9 @@ Rule::horizontal()  /  Rule::vertical()   // 1px `line`
 Link::new("rev", "a41e07c").mono().on_click(|_, window, cx| ..)
 Highlighted::new("checkout-api", vec![0..8])  // byte ranges drawn in `acc` (fuzzy match hits)
 Kbd::new("⌘K")
+ClickableSection::new("overview-pods")    // whole-cell hover (`hover` token), → after the title on hover/focus, pointer
+    .title(SectionLabel::new("Pods")).trailing(detail).padding(x, y)
+    .child(body).on_activate(|window, cx| ..)  // click, Enter and Space
 Prose::new("summary")                     // wrapping sentence with inline mono links
     .text("checkout-api ").link("a41e07c", |window, cx| ..).inert_link("no-target")
 KeyValue::new()                           // inspector / spec grid, label column 72px muted

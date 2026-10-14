@@ -8,17 +8,17 @@ use flock_core::{ClusterDetail, ClusterSummary, Page, Status};
 use gpui::{
     AnyElement, App, AppContext, Context, ElementId, Entity, EventEmitter, FontWeight, Hsla,
     InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
+    StatefulInteractiveElement, Styled, Window, div, px,
 };
 
 use super::ScreenEvent;
 use crate::kit::{
-    Button, CapacityMeter, Column, LineChart, Link, MetaLine, SectionHeader, SectionLabel,
-    Segmented, Series, StackedBar, StatusText, Table, TableEvent, Tooltip,
+    Button, CapacityMeter, ClickableSection, Column, LineChart, Link, MetaLine, SectionHeader,
+    SectionLabel, Segmented, Series, StackedBar, StatusText, Table, TableEvent, Tooltip,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, METER, Palette, RADIUS_SMALL, RULE, SPACE_1, SPACE_3, SPACE_4, SPACE_5,
-    SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_CONTROL, TEXT_FIGURE, TEXT_MONO, TEXT_SMALL,
+    SPACE_7, SPACE_8, TEXT_BODY, TEXT_CONTROL, TEXT_FIGURE, TEXT_MONO, TEXT_SMALL,
 };
 
 const RECENT_WARNINGS: usize = 5;
@@ -196,35 +196,33 @@ impl OverviewScreen {
             (Status::Warn, count_weight(pods.pending)),
             (Status::Err, count_weight(pods.failing)),
         ]);
-        let pods_cell = cell(
-            "Pods",
-            format!("capacity {}", thousands(data.nodes.pod_capacity)),
-            thousands(pods.total()),
-            pod_bar.into_any_element(),
-            vec![
+        let pods_cell = Cell {
+            label: "Pods",
+            detail: format!("capacity {}", thousands(data.nodes.pod_capacity)),
+            figure: thousands(pods.total()),
+            bar: pod_bar.into_any_element(),
+            notes: vec![
                 counted(pods.running, "running", palette.fg),
                 counted(pods.pending, "pending", palette.warn),
                 counted(pods.failing, "failing", palette.err),
             ],
-            palette,
-        );
-        let nodes_cell = cell(
-            "Nodes",
-            data.nodes.compact_instance_label(),
-            data.nodes.total.to_string(),
-            Self::node_strip(data, palette, cx),
-            vec![
+        };
+        let nodes_cell = Cell {
+            label: "Nodes",
+            detail: data.nodes.compact_instance_label(),
+            figure: data.nodes.total.to_string(),
+            bar: Self::node_strip(data, palette, cx),
+            notes: vec![
                 counted_usize(data.nodes.ready, "ready", palette.fg),
                 counted_usize(data.nodes.cordoned, "cordoned", palette.warn),
             ],
-            palette,
-        );
-        let pods_cell = Self::navigation("overview-pods", Page::Pods, pods_cell, palette, cx);
-        let nodes_cell = Self::navigation("overview-nodes", Page::Nodes, nodes_cell, palette, cx);
+        };
+        let pods_cell = Self::cell_section("overview-pods", Page::Pods, pods_cell, palette, cx);
+        let nodes_cell = Self::cell_section("overview-nodes", Page::Nodes, nodes_cell, palette, cx);
         let cells = [cpu, memory, pods_cell, nodes_cell];
         let last = cells.len() - 1;
         let row = cells.into_iter().enumerate().map(|(ix, cell)| {
-            let column = div().flex_1().min_w_0().px(SPACE_8).py(SPACE_7).child(cell);
+            let column = div().flex().flex_col().flex_1().min_w_0().child(cell);
             if ix < last {
                 column.border_r(RULE).border_color(palette.line)
             } else {
@@ -239,33 +237,30 @@ impl OverviewScreen {
             .into_any_element()
     }
 
-    fn navigation(
-        id: impl Into<SharedString>,
+    fn cell_section(
+        id: &'static str,
         page: Page,
-        content: AnyElement,
+        cell: Cell,
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let id = id.into();
-        let hover = palette.hover;
-        let focus = palette.selline;
-        div()
-            .debug_selector(|| id.to_string())
-            .id(id)
-            .w_full()
-            .tab_index(0)
-            .cursor_pointer()
-            .hover(move |style| style.bg(hover))
-            .focus(move |style| style.bg(hover).border(RULE).border_color(focus))
-            .on_click(cx.listener(move |_, _, _, cx| cx.emit(ScreenEvent::Navigate(page))))
-            .on_key_down(cx.listener(move |_, event: &gpui::KeyDownEvent, _, cx| {
-                if event.keystroke.key == "enter" || event.keystroke.key == "space" {
-                    cx.emit(ScreenEvent::Navigate(page));
-                    cx.stop_propagation();
-                }
-            }))
-            .child(content)
+        let detail = detail_text(cell.detail, palette);
+        ClickableSection::new(id)
+            .title(SectionLabel::new(cell.label))
+            .trailing(detail)
+            .child(cell_figure(cell.figure))
+            .child(cell.bar)
+            .children(cell_notes(cell.notes, palette))
+            .on_activate(Self::navigate(page, cx))
             .into_any_element()
+    }
+
+    fn navigate(page: Page, cx: &mut Context<Self>) -> impl Fn(&mut Window, &mut App) + 'static {
+        let this = cx.entity().downgrade();
+        move |_, cx| {
+            this.update(cx, |_, cx| cx.emit(ScreenEvent::Navigate(page)))
+                .ok();
+        }
     }
 
     fn node_strip(data: &OverviewData, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
@@ -326,42 +321,40 @@ impl OverviewScreen {
             .iter()
             .map(|w| {
                 let page = w.page;
-                let row = div()
-                    .flex()
-                    .flex_col()
-                    .gap(SPACE_3)
-                    .child(
-                        div()
-                            .flex()
-                            .text_size(TEXT_BODY)
-                            .child(div().flex_1().child(page.label()))
-                            .child(
-                                div()
-                                    .font_family(FONT_MONO)
-                                    .text_size(TEXT_MONO)
-                                    .text_color(palette.mute)
-                                    .child(w.summary.clone()),
-                            ),
-                    )
-                    .child(
-                        StackedBar::new(vec![
-                            (Status::Ok, count_weight_usize(w.ok)),
-                            (Status::Warn, count_weight_usize(w.mid)),
-                            (Status::Err, count_weight_usize(w.bad)),
-                        ])
-                        .thin(),
-                    )
-                    .into_any_element();
                 let id = format!("overview-{}", page.label().to_lowercase());
-                Self::navigation(id, page, row, palette, cx)
+                let summary = div()
+                    .font_family(FONT_MONO)
+                    .text_size(TEXT_MONO)
+                    .text_color(palette.mute)
+                    .child(w.summary.clone());
+                let bar = StackedBar::new(vec![
+                    (Status::Ok, count_weight_usize(w.ok)),
+                    (Status::Warn, count_weight_usize(w.mid)),
+                    (Status::Err, count_weight_usize(w.bad)),
+                ])
+                .thin();
+                ClickableSection::new(SharedString::from(id))
+                    .title(div().text_size(TEXT_BODY).child(page.label()))
+                    .trailing(summary)
+                    .padding(SPACE_8, SPACE_4)
+                    .gap(SPACE_3)
+                    .child(bar)
+                    .on_activate(Self::navigate(page, cx))
+                    .into_any_element()
             })
             .collect();
         div()
             .flex()
             .flex_col()
-            .gap(SPACE_6)
-            .child(SectionLabel::new("Workloads"))
+            .child(
+                div()
+                    .px(SPACE_8)
+                    .pt(SPACE_7)
+                    .pb(SPACE_4)
+                    .child(SectionLabel::new("Workloads")),
+            )
             .children(rows)
+            .pb(SPACE_4)
             .into_any_element()
     }
 }
@@ -391,8 +384,6 @@ impl Render for OverviewScreen {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .px(SPACE_8)
-                    .py(SPACE_7)
                     .child(Self::workloads(&data, &palette, cx)),
             );
         let all_events =
@@ -502,6 +493,14 @@ fn counted_usize(value: usize, label: &'static str, color: Hsla) -> AnyElement {
     counted(value, label, color)
 }
 
+struct Cell {
+    label: &'static str,
+    detail: String,
+    figure: String,
+    bar: AnyElement,
+    notes: Vec<AnyElement>,
+}
+
 fn capacity_cell(
     label: &'static str,
     capacity: &Capacity,
@@ -510,62 +509,66 @@ fn capacity_cell(
 ) -> AnyElement {
     let id = format!("overview-capacity-{label}");
     let meter = CapacityMeter::new(id, capacity.clone(), color);
-    cell(
+    let cell = Cell {
         label,
-        capacity.amount(),
-        percent(capacity.fraction()),
-        meter.into_any_element(),
-        Vec::new(),
-        palette,
-    )
+        detail: capacity.amount(),
+        figure: percent(capacity.fraction()),
+        bar: meter.into_any_element(),
+        notes: Vec::new(),
+    };
+    static_cell(cell, palette)
 }
 
-fn cell(
-    label: &'static str,
-    detail: String,
-    figure: String,
-    bar: AnyElement,
-    notes: Vec<AnyElement>,
-    palette: &Palette,
-) -> AnyElement {
+fn static_cell(cell: Cell, palette: &Palette) -> AnyElement {
+    let header = div()
+        .flex()
+        .items_center()
+        .gap(SPACE_5)
+        .child(SectionLabel::new(cell.label))
+        .child(div().flex_1())
+        .child(detail_text(cell.detail, palette));
     div()
         .flex()
         .flex_col()
         .gap(SPACE_5)
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(SPACE_5)
-                .child(SectionLabel::new(label))
-                .child(div().flex_1())
-                .child(
-                    div()
-                        .font_family(FONT_MONO)
-                        .text_size(TEXT_MONO)
-                        .text_color(palette.mute)
-                        .truncate()
-                        .child(detail),
-                ),
-        )
-        .child(
-            div()
-                .text_size(TEXT_FIGURE)
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(figure),
-        )
-        .child(bar)
-        .when(!notes.is_empty(), |cell| {
-            cell.child(
-                div()
-                    .flex()
-                    .gap(SPACE_7)
-                    .text_size(TEXT_CONTROL)
-                    .text_color(palette.mute)
-                    .children(notes),
-            )
-        })
+        .px(SPACE_8)
+        .py(SPACE_7)
+        .child(header)
+        .child(cell_figure(cell.figure))
+        .child(cell.bar)
+        .children(cell_notes(cell.notes, palette))
         .into_any_element()
+}
+
+fn detail_text(detail: String, palette: &Palette) -> AnyElement {
+    div()
+        .font_family(FONT_MONO)
+        .text_size(TEXT_MONO)
+        .text_color(palette.mute)
+        .truncate()
+        .child(detail)
+        .into_any_element()
+}
+
+fn cell_figure(figure: String) -> AnyElement {
+    div()
+        .text_size(TEXT_FIGURE)
+        .font_weight(FontWeight::SEMIBOLD)
+        .child(figure)
+        .into_any_element()
+}
+
+fn cell_notes(notes: Vec<AnyElement>, palette: &Palette) -> Option<AnyElement> {
+    if notes.is_empty() {
+        return None;
+    }
+    let row = div()
+        .flex()
+        .gap(SPACE_7)
+        .text_size(TEXT_CONTROL)
+        .text_color(palette.mute)
+        .children(notes);
+    Some(row.into_any_element())
 }
 
 #[cfg(test)]
