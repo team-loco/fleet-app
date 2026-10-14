@@ -352,7 +352,7 @@ mod tests {
 
     #[tokio::test]
     async fn captures_from_a_real_shell() {
-        let env = capture(Path::new("/bin/sh"), Duration::from_secs(5)).await;
+        let env = capture(Path::new("/bin/bash"), Duration::from_secs(5)).await;
         assert!(
             matches!(env.origin, EnvOrigin::LoginShell { .. }),
             "{:?}",
