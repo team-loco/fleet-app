@@ -6,6 +6,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CLUSTERS=(fleet-a fleet-b)
+FLUX_KINDS=kustomizations.kustomize.toolkit.fluxcd.io,helmreleases.helm.toolkit.fluxcd.io
 skip_up="${usage_skip_up:-false}"
 no_teardown="${usage_no_teardown:-false}"
 
@@ -33,6 +34,16 @@ for cluster in "${CLUSTERS[@]}"; do
   mise exec -- kind get kubeconfig --name "${cluster}" >"${file}"
 done
 export FLOCK_E2E=1
+
+for cluster in "${CLUSTERS[@]}"; do
+  context="kind-${cluster}"
+  kubectl=(mise exec -- kubectl --context "${context}")
+  "${kubectl[@]}" apply -f "${ROOT}/e2e/scenarios/common/namespaces.yaml"
+  "${kubectl[@]}" apply -k "${ROOT}/e2e/scenarios/${cluster}"
+  "${kubectl[@]}" uncordon "${cluster}-control-plane"
+  "${kubectl[@]}" annotate "${FLUX_KINDS}" --all --all-namespaces --overwrite \
+    "reconcile.fluxcd.io/requestedAt=$(date +%s)"
+done
 
 "${ROOT}/e2e/verify"
 

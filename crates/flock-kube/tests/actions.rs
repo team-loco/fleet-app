@@ -638,15 +638,16 @@ fn no_notices(harness: &Harness) {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn scale_up_then_back_down() {
-    let Some(harness) = Harness::start().await else {
-        return;
-    };
-    let deployments: Api<Deployment> = Api::namespaced(harness.client.clone(), WEB_NAMESPACE);
-    let Some(before) = replicas(&deployments).await else {
-        panic!("web/podinfo replicas");
-    };
+async fn restoring<T>(body: impl Future<Output = T>, restore: impl Future<Output = ()>) -> T {
+    let outcome = AssertUnwindSafe(body).catch_unwind().await;
+    restore.await;
+    match outcome {
+        Ok(value) => value,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+async fn scale_up_and_down(harness: &Harness, deployments: &Api<Deployment>, before: i32) {
     let target = web_podinfo(&harness.client).await;
     let up = u32::try_from(before + 1).unwrap_or_default();
     harness.send(Command::Scale {
@@ -655,7 +656,7 @@ async fn scale_up_then_back_down() {
     });
     eventually(
         "scale up",
-        || replicas(&deployments),
+        || replicas(deployments),
         |observed| *observed == Some(before + 1),
     )
     .await;
@@ -665,11 +666,35 @@ async fn scale_up_then_back_down() {
     });
     eventually(
         "scale down",
-        || replicas(&deployments),
+        || replicas(deployments),
         |observed| *observed == Some(before),
     )
     .await;
-    no_notices(&harness);
+    no_notices(harness);
+}
+
+async fn set_replicas(deployments: &Api<Deployment>, replicas: i32) {
+    let patch = json!({ "spec": { "replicas": replicas } });
+    let patched = deployments
+        .patch(PODINFO, &PatchParams::default(), &Patch::Merge(&patch))
+        .await;
+    assert!(patched.is_ok(), "restore web/podinfo replicas: {patched:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scale_up_then_back_down() {
+    let Some(harness) = Harness::start().await else {
+        return;
+    };
+    let deployments: Api<Deployment> = Api::namespaced(harness.client.clone(), WEB_NAMESPACE);
+    let Some(before) = replicas(&deployments).await else {
+        panic!("web/podinfo replicas");
+    };
+    restoring(
+        scale_up_and_down(&harness, &deployments, before),
+        set_replicas(&deployments, before),
+    )
+    .await;
 }
 
 async fn restart_and_rollback(harness: &Harness, deployments: &Api<Deployment>) {
@@ -980,12 +1005,7 @@ async fn compare_diffs_two_clusters_and_applies_the_other_template() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn cordon_then_uncordon_the_node() {
-    let Some(harness) = Harness::start().await else {
-        return;
-    };
-    let nodes: Api<Node> = Api::all(harness.client.clone());
+async fn cordon_and_uncordon(harness: &Harness, nodes: &Api<Node>) {
     let unschedulable = || async {
         nodes
             .get(NODE)
@@ -999,7 +1019,24 @@ async fn cordon_then_uncordon_the_node() {
     eventually("cordon", unschedulable, |observed| *observed).await;
     harness.send(Command::Uncordon(target));
     eventually("uncordon", unschedulable, |observed| !*observed).await;
-    no_notices(&harness);
+    no_notices(harness);
+}
+
+async fn uncordon_node(nodes: &Api<Node>) {
+    let patch = json!({ "spec": { "unschedulable": false } });
+    let patched = nodes
+        .patch(NODE, &PatchParams::default(), &Patch::Merge(&patch))
+        .await;
+    assert!(patched.is_ok(), "restore node schedulable: {patched:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cordon_then_uncordon_the_node() {
+    let Some(harness) = Harness::start().await else {
+        return;
+    };
+    let nodes: Api<Node> = Api::all(harness.client.clone());
+    restoring(cordon_and_uncordon(&harness, &nodes), uncordon_node(&nodes)).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

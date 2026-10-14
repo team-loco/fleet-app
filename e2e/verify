@@ -14,6 +14,7 @@ for cluster in "${CLUSTERS[@]}"; do
   "${kubectl[@]}" -n apps rollout status deployment/podinfo --timeout="${WAIT_TIMEOUT}"
   "${kubectl[@]}" -n flux-system wait helmchart --all --for=condition=Ready --timeout="${WAIT_TIMEOUT}"
   "${kubectl[@]}" -n flux-system wait kustomization/apps --for=condition=Ready --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n web wait deployment/podinfo --for=condition=Available --timeout="${WAIT_TIMEOUT}"
   "${kubectl[@]}" -n web rollout status deployment/podinfo --timeout="${WAIT_TIMEOUT}"
   "${kubectl[@]}" -n flux-system wait kustomization/broken-kustomization --for=jsonpath='{.status.conditions[?(@.type=="Ready")].reason}'=ArtifactFailed --timeout="${WAIT_TIMEOUT}"
   "${kubectl[@]}" -n search wait helmrelease/search-indexer --for=jsonpath='{.spec.suspend}'=true --timeout="${WAIT_TIMEOUT}"
