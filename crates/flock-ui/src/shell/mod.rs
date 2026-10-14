@@ -605,10 +605,26 @@ impl Shell {
 
     pub fn filter_bar(&self, cx: &App) -> Option<Entity<FilterBar>> {
         let location = self.state.location();
+        Self::screen_filter_bar(self.focused_screens(), location, cx)
+    }
+
+    pub(super) fn filter_bar_at(
+        &self,
+        ix: usize,
+        location: &Location,
+        cx: &App,
+    ) -> Option<Entity<FilterBar>> {
+        Self::screen_filter_bar(self.screens(ix), location, cx)
+    }
+
+    fn screen_filter_bar(
+        screens: &PaneScreens,
+        location: &Location,
+        cx: &App,
+    ) -> Option<Entity<FilterBar>> {
         if location.workload().is_some() || location.flux_object.is_some() {
             return None;
         }
-        let screens = self.focused_screens();
         #[cfg(feature = "loco")]
         if crate::screens::loco::owns(location.page) {
             return screens.loco.read(cx).filter_bar(location.page, cx);

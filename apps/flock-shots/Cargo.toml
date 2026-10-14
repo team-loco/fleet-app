@@ -24,7 +24,10 @@ gpui-platform = { workspace = true, features = ["test-support"] }
 image.workspace = true
 
 [dev-dependencies]
+flock-kube.workspace = true
 flock-update.workspace = true
+kube.workspace = true
+serde_norway.workspace = true
 tempfile.workspace = true
 
 [lints]

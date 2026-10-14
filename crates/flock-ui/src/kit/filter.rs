@@ -73,6 +73,10 @@ impl FilterBar {
         self.query.words.clone()
     }
 
+    pub fn text(&self, cx: &gpui::App) -> String {
+        self.field.read(cx).value().to_string()
+    }
+
     pub fn chip(&self) -> usize {
         self.chip
     }
@@ -157,7 +161,9 @@ impl Render for FilterBar {
                     .text_color(palette.mute)
                     .child(note)
             });
+        let selector = self.id.to_string();
         div()
+            .debug_selector(move || selector)
             .id(self.id.clone())
             .flex()
             .flex_none()

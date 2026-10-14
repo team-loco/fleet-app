@@ -78,6 +78,35 @@ impl Page {
         }
     }
 
+    pub const fn singular(self) -> &'static str {
+        match self {
+            Self::Nodes => "Node",
+            Self::Namespaces => "Namespace",
+            Self::Events => "Event",
+            #[cfg(feature = "loco")]
+            Self::LocoApplications => "Application",
+            #[cfg(feature = "loco")]
+            Self::LocoBuilds => "Build",
+            #[cfg(feature = "loco")]
+            Self::LocoRoutes => "Route",
+            Self::Pods => "Pod",
+            Self::Deployments => "Deployment",
+            Self::StatefulSets => "StatefulSet",
+            Self::DaemonSets => "DaemonSet",
+            Self::Jobs => "Job",
+            Self::CronJobs => "CronJob",
+            Self::Kustomizations => "Kustomization",
+            Self::HelmReleases => "HelmRelease",
+            Self::Sources => "Source",
+            Self::Services => "Service",
+            Self::Ingresses => "Ingress",
+            Self::ConfigMaps => "ConfigMap",
+            Self::Secrets => "Secret",
+            Self::Pvcs => "PVC",
+            other => other.label(),
+        }
+    }
+
     pub const fn title(self) -> &'static str {
         match self {
             Self::ClusterOverview => "Cluster overview",

@@ -1,14 +1,15 @@
 use flock_core::cluster::{CPU_UNIT, MEMORY_UNIT, Namespace};
+use flock_core::emptiness::Noun;
 use flock_core::filter::StatusFilter;
 use flock_core::overview::fixed;
 use flock_core::time::age;
-use flock_core::{ClusterDetail, ClusterId, Counts, Status};
+use flock_core::{ClusterDetail, ClusterSummary, Counts, Page, Status};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
     Render, Styled, Window, div, px,
 };
 
-use super::ScreenEvent;
+use super::{ListShape, ScreenEvent, empty_list};
 use crate::kit::status_symbols;
 use crate::kit::{Column, FilterBar, FilterEvent, StatusGlyph, Table, chip_label};
 use crate::theme::{ActiveTheme, FONT_MONO, GLYPH_SLOT, Palette, SPACE_4};
@@ -23,6 +24,8 @@ const MEMORY_WIDTH: Pixels = px(84.);
 const AGE_WIDTH: Pixels = px(44.);
 
 pub struct NamespacesScreen {
+    cluster_name: String,
+    shown: usize,
     namespaces: Vec<Namespace>,
     table: Entity<Table<Namespace>>,
     filter: Entity<FilterBar>,
@@ -37,9 +40,7 @@ impl NamespacesScreen {
 
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let table = cx.new(|cx| {
-            Table::new("namespaces", columns(), cx)
-                .row_key(|n: &Namespace| n.name.clone().into())
-                .empty("No namespaces.")
+            Table::new("namespaces", columns(), cx).row_key(|n: &Namespace| n.name.clone().into())
         });
         let filter = cx.new(|cx| FilterBar::new("namespace-filter", window, cx));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
@@ -47,6 +48,8 @@ impl NamespacesScreen {
         })
         .detach();
         Self {
+            cluster_name: String::new(),
+            shown: 0,
             namespaces: Vec::new(),
             table,
             filter,
@@ -78,6 +81,7 @@ impl NamespacesScreen {
             .cloned()
             .collect();
         let shown = rows.len();
+        self.shown = shown;
         let total = self.namespaces.len();
         self.filter.update(cx, |bar, cx| {
             bar.set_chips(chips, cx);
@@ -91,8 +95,14 @@ impl NamespacesScreen {
         cx.notify();
     }
 
-    pub fn set(&mut self, cluster: &ClusterId, detail: &ClusterDetail, cx: &mut Context<Self>) {
-        let scope = cluster.as_str().to_owned();
+    pub fn set(
+        &mut self,
+        cluster: &ClusterSummary,
+        detail: &ClusterDetail,
+        cx: &mut Context<Self>,
+    ) {
+        self.cluster_name.clone_from(&cluster.name);
+        let scope = cluster.id.as_str().to_owned();
         self.table
             .update(cx, |table, cx| table.set_scope(scope, cx));
         if self.namespaces == detail.namespaces {
@@ -110,13 +120,24 @@ impl NamespacesScreen {
 }
 
 impl Render for NamespacesScreen {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let shape = ListShape {
+            shown: self.shown,
+            total: self.namespaces.len(),
+            namespace: None,
+            noun: Noun::of(Page::Namespaces),
+            cluster: &self.cluster_name,
+        };
+        let body: AnyElement = match empty_list(&shape, &self.filter, None, cx) {
+            Some(empty) => empty.into_any_element(),
+            None => self.table.clone().into_any_element(),
+        };
         div()
             .size_full()
             .flex()
             .flex_col()
             .child(self.filter.clone())
-            .child(div().flex_1().min_h_0().child(self.table.clone()))
+            .child(div().flex_1().min_h_0().child(body))
     }
 }
 

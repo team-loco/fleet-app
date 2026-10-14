@@ -1,18 +1,22 @@
 use crate::kit::SelectableText;
+use flock_core::emptiness::Noun;
 use flock_core::events::{self, Event, EventFilter, filter_counts, filter_events};
 use flock_core::resources::EVENT_LIST;
 use flock_core::settings::NamespaceSelection;
 use flock_core::time::age;
-use flock_core::{ClusterDetail, ClusterId, ClusterSummary, Command, Counts, Preferences, Status};
+use flock_core::{
+    ClusterDetail, ClusterId, ClusterSummary, Command, Counts, Page, Preferences, Status,
+};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
     ParentElement, Render, SharedString, Styled, Window, div,
 };
 
-use super::ScreenEvent;
+use super::{ListShape, ScreenEvent, empty_list};
 use crate::kit::{
     Column, FilterBar, FilterEvent, IconButton, Inspector, KeyValue, Link, Presence, Select,
-    SelectEvent, StatusGlyph, StatusText, Table, TableEvent, chip_label, slide_in, slide_out,
+    SelectEvent, ShowAll, StatusGlyph, StatusText, Table, TableEvent, chip_label, slide_in,
+    slide_out,
 };
 use crate::theme::{
     EVENT_AGE_WIDTH, EVENT_COUNT_WIDTH, EVENT_MESSAGE_MIN, EVENT_MESSAGE_WEIGHT,
@@ -27,6 +31,9 @@ const ALL_NAMESPACES: &str = "All namespaces";
 
 pub struct EventsScreen {
     cluster: Option<ClusterId>,
+    cluster_name: String,
+    shown: usize,
+    in_scope: usize,
     preferences: Preferences,
     namespaces: Entity<Select>,
     selected: Option<String>,
@@ -66,7 +73,6 @@ impl EventsScreen {
                 .row_key(|event: &Event| event.key().into())
                 .click_opens()
                 .row_status(|e: &Event| (e.status == Status::Err).then_some(Status::Err))
-                .empty("No events match the filter.")
         });
         cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
             if let TableEvent::Opened(ix) = event {
@@ -90,15 +96,7 @@ impl EventsScreen {
             } else {
                 NamespaceSelection::Named(label.to_string())
             };
-            this.preferences.select_namespace(EVENT_LIST, scope);
-            this.selected = None;
-            this.refresh(cx);
-            if let Some(cluster) = &this.cluster {
-                cx.emit(ScreenEvent::Command(Command::SetPreferences(
-                    cluster.clone(),
-                    this.preferences.clone(),
-                )));
-            }
+            this.choose_namespace(scope, cx);
         })
         .detach();
         let filter =
@@ -109,6 +107,9 @@ impl EventsScreen {
         .detach();
         Self {
             cluster: None,
+            cluster_name: String::new(),
+            shown: 0,
+            in_scope: 0,
             preferences: Preferences::default(),
             namespaces,
             selected: None,
@@ -117,6 +118,24 @@ impl EventsScreen {
             filter,
             table,
         }
+    }
+
+    fn choose_namespace(&mut self, scope: NamespaceSelection, cx: &mut Context<Self>) {
+        self.preferences.select_namespace(EVENT_LIST, scope);
+        self.selected = None;
+        self.refresh(cx);
+        if let Some(cluster) = &self.cluster {
+            cx.emit(ScreenEvent::Command(Command::SetPreferences(
+                cluster.clone(),
+                self.preferences.clone(),
+            )));
+        }
+    }
+
+    fn show_all_namespaces(&mut self, cx: &mut Context<Self>) {
+        self.namespaces
+            .update(cx, |select, cx| select.set_selected(0, cx));
+        self.choose_namespace(NamespaceSelection::All, cx);
     }
 
     pub fn set(
@@ -133,6 +152,7 @@ impl EventsScreen {
         self.table
             .update(cx, |table, cx| table.set_scope(scope, cx));
         self.cluster = Some(cluster.id.clone());
+        self.cluster_name.clone_from(&cluster.name);
         self.preferences = preferences.clone();
         self.events.clone_from(&detail.events);
         let scope = self.preferences.namespace_selection(EVENT_LIST);
@@ -180,6 +200,8 @@ impl EventsScreen {
         let filter = EventFilter::ALL.get(chip).copied().unwrap_or_default();
         let rows = filter_events(&scoped, filter, &query);
         let shown = rows.len();
+        self.shown = shown;
+        self.in_scope = scoped.len();
         let total = scoped.len();
         self.filter.update(cx, |bar, cx| {
             bar.set_chips(chips, cx);
@@ -284,6 +306,24 @@ impl Render for EventsScreen {
             .and_then(|key| self.events.iter().find(|event| &event.key() == key))
             .cloned();
         self.presence.track(current.as_ref(), presence, cx);
+        let scope = self.preferences.namespace_selection(EVENT_LIST);
+        let shape = ListShape {
+            shown: self.shown,
+            total: self.events.len(),
+            namespace: scope
+                .namespace()
+                .map(|namespace| (namespace, self.in_scope)),
+            noun: Noun::of(Page::Events),
+            cluster: &self.cluster_name,
+        };
+        let screen = cx.weak_entity();
+        let show_all: ShowAll = std::rc::Rc::new(move |_, cx| {
+            let _ = screen.update(cx, EventsScreen::show_all_namespaces);
+        });
+        let body: AnyElement = match empty_list(&shape, &self.filter, Some(show_all), cx) {
+            Some(empty) => empty.into_any_element(),
+            None => self.table.clone().into_any_element(),
+        };
         let inspector = match current {
             Some(event) => {
                 let panel = self.inspector(&event, cx);
@@ -310,7 +350,7 @@ impl Render for EventsScreen {
                     .flex()
                     .flex_col()
                     .child(self.filter.clone())
-                    .child(div().flex_1().min_h_0().child(self.table.clone())),
+                    .child(div().flex_1().min_h_0().child(body)),
             )
             .children(inspector)
     }

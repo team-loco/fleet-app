@@ -1,9 +1,10 @@
+use flock_core::emptiness::Noun;
 use flock_core::filter::StatusFilter;
 use flock_core::nodes::{Node, NodeSummary, Usage};
 use flock_core::overview::{Capacity, Commitment, number, percent};
 use flock_core::time::age;
 use flock_core::{
-    ClusterDetail, ClusterId, ClusterSummary, Command, Counts, ResourceRef, Seen, Status,
+    ClusterDetail, ClusterId, ClusterSummary, Command, Counts, Page, ResourceRef, Seen, Status,
 };
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, Hsla, IntoElement, ParentElement,
@@ -16,7 +17,7 @@ use crate::kit::{
     KeyValue, MenuItem, MetaLine, Meter, MiniMeter, Presence, SectionLabel, StatusGlyph,
     StatusText, Table, TableEvent, chip_label, confirm, slide_in, slide_out,
 };
-use crate::screens::new_tab_item;
+use crate::screens::{ListShape, empty_list, new_tab_item};
 use crate::theme::{
     ActiveTheme, FONT_MONO, INSPECTOR, Palette, SPACE_2, SPACE_3, SPACE_4, SPACE_5, TEXT_MONO,
     TEXT_SMALL,
@@ -41,6 +42,8 @@ const INSPECTOR_ID: &str = "node-inspector";
 
 pub struct NodesScreen {
     cluster: Option<ClusterId>,
+    cluster_name: String,
+    shown: usize,
     summary: NodeSummary,
     nodes: Vec<Node>,
     confirm_destructive: bool,
@@ -74,7 +77,6 @@ impl NodesScreen {
             Table::new("nodes", columns(), cx)
                 .row_key(|n: &Node| n.name.clone().into())
                 .row_status(|n: &Node| (n.status != Status::Ok).then_some(n.status))
-                .empty("No nodes.")
         });
         cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
             let TableEvent::Selected(ix) = event else {
@@ -91,6 +93,8 @@ impl NodesScreen {
         .detach();
         Self {
             cluster: None,
+            cluster_name: String::new(),
+            shown: 0,
             summary: NodeSummary::default(),
             nodes: Vec::new(),
             confirm_destructive: true,
@@ -110,6 +114,7 @@ impl NodesScreen {
     ) {
         self.selected = kept_selection(self.cluster.as_ref(), &cluster.id, self.selected.take());
         self.cluster = Some(cluster.id.clone());
+        self.cluster_name.clone_from(&cluster.name);
         if self.confirm_destructive != confirm_destructive {
             self.confirm_destructive = confirm_destructive;
             self.refresh(cx);
@@ -150,6 +155,7 @@ impl NodesScreen {
             .cloned()
             .collect();
         let shown = rows.len();
+        self.shown = shown;
         let total = self.nodes.len();
         self.filter.update(cx, |bar, cx| {
             bar.set_chips(chips, cx);
@@ -311,6 +317,17 @@ impl Render for NodesScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
         let meta = self.summary.meta_line();
+        let shape = ListShape {
+            shown: self.shown,
+            total: self.nodes.len(),
+            namespace: None,
+            noun: Noun::of(Page::Nodes),
+            cluster: &self.cluster_name,
+        };
+        let body: AnyElement = match empty_list(&shape, &self.filter, None, cx) {
+            Some(empty) => empty.into_any_element(),
+            None => self.table.clone().into_any_element(),
+        };
         let current = self.selected_node().cloned();
         self.presence.track(current.as_ref(), presence, cx);
         let inspector = match current {
@@ -334,7 +351,7 @@ impl Render for NodesScreen {
                     .flex_col()
                     .child(MetaLine::new(meta))
                     .child(self.filter.clone())
-                    .child(div().flex_1().min_h_0().child(self.table.clone())),
+                    .child(div().flex_1().min_h_0().child(body)),
             )
             .children(inspector)
     }

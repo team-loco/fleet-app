@@ -6,12 +6,9 @@ use flock_core::{ClusterId, Command, Page, Status, WatchState};
 use gpui::{AnyElement, Context, IntoElement, ParentElement, Task, div};
 
 use super::Shell;
-use crate::kit::{Button, ConnectionProgress, EmptyState, ErrorState, Skeleton};
-use crate::screens::is_flux_list;
+use crate::kit::{Button, ConnectionProgress, ErrorState, Skeleton};
 
 const RETRY: &str = "Retry";
-const REFRESH: &str = "Refresh";
-const OPEN_GITOPS: &str = "Open GitOps";
 
 #[derive(Default)]
 pub(super) struct LoadClock {
@@ -100,8 +97,8 @@ impl Shell {
         let id = cluster.id.clone();
         let page = location.page;
         let element = match state {
-            WatchState::Synced => return self.empty_view(ix, location, cx),
-            WatchState::Refreshing(_) => return self.empty_view(ix, location, cx),
+            WatchState::Synced => return None,
+            WatchState::Refreshing(_) => return None,
             WatchState::Failed(reason) => {
                 let retry = Button::new("page-retry", RETRY)
                     .on_click(cx.listener(move |this, _, _, cx| this.retry(ix, id.clone(), cx)));
@@ -121,36 +118,10 @@ impl Shell {
         Some(element)
     }
 
-    fn empty_view(
-        &self,
-        ix: usize,
-        location: &Location,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let cluster = self.cluster_of(location)?;
-        let page = location.page;
-        if self.state.snapshot.page_rows(&cluster.id, page) != Some(0) {
-            return None;
-        }
-        let sentence = format!("No {} in {}.", page.label(), cluster.name);
-        let action = empty_action(ix, cluster.id.clone(), page, cx);
-        Some(EmptyState::new(sentence, action).into_any_element())
-    }
-
     fn retry(&mut self, ix: usize, cluster: ClusterId, cx: &mut Context<Self>) {
         if let Some(screens) = self.panes.get_mut(ix) {
             screens.load = LoadClock::default();
         }
         self.dispatch(Command::Connect(cluster), cx);
     }
-}
-
-fn empty_action(ix: usize, cluster: ClusterId, page: Page, cx: &mut Context<Shell>) -> Button {
-    if is_flux_list(page) {
-        return Button::new("page-empty-action", OPEN_GITOPS).on_click(
-            cx.listener(|this, _, _, cx| this.dispatch(Command::SelectPage(Page::GitOps), cx)),
-        );
-    }
-    Button::new("page-empty-action", REFRESH)
-        .on_click(cx.listener(move |this, _, _, cx| this.retry(ix, cluster.clone(), cx)))
 }

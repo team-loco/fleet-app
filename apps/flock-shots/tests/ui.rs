@@ -922,16 +922,12 @@ fn lists_start_in_the_default_namespace_and_remember_the_pick_per_cluster_and_ki
 }
 
 #[test]
-fn every_page_state_renders_and_retry_or_refresh_reloads() -> anyhow::Result<()> {
+fn every_page_state_renders_under_the_filter_bar_and_retry_reloads() -> anyhow::Result<()> {
     use flock_shots::StateFixture;
     let states = [
         (StateFixture::Loading, "loading-skeleton", None),
         (StateFixture::Connecting, "connection-progress", None),
-        (
-            StateFixture::Empty,
-            "empty-state",
-            Some("page-empty-action"),
-        ),
+        (StateFixture::Empty, "empty-state-cluster", None),
         (StateFixture::Error, "error-state", Some("page-retry")),
     ];
     for (state, selector, action) in states {
@@ -939,6 +935,14 @@ fn every_page_state_renders_and_retry_or_refresh_reloads() -> anyhow::Result<()>
         assert!(
             ui.bounds(selector).is_some(),
             "{state:?} shows no {selector}"
+        );
+        assert!(
+            ui.bounds("resource-filter").is_some(),
+            "{state:?} hides the filter bar"
+        );
+        assert!(
+            ui.bounds("page-empty-action").is_none(),
+            "{state:?} offers a refresh"
         );
         if let Some(action) = action {
             ui.click(action)?;
@@ -949,6 +953,68 @@ fn every_page_state_renders_and_retry_or_refresh_reloads() -> anyhow::Result<()>
             assert!(ui.bounds("resources-Deployment-row-0").is_some());
         }
     }
+    Ok(())
+}
+
+fn namespace_without_deployments(ui: &Ui) -> anyhow::Result<usize> {
+    let state = ui.state();
+    let cluster = state
+        .location()
+        .cluster
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("no cluster"))?;
+    let detail = state
+        .snapshot
+        .detail(&cluster)
+        .ok_or_else(|| anyhow::anyhow!("no detail"))?;
+    let deployments = detail.resources(flock_core::ResourceKind::Deployment);
+    let mut names: std::collections::BTreeSet<String> =
+        detail.namespaces.iter().map(|n| n.name.clone()).collect();
+    names.extend(deployments.iter().map(|d| d.namespace.clone()));
+    names
+        .iter()
+        .position(|name| !deployments.iter().any(|d| &d.namespace == name))
+        .ok_or_else(|| anyhow::anyhow!("every namespace has deployments"))
+}
+
+#[test]
+fn a_namespace_without_rows_keeps_the_filter_bar_and_offers_all_namespaces() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Resources)?;
+    let ix = namespace_without_deployments(&ui)?;
+    ui.click("resource-namespace")?;
+    ui.click(selector(format!("resource-namespace-option-{}", ix + 1)))?;
+    assert!(ui.bounds("resource-filter").is_some());
+    assert!(ui.bounds("resource-namespace").is_some());
+    assert!(ui.bounds("empty-state-namespace").is_some());
+    assert!(ui.bounds("empty-state-cluster").is_none());
+    assert!(ui.bounds("empty-clear-filter").is_none());
+    ui.click("empty-show-all-namespaces")?;
+    assert!(ui.bounds("empty-state-namespace").is_none());
+    assert!(
+        ui.bounds(selector(format!("{DEPLOYMENTS}-row-0")))
+            .is_some()
+    );
+    assert_eq!(
+        picked(&ui, SAMPLE, "Deployment"),
+        Some(flock_core::settings::NamespaceSelection::All)
+    );
+    Ok(())
+}
+
+#[test]
+fn a_filter_that_hides_every_row_keeps_the_bar_and_clears_with_one_click() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Resources)?;
+    ui.press("/")?;
+    ui.type_text("nothing-is-called-this")?;
+    assert!(ui.bounds("resource-filter").is_some());
+    assert!(ui.bounds("empty-state-filter").is_some());
+    assert!(ui.bounds("empty-show-all-namespaces").is_none());
+    ui.click("empty-clear-filter")?;
+    assert!(ui.bounds("empty-state-filter").is_none());
+    assert!(
+        ui.bounds(selector(format!("{DEPLOYMENTS}-row-0")))
+            .is_some()
+    );
     Ok(())
 }
 

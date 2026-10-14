@@ -1,11 +1,12 @@
+use flock_core::emptiness::Noun;
 use flock_core::filter::StatusFilter;
-use flock_core::{ClusterId, Command, Counts, FluxAction, FluxObject, Page};
+use flock_core::{ClusterSummary, Command, Counts, FluxAction, FluxObject, Page};
 use gpui::{
-    App, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels, Render,
-    Styled, WeakEntity, Window, div, px,
+    AnyElement, App, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
+    Render, Styled, WeakEntity, Window, div, px,
 };
 
-use super::ScreenEvent;
+use super::{ListShape, ScreenEvent, empty_list};
 use crate::kit::{Column, FilterBar, FilterEvent, MenuItem, Table, TableEvent, chip_label};
 use crate::screens::new_tab_item;
 
@@ -17,6 +18,9 @@ const STATUS_WEIGHT: f32 = 2.;
 const STATUS_MIN: Pixels = px(300.);
 
 pub struct FluxListScreen {
+    cluster_name: String,
+    page: Page,
+    shown: usize,
     objects: Vec<FluxObject>,
     table: Entity<Table<FluxObject>>,
     filter: Entity<FilterBar>,
@@ -32,7 +36,6 @@ impl FluxListScreen {
                 .row_actions(move |object: &FluxObject| row_items(object, &screen))
                 .row_key(|o: &FluxObject| format!("{}/{}", o.key.namespace, o.key.name).into())
                 .type_ahead(|o: &FluxObject| o.key.name.clone().into())
-                .empty("No Flux objects match the filter.")
         });
         let filter = cx.new(|cx| FilterBar::new("flux-filter", window, cx));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
@@ -49,6 +52,9 @@ impl FluxListScreen {
         })
         .detach();
         Self {
+            cluster_name: String::new(),
+            page: Page::Kustomizations,
+            shown: 0,
             objects: Vec::new(),
             table,
             filter,
@@ -65,11 +71,15 @@ impl FluxListScreen {
 
     pub fn set(
         &mut self,
-        cluster: &ClusterId,
+        cluster: &ClusterSummary,
         page: Page,
         flux: &[FluxObject],
         cx: &mut Context<Self>,
     ) {
+        self.cluster_name.clone_from(&cluster.name);
+        let changed = self.page != page;
+        self.page = page;
+        let cluster = &cluster.id;
         let scope = format!("{}/{}", cluster.as_str(), page.label());
         self.table
             .update(cx, |table, cx| table.set_scope(scope, cx));
@@ -78,7 +88,7 @@ impl FluxListScreen {
             .filter(|o| &o.key.cluster == cluster && o.key.kind.page() == page)
             .cloned()
             .collect();
-        if self.objects == objects {
+        if !changed && self.objects == objects {
             return;
         }
         self.objects = objects;
@@ -114,6 +124,7 @@ impl FluxListScreen {
             .cloned()
             .collect();
         let shown = rows.len();
+        self.shown = shown;
         let total = self.objects.len();
         self.filter.update(cx, |bar, cx| {
             bar.set_chips(chips, cx);
@@ -129,13 +140,24 @@ impl FluxListScreen {
 }
 
 impl Render for FluxListScreen {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let shape = ListShape {
+            shown: self.shown,
+            total: self.objects.len(),
+            namespace: None,
+            noun: Noun::of(self.page),
+            cluster: &self.cluster_name,
+        };
+        let body: AnyElement = match empty_list(&shape, &self.filter, None, cx) {
+            Some(empty) => empty.into_any_element(),
+            None => self.table.clone().into_any_element(),
+        };
         div()
             .size_full()
             .flex()
             .flex_col()
             .child(self.filter.clone())
-            .child(div().flex_1().min_h_0().child(self.table.clone()))
+            .child(div().flex_1().min_h_0().child(body))
     }
 }
 
