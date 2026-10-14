@@ -105,6 +105,12 @@ gpui_platform::application()
   Content inside an animated width uses a fixed width and `overflow_hidden` so it clips instead of
   reflowing.
 
+- Tab strip motion (`shell/tab_motion.rs`): new tabs wrap in a clipped `max_w(TAB_GROW_MAX * t)` slot with
+  fading opacity (natural width is unknown, so a cap stands in); closed tabs stay as view-only ghosts
+  that shrink the same way and are dropped by a timer, never delaying the model; a reordered tab slides
+  in from its old side under a per-move animation id. `with_animation` clocks use wall time, so Ui tests
+  call `Ui::advance_clock`, which also sleeps and redraws. Reduce Motion skips ghosts and wrappers.
+
 ## Headless rendering and UI tests
 
 `apps/flock-shots` renders Flock without any window, so nothing takes focus. It is dev-only: the

@@ -5,6 +5,7 @@ mod pane;
 mod sidebar;
 mod status_bar;
 pub(crate) mod switcher;
+mod tab_motion;
 mod tabs;
 
 use flock_core::history::Location;

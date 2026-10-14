@@ -3,7 +3,9 @@ use flock_core::resources::EVENT_LIST;
 use flock_core::{ClusterId, ClusterSummary, Command, Page};
 use flock_shots::Ui;
 use flock_ui::Shell;
-use flock_ui::theme::{ICON_BUTTON, SIDEBAR, SPACE_3, TITLE_ROW, TRAFFIC_LIGHTS_INSET};
+use flock_ui::theme::{
+    ICON_BUTTON, SIDEBAR, SPACE_3, TAB_ENTER, TAB_LEAVE, TITLE_ROW, TRAFFIC_LIGHTS_INSET,
+};
 use gpui::Pixels;
 
 const EXPECTED_WIDTH: u32 = 2880;
@@ -1874,5 +1876,56 @@ fn returning_to_a_tab_renders_its_data_without_a_skeleton() -> anyhow::Result<()
         );
         assert!(ui.bounds(shown).is_some(), "{screen:?} lost {shown}");
     }
+    Ok(())
+}
+
+fn motion_on(ui: &mut Ui) {
+    ui.update_app(|cx| cx.set_reduce_motion(false));
+}
+
+fn tab_gap(ui: &mut Ui) -> Option<Pixels> {
+    let first = ui.bounds("tab-0")?;
+    let second = ui.bounds("tab-1")?;
+    Some(second.left() - first.right())
+}
+
+#[test]
+fn a_new_tab_grows_in_and_ends_beside_its_neighbour() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    motion_on(&mut ui);
+    ui.press_unsettled("cmd-t")?;
+    assert!(ui.bounds("tab-slot-1").is_some());
+    ui.advance_clock(TAB_ENTER)?;
+    let slot = ui.bounds("tab-slot-1").map(|bounds| bounds.size.width);
+    let natural = ui.bounds("tab-1").map(|bounds| bounds.size.width);
+    assert!(slot.is_some());
+    assert_eq!(slot, natural);
+    assert_eq!(tab_gap(&mut ui), Some(gpui::px(0.)));
+    Ok(())
+}
+
+#[test]
+fn a_closed_tab_leaves_the_model_at_once_and_shrinks_away() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.press("cmd-t")?;
+    motion_on(&mut ui);
+    ui.press_unsettled("cmd-w")?;
+    assert_eq!(tab_pages(&ui).len(), 1);
+    assert!(ui.bounds("tab-leaving-1").is_some());
+    ui.advance_clock(TAB_LEAVE)?;
+    assert!(ui.bounds("tab-leaving-1").is_none());
+    assert!(ui.bounds("tab-1").is_none());
+    Ok(())
+}
+
+#[test]
+fn reduce_motion_shows_the_final_strip_immediately() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.press_unsettled("cmd-t")?;
+    assert!(ui.bounds("tab-slot-1").is_none());
+    assert_eq!(tab_gap(&mut ui), Some(gpui::px(0.)));
+    ui.press_unsettled("cmd-w")?;
+    assert!(ui.bounds("tab-leaving-1").is_none());
+    assert!(ui.bounds("tab-1").is_none());
     Ok(())
 }

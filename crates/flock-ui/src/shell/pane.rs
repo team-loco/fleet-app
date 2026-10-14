@@ -77,6 +77,7 @@ pub(super) struct PaneScreens {
     pub(super) load: LoadClock,
     pub(super) strip: ScrollHandle,
     pub(super) shown: Option<TabId>,
+    pub(super) motion: super::tab_motion::StripMotion,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -131,6 +132,7 @@ impl PaneScreens {
             load: LoadClock::default(),
             strip: ScrollHandle::default(),
             shown: None,
+            motion: super::tab_motion::StripMotion::default(),
             _subscriptions: subscriptions,
         }
     }
