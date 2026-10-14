@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+#MISE description="Cut a release: bump the workspace version, commit, tag v<version> and push both"
+#USAGE arg "<version>" help="semver without the v, e.g. 0.2.0 or 0.3.0-beta.1"
+set -euo pipefail
+
+version="${usage_version:-${1:?version}}"
+semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$'
+if ! [[ "$version" =~ $semver ]]; then
+  echo "not a semver version: $version" >&2
+  exit 1
+fi
+tag="v$version"
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+if [ "$(git rev-parse --abbrev-ref HEAD)" != "main" ]; then
+  echo "releases are cut from main" >&2
+  exit 1
+fi
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "the working tree has uncommitted changes" >&2
+  exit 1
+fi
+git fetch --quiet --tags origin main
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+  echo "main is not at origin/main; pull or push first" >&2
+  exit 1
+fi
+if git rev-parse --quiet --verify "refs/tags/$tag" >/dev/null; then
+  echo "$tag already exists" >&2
+  exit 1
+fi
+if [ "$(grep -c '^version = "' Cargo.toml)" != "1" ]; then
+  echo "Cargo.toml must have exactly one workspace version line" >&2
+  exit 1
+fi
+current="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml)"
+if [ "$current" = "$version" ]; then
+  echo "the workspace is already at $version" >&2
+  exit 1
+fi
+sed -i '' "s/^version = \"$current\"$/version = \"$version\"/" Cargo.toml
+cargo update --workspace --quiet
+git commit --quiet -m "Release $tag" -- Cargo.toml Cargo.lock
+git tag -a "$tag" -m "Fleet $version"
+git push --quiet origin HEAD:main
+git push --quiet origin "$tag"
+echo "pushed $tag; the release workflow builds and publishes it"

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#MISE description="Checksum and sign an update zip, then verify it with the app's public key"
+#USAGE arg "<zip>" help="the zip from mise run package"
+set -euo pipefail
+
+zip="${usage_zip:-${1:?zip}}"
+root="$(git rev-parse --show-toplevel)"
+signer="$root/target/release/fleet-sign"
+if [ -z "${FLOCK_UPDATE_SIGNING_KEY:-}" ]; then
+  FLOCK_UPDATE_SIGNING_KEY="$(security find-generic-password -s dev.flock.app.update-signing -a team-loco -w)"
+fi
+export FLOCK_UPDATE_SIGNING_KEY
+"$signer" sign "$zip"
+unset FLOCK_UPDATE_SIGNING_KEY
+"$signer" verify "$zip"

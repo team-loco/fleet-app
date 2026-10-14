@@ -9,6 +9,7 @@ members = [
   "crates/fleet-kube",
   "crates/fleet-loco",
   "crates/fleet-ui",
+  "crates/fleet-update",
 ]
 
 [workspace.package]
@@ -27,12 +28,15 @@ fleet-flux = { path = "crates/fleet-flux" }
 fleet-kube = { path = "crates/fleet-kube" }
 fleet-loco = { path = "crates/fleet-loco" }
 fleet-ui = { path = "crates/fleet-ui" }
+fleet-update = { path = "crates/fleet-update" }
 
 anyhow = "1.0.104"
 async-channel = "2.5.0"
 clap = { version = "4.6.7", features = ["derive"] }
 dhat = "0.3.3"
+ed25519-dalek = "3.0.0"
 futures = "0.3.34"
+getrandom = "0.4.3"
 gpui = { package = "gpui-pre", version = "=0.3.9" }
 gpui-apple = { package = "gpui-pre-apple", version = "=0.3.9", features = ["font-kit"] }
 gpui-component = "0.7.3"
