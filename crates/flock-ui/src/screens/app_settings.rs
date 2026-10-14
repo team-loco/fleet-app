@@ -111,6 +111,7 @@ impl Slot {
 }
 
 pub struct AppSettingsScreen {
+    pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
     hex: [Entity<TextFieldState>; 2],
     invalid: [bool; 2],
     _settings: Subscription,
@@ -146,6 +147,7 @@ impl AppSettingsScreen {
             })
         });
         Self {
+            navigation: None,
             hex,
             invalid: [false; 2],
             _settings: observe,
@@ -248,7 +250,7 @@ impl AppSettingsScreen {
             .into_any_element()
     }
 
-    fn header(palette: &Palette) -> impl IntoElement {
+    fn header(&self, palette: &Palette) -> impl IntoElement {
         div()
             .flex()
             .flex_none()
@@ -258,6 +260,7 @@ impl AppSettingsScreen {
             .border_b(RULE)
             .border_color(palette.line)
             .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
+            .children(self.navigation.clone())
             .child(
                 div()
                     .text_size(TEXT_TITLE)
@@ -581,7 +584,7 @@ impl Render for AppSettingsScreen {
             .flex()
             .flex_col()
             .size_full()
-            .child(Self::header(&palette))
+            .child(self.header(&palette))
             .child(
                 div()
                     .id("app-settings")

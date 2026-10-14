@@ -17,6 +17,7 @@ pub struct PageHeader {
     mono: bool,
     status: Option<(Status, SharedString)>,
     actions: Vec<AnyElement>,
+    leading: Option<AnyElement>,
     sentence: Option<AnyElement>,
     meta: Option<AnyElement>,
     footer: Option<AnyElement>,
@@ -29,10 +30,16 @@ impl PageHeader {
             mono: false,
             status: None,
             actions: Vec::new(),
+            leading: None,
             sentence: None,
             meta: None,
             footer: None,
         }
+    }
+
+    pub fn leading(mut self, element: Option<impl IntoElement>) -> Self {
+        self.leading = element.map(IntoElement::into_any_element);
+        self
     }
 
     pub fn mono(mut self) -> Self {
@@ -80,6 +87,7 @@ impl RenderOnce for PageHeader {
             .flex()
             .items_center()
             .gap(SPACE_5)
+            .children(self.leading)
             .child(title)
             .when_some(self.status, |row, (status, label)| {
                 row.child(
@@ -159,6 +167,7 @@ pub struct PageTitle {
     title: SharedString,
     detail: Option<SharedString>,
     end: Vec<AnyElement>,
+    leading: Option<AnyElement>,
 }
 
 impl PageTitle {
@@ -167,7 +176,13 @@ impl PageTitle {
             title: title.into(),
             detail: None,
             end: Vec::new(),
+            leading: None,
         }
+    }
+
+    pub fn leading(mut self, element: Option<impl IntoElement>) -> Self {
+        self.leading = element.map(IntoElement::into_any_element);
+        self
     }
 
     pub fn detail(mut self, detail: impl Into<SharedString>) -> Self {
@@ -194,6 +209,7 @@ impl RenderOnce for PageTitle {
             .border_b(RULE)
             .border_color(palette.line)
             .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
+            .children(self.leading)
             .child(
                 div()
                     .flex_none()

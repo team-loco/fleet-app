@@ -32,9 +32,16 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let tab = self.state.panes().panes()[ix].active();
+        self.screens(ix)
+            .navigation
+            .clone()
+            .update(cx, |navigation, cx| {
+                navigation.set_history(ix, tab, &self.state.snapshot, window, cx);
+            });
         let location = self.location_at(ix).clone();
         if self.loaded && !self.state.available(&location) {
-            return self.unavailable(&location, cx);
+            return self.unavailable(ix, &location, cx);
         }
         #[cfg(feature = "loco")]
         if crate::screens::loco::owns(location.page) {
@@ -146,6 +153,8 @@ impl Shell {
             return Some(screen);
         }
         let screen = cx.new(|cx| WorkloadScreen::new(target, window, cx));
+        let navigation = self.screens(ix).navigation.clone();
+        screen.update(cx, |screen, _| screen.navigation = Some(navigation));
         let subscription = cx.subscribe(&screen, move |shell, _, command: &Command, cx| {
             shell.pane_command(pane, command.clone(), cx);
         });
@@ -187,6 +196,8 @@ impl Shell {
             return Some(screen);
         }
         let screen = cx.new(|cx| LogsScreen::new(pod, container, window, cx));
+        let navigation = self.screens(ix).navigation.clone();
+        screen.update(cx, |screen, _| screen.navigation = Some(navigation));
         let subscription = cx.subscribe(&screen, move |shell, _, command: &Command, cx| {
             shell.pane_command(pane, command.clone(), cx);
         });
@@ -198,7 +209,7 @@ impl Shell {
         Some(screen)
     }
 
-    fn unavailable(&self, location: &Location, cx: &mut Context<Self>) -> AnyElement {
+    fn unavailable(&self, ix: usize, location: &Location, cx: &mut Context<Self>) -> AnyElement {
         let palette = *cx.palette();
         let name = location
             .cluster
@@ -216,6 +227,10 @@ impl Shell {
             .min_w_0()
             .h_full()
             .bg(palette.editor)
+            .child(
+                crate::kit::PageTitle::new(location.page.title())
+                    .leading(Some(self.screens(ix).navigation.clone())),
+            )
             .child(EmptyState::new(sentence).action(action))
             .into_any_element()
     }
@@ -279,6 +294,7 @@ impl Shell {
             .border_b(RULE)
             .border_color(palette.line)
             .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
+            .child(screens.navigation.clone())
             .child(
                 div()
                     .text_size(TEXT_TITLE)

@@ -16,6 +16,7 @@ const WRAP: &str = "wrap";
 const META_SEPARATOR: &str = " · ";
 
 pub struct LogsScreen {
+    pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
     pod: ResourceRef,
     container: String,
     logs: Entity<LogView>,
@@ -44,6 +45,7 @@ impl LogsScreen {
             }
         });
         Self {
+            navigation: None,
             pod,
             container,
             logs,
@@ -125,8 +127,14 @@ impl Render for LogsScreen {
         if self.compact {
             return div()
                 .size_full()
+                .flex()
+                .flex_col()
                 .bg(palette.editor)
-                .child(self.logs.clone());
+                .child(
+                    crate::kit::PageTitle::new(self.pod.name.clone())
+                        .leading(self.navigation.clone()),
+                )
+                .child(div().flex_1().min_h_0().child(self.logs.clone()));
         }
         let facts = [
             self.container.as_str(),
@@ -134,7 +142,10 @@ impl Render for LogsScreen {
             self.pod.cluster.as_str(),
         ];
         let meta = MetaLine::new(facts.join(META_SEPARATOR));
-        let header = PageHeader::new(self.pod.name.clone()).mono().meta(meta);
+        let header = PageHeader::new(self.pod.name.clone())
+            .leading(self.navigation.clone())
+            .mono()
+            .meta(meta);
         div()
             .size_full()
             .flex()

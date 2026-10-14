@@ -94,6 +94,14 @@ impl Tab {
         &self.location
     }
 
+    pub const fn history(&self) -> &History {
+        &self.history
+    }
+
+    pub fn can_go_forward(&self) -> bool {
+        self.history.can_go_forward()
+    }
+
     pub fn can_go_back(&self) -> bool {
         self.history.can_go_back()
     }

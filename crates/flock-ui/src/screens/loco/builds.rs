@@ -32,6 +32,7 @@ const CANCEL: &str = "Cancel build";
 pub struct BuildsScreen {
     cluster_name: String,
     shown: usize,
+    pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
     builds: Builds,
     selected: Option<ResourceRef>,
     shown_log: Vec<BuildLogLine>,
@@ -65,6 +66,7 @@ impl BuildsScreen {
         Self {
             cluster_name: String::new(),
             shown: 0,
+            navigation: None,
             builds: Builds::default(),
             selected: None,
             shown_log: Vec::new(),
@@ -254,7 +256,11 @@ impl Render for BuildsScreen {
             .flex()
             .flex_col()
             .size_full()
-            .child(PageTitle::new(TITLE).detail(self.builds.subtitle()))
+            .child(
+                PageTitle::new(TITLE)
+                    .leading(self.navigation.clone())
+                    .detail(self.builds.subtitle()),
+            )
             .child(self.filter.clone())
             .child(
                 div()

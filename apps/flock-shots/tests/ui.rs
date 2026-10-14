@@ -1996,6 +1996,34 @@ fn a_new_tab_grows_in_and_ends_beside_its_neighbour() -> anyhow::Result<()> {
 }
 
 #[test]
+fn history_buttons_walk_and_disable_at_each_end() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Flock)?;
+    let start = ui.state().location().clone();
+    assert!(!ui.state().panes().active().can_go_back());
+    assert!(!ui.state().panes().active().can_go_forward());
+    ui.right_click("pane-0-back")?;
+    assert!(ui.bounds("history-menu-item-0").is_none());
+    ui.click("pane-0-back")?;
+    ui.click("pane-0-forward")?;
+    assert_eq!(ui.state().location(), &start);
+    ui.click("nav-gitops")?;
+    ui.click("nav-changes")?;
+    ui.click("pane-0-back")?;
+    assert_eq!(ui.state().location().page, Page::GitOps);
+    ui.click("pane-0-back")?;
+    assert_eq!(ui.state().location(), &start);
+    ui.click("pane-0-back")?;
+    assert_eq!(ui.state().location(), &start);
+    ui.click("pane-0-forward")?;
+    assert_eq!(ui.state().location().page, Page::GitOps);
+    ui.click("pane-0-forward")?;
+    assert_eq!(ui.state().location().page, Page::Changes);
+    ui.click("pane-0-forward")?;
+    assert_eq!(ui.state().location().page, Page::Changes);
+    Ok(())
+}
+
+#[test]
 fn a_closed_tab_leaves_the_model_at_once_and_shrinks_away() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     ui.press("cmd-t")?;
@@ -2010,6 +2038,24 @@ fn a_closed_tab_leaves_the_model_at_once_and_shrinks_away() -> anyhow::Result<()
 }
 
 #[test]
+fn history_menus_jump_in_both_directions_most_recent_first() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("nav-nodes")?;
+    ui.click("nav-pods")?;
+    ui.click("nav-events")?;
+    ui.right_click("pane-0-back")?;
+    ui.click("history-menu-item-1")?;
+    assert_eq!(ui.state().location().page, Page::Nodes);
+    ui.right_click("pane-0-forward")?;
+    ui.click("history-menu-item-1")?;
+    assert_eq!(ui.state().location().page, Page::Events);
+    ui.right_click("pane-0-back")?;
+    ui.press("down enter")?;
+    assert_eq!(ui.state().location().page, Page::Pods);
+    Ok(())
+}
+
+#[test]
 fn reduce_motion_shows_the_final_strip_immediately() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     ui.press_unsettled("cmd-t")?;
@@ -2018,6 +2064,49 @@ fn reduce_motion_shows_the_final_strip_immediately() -> anyhow::Result<()> {
     ui.press_unsettled("cmd-w")?;
     assert!(ui.bounds("tab-leaving-1").is_none());
     assert!(ui.bounds("tab-1").is_none());
+    Ok(())
+}
+
+#[test]
+fn split_history_controls_and_mouse_navigation_follow_the_pointer() -> anyhow::Result<()> {
+    use gpui::NavigationDirection::{Back, Forward};
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("nav-nodes")?;
+    ui.press("cmd-\\")?;
+    ui.click("nav-pods")?;
+    ui.click("pane-0-back")?;
+    assert_eq!(
+        ui.state().panes().panes()[0].active().location().page,
+        Page::ClusterOverview
+    );
+    assert_eq!(
+        ui.state().panes().panes()[1].active().location().page,
+        Page::Pods
+    );
+    ui.click("pane-1-back")?;
+    assert_eq!(
+        ui.state().panes().panes()[1].active().location().page,
+        Page::Nodes
+    );
+    ui.navigate("pane-0-forward", Forward)?;
+    assert_eq!(
+        ui.state().panes().panes()[0].active().location().page,
+        Page::Nodes
+    );
+    ui.navigate("pane-1-forward", Forward)?;
+    assert_eq!(
+        ui.state().panes().panes()[1].active().location().page,
+        Page::Pods
+    );
+    ui.navigate("pane-0-back", Back)?;
+    assert_eq!(
+        ui.state().panes().panes()[0].active().location().page,
+        Page::ClusterOverview
+    );
+    assert_eq!(
+        ui.state().panes().panes()[1].active().location().page,
+        Page::Pods
+    );
     Ok(())
 }
 
@@ -2056,6 +2145,27 @@ fn the_pods_dock_waits_for_a_pod_before_offering_log_controls() -> anyhow::Resul
     assert!(ui.bounds("pods-dock-empty").is_some());
     ui.click("empty-clear-filter")?;
     assert!(ui.bounds("pod-logs-follow").is_some());
+    Ok(())
+}
+
+#[test]
+fn history_buttons_follow_the_active_tab_and_clear_forward_on_a_new_visit() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("nav-nodes")?;
+    ui.press("cmd-t")?;
+    ui.click("nav-gitops")?;
+    ui.click("pane-0-back")?;
+    assert_eq!(ui.state().location().page, Page::Overview);
+    ui.click("tab-0")?;
+    ui.click("pane-0-back")?;
+    assert_eq!(ui.state().location().page, Page::ClusterOverview);
+    ui.click("nav-pods")?;
+    assert!(!ui.state().panes().active().can_go_forward());
+    ui.click("pane-0-forward")?;
+    assert_eq!(ui.state().location().page, Page::Pods);
+    ui.click("tab-1")?;
+    ui.click("pane-0-forward")?;
+    assert_eq!(ui.state().location().page, Page::GitOps);
     Ok(())
 }
 

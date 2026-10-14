@@ -58,6 +58,7 @@ gpui::actions!(
 );
 
 pub struct FluxObjectPage {
+    pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
     page: Option<FluxPage>,
     filter: InventoryFilter,
     yaml_open: bool,
@@ -120,6 +121,7 @@ impl FluxObjectPage {
             }),
         ];
         Self {
+            navigation: None,
             page: None,
             filter: InventoryFilter::All,
             yaml_open: false,
@@ -143,8 +145,14 @@ impl FluxObjectPage {
         self.compact = compact;
     }
 
-    fn compact_header(object: &FluxObject, open: &FullView, cx: &mut Context<Self>) -> AnyElement {
+    fn compact_header(
+        &self,
+        object: &FluxObject,
+        open: &FullView,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         PageHeader::new(object.key.name.clone())
+            .leading(self.navigation.clone())
             .mono()
             .status(object.status(), object.phase.label())
             .sentence(Self::sentence(object, cx))
@@ -359,6 +367,7 @@ impl FluxObjectPage {
                 })
         };
         PageHeader::new(object.key.name.clone())
+            .leading(self.navigation.clone())
             .mono()
             .status(object.status(), object.phase.label())
             .action(primary.primary())
@@ -657,13 +666,16 @@ impl Render for FluxObjectPage {
             window.focus(&self.focus, cx);
         }
         let compact = self.compact.clone();
+        let pending = self.page.is_none().then(|| {
+            crate::kit::PageTitle::new(Page::GitOps.title()).leading(self.navigation.clone())
+        });
         let content = self.page.clone().map(|page| {
             if let Some(open) = &compact {
                 return div()
                     .flex()
                     .flex_col()
                     .size_full()
-                    .child(Self::compact_header(&page.object, open, cx));
+                    .child(self.compact_header(&page.object, open, cx));
             }
             let aside = Self::aside(&page, &palette, cx);
             let aside = InspectorPane::new("flux-inspector", aside).width(ASIDE_WIDTH);
@@ -695,6 +707,9 @@ impl Render for FluxObjectPage {
             .h_full()
             .bg(palette.editor)
             .font_family(FONT_SANS)
+            .flex()
+            .flex_col()
+            .children(pending)
             .children(content)
     }
 }

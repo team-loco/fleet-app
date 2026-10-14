@@ -34,6 +34,7 @@ pub enum LocoEvent {
 }
 
 pub struct LocoScreens {
+    pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
     page: Page,
     loco: Option<LocoCluster>,
     applications: Entity<ApplicationsScreen>,
@@ -66,6 +67,7 @@ impl LocoScreens {
             }),
         ];
         Self {
+            navigation: None,
             page: Page::LocoApplications,
             loco: None,
             applications,
@@ -86,6 +88,22 @@ impl LocoScreens {
                 cx.emit(Command::SelectPage(Page::LocoApplications));
             }
         }
+    }
+
+    pub(crate) fn set_navigation(
+        &mut self,
+        navigation: Entity<crate::kit::HeaderNavigation>,
+        cx: &mut Context<Self>,
+    ) {
+        self.navigation = Some(navigation.clone());
+        self.applications
+            .update(cx, |screen, _| screen.navigation = Some(navigation.clone()));
+        self.builds
+            .update(cx, |screen, _| screen.navigation = Some(navigation.clone()));
+        self.platform
+            .update(cx, |screen, _| screen.navigation = Some(navigation.clone()));
+        self.routes
+            .update(cx, |screen, _| screen.navigation = Some(navigation));
     }
 
     pub fn set_context(
@@ -146,7 +164,7 @@ impl LocoScreens {
             .flex()
             .flex_col()
             .size_full()
-            .child(PageTitle::new(self.page.label()))
+            .child(PageTitle::new(self.page.label()).leading(self.navigation.clone()))
             .child(
                 div()
                     .px(SPACE_8)

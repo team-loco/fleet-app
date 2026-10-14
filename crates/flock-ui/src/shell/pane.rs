@@ -60,6 +60,7 @@ impl Drop for Scope {
 
 pub(super) struct PaneScreens {
     pub(super) pane: PaneId,
+    pub(super) navigation: Entity<crate::kit::HeaderNavigation>,
     pub(super) scope: Scope,
     pub(super) flock: Entity<FlockScreen>,
     pub(super) changes: Entity<ChangesScreen>,
@@ -98,11 +99,32 @@ impl PaneScreens {
         let app_settings = cx.new(|cx| AppSettingsScreen::new(window, cx));
         let pods = cx.new(|cx| PodsScreen::new(window, cx));
         let flux_object = cx.new(FluxObjectPage::new);
+        let navigation = cx.new(crate::kit::HeaderNavigation::new);
+        changes.update(cx, |screen, _| screen.navigation = Some(navigation.clone()));
+        compare.update(cx, |screen, _| screen.navigation = Some(navigation.clone()));
+        settings.update(cx, |screen, _| screen.navigation = Some(navigation.clone()));
+        app_settings.update(cx, |screen, _| screen.navigation = Some(navigation.clone()));
+        flux_object.update(cx, |screen, _| screen.navigation = Some(navigation.clone()));
+        #[cfg(feature = "loco")]
+        loco.update(cx, |screen, cx| {
+            screen.set_navigation(navigation.clone(), cx);
+        });
         let pages = ClusterPages::new(window, cx, move |shell: &mut Shell, event, cx| {
             shell.pane_screen_event(pane, event, cx);
         });
         #[cfg_attr(not(feature = "loco"), allow(unused_mut))]
         let mut subscriptions = vec![
+            cx.subscribe(
+                &navigation,
+                move |shell, _, jump: &crate::kit::HistoryJump, cx| {
+                    shell.focus_pane_id(pane, cx);
+                    if shell.state.panes().active().id() == jump.tab
+                        && shell.state.jump_history(jump.direction, jump.steps)
+                    {
+                        shell.show_active(cx);
+                    }
+                },
+            ),
             forward(pane, &flock, cx),
             forward(pane, &gitops, cx),
             forward(pane, &compare, cx),
@@ -115,6 +137,7 @@ impl PaneScreens {
         subscriptions.push(forward(pane, &loco, cx));
         Self {
             pane,
+            navigation,
             scope: Scope::new(commands),
             flock,
             changes,

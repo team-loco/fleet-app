@@ -4,7 +4,7 @@ use flock_core::compare::{Cell, Comparison, Field, SpecDiff};
 use flock_core::overview::plural;
 use flock_core::{ClusterId, Command, Page, ResourceRef, Snapshot, Status};
 use gpui::{
-    AnyElement, Context, EventEmitter, FontWeight, InteractiveElement as _, IntoElement,
+    AnyElement, Context, Entity, EventEmitter, FontWeight, InteractiveElement as _, IntoElement,
     MouseButton, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement as _,
     Styled, Window, div, prelude::FluentBuilder, px,
 };
@@ -30,6 +30,7 @@ const SEPARATOR: &str = " · ";
 const VERSUS: &str = " vs ";
 
 pub struct CompareScreen {
+    pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
     resource: Option<ResourceRef>,
     comparison: Option<Comparison>,
     confirm_on_target: bool,
@@ -41,6 +42,7 @@ impl EventEmitter<Command> for CompareScreen {}
 impl CompareScreen {
     pub fn new(_: &mut Context<Self>) -> Self {
         Self {
+            navigation: None,
             resource: None,
             comparison: None,
             confirm_on_target: true,
@@ -87,6 +89,7 @@ impl CompareScreen {
             .border_color(palette.line)
             .text_size(TEXT_BODY)
             .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
+            .children(self.navigation.clone())
             .child(
                 div()
                     .text_size(TEXT_TITLE)
