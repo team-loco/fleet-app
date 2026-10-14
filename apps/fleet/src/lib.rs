@@ -353,9 +353,6 @@ fn shell_view(
 ) -> AnyView {
     let initial = screen.commands(preset);
     let shell = cx.new(|cx| Shell::new(store, initial, window, cx));
-    if let Some(tabs) = screen.tabs(preset) {
-        shell.update(cx, |shell, cx| shell.restore_tabs(&tabs, cx));
-    }
     if let Screen::Command = screen {
         shell.update(cx, |shell, cx| shell.open_palette(SAMPLE_QUERY, window, cx));
     }

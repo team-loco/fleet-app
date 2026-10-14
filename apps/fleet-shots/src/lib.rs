@@ -76,6 +76,9 @@ fn view(
     let store = cx.new(|cx| Store::new(updates, commands, cx));
     let view = root_view(screen, preset, store, window, cx);
     let shell = view.clone().downcast::<Shell>().ok();
+    if let Some((shell, tabs)) = shell.as_ref().zip(screen.tabs(preset)) {
+        shell.update(cx, |shell, cx| shell.restore_tabs(&tabs, cx));
+    }
     (view, shell)
 }
 
@@ -367,6 +370,13 @@ impl Ui {
 
     pub fn read<R>(&self, read: impl FnOnce(&Shell, &App) -> R) -> R {
         self.cx.read_entity(&self.shell, read)
+    }
+
+    pub fn restore(&mut self, tabs: &fleet_core::tabs::SavedWindow) -> anyhow::Result<()> {
+        let shell = self.shell.clone();
+        self.cx
+            .update(|_, cx| shell.update(cx, |shell, cx| shell.restore_tabs(tabs, cx)));
+        self.settle()
     }
 
     pub fn bounds(&mut self, selector: &'static str) -> Option<Bounds<Pixels>> {

@@ -1248,3 +1248,26 @@ fn check_for_updates_from_the_menu_shows_checking_then_up_to_date() -> anyhow::R
     assert!(ui.bounds(updater::STATUS_ITEM).is_none());
     Ok(())
 }
+
+#[test]
+fn a_restored_tab_whose_cluster_is_gone_says_so() -> anyhow::Result<()> {
+    use fleet_core::history::Location;
+    use fleet_core::tabs::{SavedPane, SavedWindow};
+    let mut ui = Ui::open(Screen::Fleet)?;
+    let gone = Location::page_on(ClusterId::new("decommissioned"), Page::Pods);
+    let saved = SavedWindow {
+        panes: vec![SavedPane {
+            tabs: vec![Location::default(), gone.clone()],
+            active: 1,
+        }],
+        focused: 0,
+    };
+    ui.restore(&saved)?;
+    assert_eq!(ui.state().location(), &gone);
+    assert!(ui.bounds("cluster-unavailable").is_some());
+    assert!(ui.bounds("tab-1").is_some());
+    ui.click("tab-show-fleet")?;
+    assert_eq!(ui.state().location(), &Location::default());
+    assert!(ui.bounds("cluster-unavailable").is_none());
+    Ok(())
+}

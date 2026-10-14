@@ -162,3 +162,13 @@ Settled; change only with a new entry that says why.
     a bundle (`cargo run`) or sits in a folder Fleet cannot write (App Translocation, a read-only
     volume) links to the release page instead. Releases are arm64 only, assets
     `Flock-<version>-arm64.zip` with `.sha256` and `.sig`.
+27. **Tabs persist per window** (product owner): every window's panes and tabs (their locations,
+    not their history) are saved as `tabs.json` in the Fleet data dir with the same set-aside
+    handling as `settings.json` (`fleet_kube::tab_store::TabStore`, a toast names the kept file).
+    The UI keeps one entry per open window in open order (`fleet_ui::session`) and saves on every
+    tab change; closing a window drops its entry unless it was the last one, so quitting by closing
+    the last window or with ⌘Q restores everything. A plain launch reopens one window per saved
+    entry; `--demo`, `--screen` other than fleet and an empty file open the usual startup window.
+    A tab whose Flux object has not loaded yet waits for it, and a tab whose cluster is no longer
+    in Fleet says so and offers "Show all clusters". Unknown pages (a Loco tab read by a build
+    without Loco) are dropped one tab at a time instead of discarding the file.

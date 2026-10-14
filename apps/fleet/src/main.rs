@@ -9,6 +9,7 @@ use fleet::{
     bind_keys, bundled, menus, parse_object, root_view,
 };
 use fleet_core::Status;
+use fleet_core::tabs::SavedWindow;
 use fleet_core::{Backend, ClusterId, Command, Receiver, Sender, UpdaterRequest, UpdaterStatus};
 use fleet_demo::DemoBackend;
 use fleet_kube::LiveBackend;
@@ -16,6 +17,7 @@ use fleet_kube::app_settings::SettingsStore;
 use fleet_kube::discovery::DiscoverySources;
 use fleet_kube::settings::KubeSettings;
 use fleet_kube::store::ClusterStore;
+use fleet_kube::tab_store::TabStore;
 use fleet_ui::actions::{NewWindow, Quit};
 use fleet_ui::kit::{Toast, toast};
 use fleet_ui::theme::{Appearance, TRAFFIC_LIGHT_X, TRAFFIC_LIGHT_Y};
@@ -31,6 +33,13 @@ const MIN_WIDTH: f32 = 720.;
 const MIN_HEIGHT: f32 = 480.;
 const LOG_SNAPSHOTS_VAR: &str = "FLEET_LOG_SNAPSHOTS";
 const SETTINGS_SET_ASIDE: &str = "Settings could not be read";
+const TABS_SET_ASIDE: &str = "Open tabs could not be read";
+
+#[derive(Default)]
+struct Stores {
+    settings: Option<SettingsStore>,
+    tabs: Option<TabStore>,
+}
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 const BUNDLE_EXTENSION: &str = ".app";
@@ -87,6 +96,12 @@ fn main() -> anyhow::Result<()> {
     } else {
         dir.as_ref().ok().cloned()
     };
+    let tabs = prefs_dir
+        .as_ref()
+        .map(|dir| {
+            TabStore::open(dir).with_context(|| format!("reading open tabs in {}", dir.display()))
+        })
+        .transpose()?;
     let backend: Box<dyn Backend> = if args.demo {
         Box::new(DemoBackend)
     } else {
@@ -119,7 +134,7 @@ fn main() -> anyhow::Result<()> {
             let launched = launch(
                 cx,
                 forced,
-                settings,
+                Stores { settings, tabs },
                 self_update,
                 update_rx,
                 command_tx,
@@ -232,7 +247,7 @@ fn install_settings(store: SettingsStore, cx: &mut App) {
 fn launch(
     cx: &mut App,
     forced: Option<Appearance>,
-    settings: Option<SettingsStore>,
+    stores: Stores,
     self_update: Option<UpdaterChannels>,
     updates: Receiver<fleet_core::Update>,
     commands: Sender<Command>,
@@ -241,9 +256,13 @@ fn launch(
 ) -> anyhow::Result<()> {
     fleet_ui::init(forced, cx)?;
     cx.set_app_identity(APP_ID, APP_NAME);
-    if let Some(settings) = settings {
+    if let Some(settings) = stores.settings {
         install_settings(settings, cx);
     }
+    let restored = stores
+        .tabs
+        .map(|tabs| install_tabs(tabs, cx))
+        .unwrap_or_default();
     if let Some((requests, statuses)) = self_update {
         fleet_ui::updater::install(requests, statuses, cx);
     }
@@ -259,11 +278,35 @@ fn launch(
     let store = cx.new(|cx| Store::new(updates, commands, cx));
     let new_window_store = store.clone();
     cx.on_action(move |_: &NewWindow, cx| {
-        if let Err(error) = open_fleet_window(new_window_store.clone(), Vec::new(), cx) {
+        if let Err(error) = open_fleet_window(new_window_store.clone(), Vec::new(), None, cx) {
             tracing::error!(%error, "opening a Fleet window");
         }
     });
-    open_startup_window(store, screen, preset, cx)
+    if restored.is_empty() || !matches!(screen, Screen::Fleet) {
+        return open_startup_window(store, screen, preset, cx);
+    }
+    for saved in restored {
+        open_fleet_window(store.clone(), Vec::new(), Some(&saved), cx)?;
+    }
+    Ok(())
+}
+
+fn install_tabs(store: TabStore, cx: &mut App) -> Vec<SavedWindow> {
+    let set_aside = store.set_aside().map(|kept| kept.display().to_string());
+    let restored = store.session().windows.clone();
+    let store = Rc::new(RefCell::new(store));
+    let save: fleet_ui::session::Saver = Rc::new(move |session| {
+        store
+            .borrow_mut()
+            .save(session)
+            .map_err(|error| error.to_string())
+    });
+    fleet_ui::session::install(save, cx);
+    if let Some(kept) = set_aside {
+        let notice = Toast::new(Status::Warn, TABS_SET_ASIDE).detail(format!("Kept as {kept}"));
+        toast(notice, cx);
+    }
+    restored
 }
 
 fn window_options(cx: &App) -> WindowOptions {
@@ -305,7 +348,7 @@ fn open_startup_window(
 
 fn subscribe_windows(shell: &gpui::Entity<Shell>, store: gpui::Entity<Store>, cx: &mut App) {
     cx.subscribe(shell, move |_, request: &NewWindowRequest, cx| {
-        if let Err(error) = open_fleet_window(store.clone(), request.0.clone(), cx) {
+        if let Err(error) = open_fleet_window(store.clone(), request.0.clone(), None, cx) {
             tracing::error!(%error, "opening a Fleet window");
         }
     })
@@ -315,11 +358,15 @@ fn subscribe_windows(shell: &gpui::Entity<Shell>, store: gpui::Entity<Store>, cx
 fn open_fleet_window(
     store: gpui::Entity<Store>,
     initial: Vec<Command>,
+    restored: Option<&SavedWindow>,
     cx: &mut App,
 ) -> anyhow::Result<()> {
     let options = window_options(cx);
     cx.open_window(options, |window, cx| {
         let shell = cx.new(|cx| Shell::new(store.clone(), initial, window, cx));
+        if let Some(saved) = restored {
+            shell.update(cx, |shell, cx| shell.restore_tabs(saved, cx));
+        }
         subscribe_windows(&shell, store, cx);
         cx.new(|cx| Root::new(shell, window, cx))
     })
@@ -340,7 +387,7 @@ mod tests {
             launch(
                 cx,
                 Some(Appearance::Dark),
-                None,
+                Stores::default(),
                 None,
                 updates,
                 commands,

@@ -5,6 +5,7 @@ pub mod keymap;
 pub mod kit;
 pub mod prefs;
 pub mod screens;
+pub mod session;
 pub mod settings;
 mod shell;
 mod store;
