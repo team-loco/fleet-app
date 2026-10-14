@@ -86,3 +86,4 @@ Spec column points at `design/`.
 | HDR1 | one 32px title row with the traffic lights; collapsed sidebar hidden, lights and chevron lead the tab strip; singular node count (#165) | claude | header-traffic-lights | done |
 | SPLIT1 | split right: pane-owned screens and backend scopes, two panes, compact pane views (#77) | claude | split-panes | done (#170, split UI PR) |
 | SEL1 | selectable, copyable text: kit `Selectable`/`SelectableText` on the window text selection, ⌘C/⌘A, terminal drag-select (#127) | claude | selectable-text | done (#173, adoption PR) |
+| POL | Global shortcut focus recovery, selection without outlines, subtle skeletons, editable default namespace picker (#179–#182) | codex | polish-focus-skeleton | done |

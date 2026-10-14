@@ -153,6 +153,12 @@ select.read(cx).selected_index()
 select.update(cx, |s, cx| s.set_selected(ix, cx));   // e.g. when the edited object changes
 ```
 
+`.editable(window, cx)` adds a type-to-filter field and a “Use” row for free text. Arrow keys move
+through the filtered options and the free-text row; Enter saves, Esc cancels. `.placeholder("default")`
+labels an empty value. `set_value(value, cx)` selects a value, retaining it as an option when absent
+from the supplied list. Picks and free text both emit `SelectEvent::Changed`; read the value with
+`selected_label()`.
+
 Own popover (same look and keyboard as the action menu); arrow keys, Enter, Esc. Every kit popover
 surface (`popover::surface`) occludes what is under it, so hover and clicks never reach rows beneath an
 open menu, select or switcher. Options carry `{select}-option-{ix}` debug selectors. `.compact()` draws
@@ -255,7 +261,7 @@ bottom-right above the status bar and dismiss after `theme::TOAST_TIMEOUT` or on
 ## Table
 
 Generic over your row type, virtualised with `uniform_list`, sticky header, hover, selection
-(`sel` + `selline` outline), status-tinted rows, sortable headers (click cycles ↑ ↓ off), keyboard
+(`sel` fill), status-tinted rows, sortable headers (click cycles ↑ ↓ off), keyboard
 ↑ ↓ Enter.
 
 ```rust
@@ -283,8 +289,7 @@ Keyboard (in `kit::list_keys`, shared with the sidebar, switcher and palette): �
 PageUp / PageDown move the selection, Enter emits `Opened`, typed letters jump to the first row whose
 `.type_ahead(|row| name)` (or `row_key`, or the part of it after the last `/`) starts with them, and Esc
 dispatches `actions::CloseInspector` (open row menus take Esc first). The table is a tab stop;
-while it has focus the selected row's outline (or, with nothing selected, the table's) is drawn in the
-`focus` token.
+keyboard position is shown by the selected row fill, without a focus outline.
 
 Column options: `.fixed(px)`, `.flex(weight, min)`, `.end()`, `.center()`, `.mono()` (Plex Mono 12;
 rows are otherwise Sans 12.5), `.sortable(cmp)` / `.sort_by_key(key)`, `.highlight()` (text columns

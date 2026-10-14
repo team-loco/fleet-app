@@ -1,15 +1,16 @@
 use flock_core::Status;
 use gpui::{
-    AnimationExt, AnyElement, App, InteractiveElement, IntoElement, ParentElement, Pixels,
-    RenderOnce, SharedString, Styled, Window, div,
+    AnimationExt, AnyElement, App, Hsla, InteractiveElement, IntoElement, ParentElement, Pixels,
+    RenderOnce, SharedString, Styled, Window, div, linear_color_stop, linear_gradient,
 };
 
 use super::{Button, StatusText};
 use crate::theme::{
     self, ActiveTheme, CHART_HEIGHT, Palette, ROW_TABLE, RULE, SKELETON_CHART_WIDTH,
-    SKELETON_METER_HEIGHT, SKELETON_METER_WIDTH, SKELETON_NAME_WIDTH, SKELETON_NAMESPACE_WIDTH,
-    SKELETON_ROWS, SKELETON_SHIMMER, SKELETON_SHIMMER_OPACITY, SKELETON_SHIMMER_WIDTH,
-    SKELETON_STATUS_WIDTH, SKELETON_TITLE_WIDTH, SPACE_4, SPACE_5, SPACE_8, TEXT_LABEL, TEXT_TITLE,
+    SKELETON_GRADIENT_ANGLE, SKELETON_GRADIENT_END, SKELETON_GRADIENT_START, SKELETON_METER_HEIGHT,
+    SKELETON_METER_WIDTH, SKELETON_NAME_WIDTH, SKELETON_NAMESPACE_WIDTH, SKELETON_ROWS,
+    SKELETON_SHIMMER, SKELETON_SHIMMER_OPACITY, SKELETON_SHIMMER_WIDTH, SKELETON_STATUS_WIDTH,
+    SKELETON_TITLE_WIDTH, SPACE_4, SPACE_5, SPACE_8, TEXT_LABEL, TEXT_TITLE,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -35,6 +36,14 @@ impl Skeleton {
     }
 }
 
+fn shimmer_color(palette: &Palette) -> Hsla {
+    if palette.line.l > palette.panel.l {
+        palette.line
+    } else {
+        palette.panel
+    }
+}
+
 fn block(id: String, width: Pixels, height: Pixels, palette: &Palette, still: bool) -> AnyElement {
     let base = div()
         .relative()
@@ -42,17 +51,26 @@ fn block(id: String, width: Pixels, height: Pixels, palette: &Palette, still: bo
         .w(width)
         .h(height)
         .rounded(theme::RADIUS_SMALL)
-        .bg(palette.line);
+        .bg(palette.hover);
     if still {
         return base.into_any_element();
     }
     let travel = width + SKELETON_SHIMMER_WIDTH;
+    let shimmer = shimmer_color(palette);
+    let start = linear_color_stop(palette.hover, SKELETON_GRADIENT_START);
+    let end = linear_color_stop(shimmer, SKELETON_GRADIENT_END);
+    let fade_in = linear_gradient(SKELETON_GRADIENT_ANGLE, start, end);
+    let start = linear_color_stop(shimmer, SKELETON_GRADIENT_START);
+    let end = linear_color_stop(palette.hover, SKELETON_GRADIENT_END);
+    let fade_out = linear_gradient(SKELETON_GRADIENT_ANGLE, start, end);
     let shine = div()
         .absolute()
         .top_0()
         .h_full()
         .w(SKELETON_SHIMMER_WIDTH)
-        .bg(palette.line2)
+        .flex()
+        .child(div().h_full().flex_1().bg(fade_in))
+        .child(div().h_full().flex_1().bg(fade_out))
         .opacity(SKELETON_SHIMMER_OPACITY)
         .with_animation(
             id,
@@ -200,5 +218,35 @@ impl RenderOnce for ErrorState {
             .pt(SPACE_8)
             .child(StatusText::new(Status::Err, self.reason))
             .child(self.retry)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{highlight, theme::Appearance};
+    use flock_core::app_settings::Highlight;
+
+    const MAX_BLOCK_LIGHTNESS_GAP: f32 = 0.06;
+    const MAX_SHIMMER_LIGHTNESS_GAP: f32 = 0.05;
+
+    #[test]
+    fn skeletons_stay_close_to_the_surface_and_shimmer_never_darkens_them() {
+        for (appearance, base) in [
+            (Appearance::Dark, Palette::dark()),
+            (Appearance::Light, Palette::light()),
+        ] {
+            for primary in Highlight::PRESETS {
+                for secondary in Highlight::PRESETS {
+                    let palette = highlight::apply(base, appearance, primary, secondary);
+                    let shine = shimmer_color(&palette);
+                    assert!((palette.hover.l - palette.editor.l).abs() < MAX_BLOCK_LIGHTNESS_GAP);
+                    assert!(shine.l >= palette.hover.l);
+                    assert!(shine.l - palette.hover.l < MAX_SHIMMER_LIGHTNESS_GAP);
+                    assert_eq!(palette.hover, base.hover);
+                    assert_eq!(shine, shimmer_color(&base));
+                }
+            }
+        }
     }
 }

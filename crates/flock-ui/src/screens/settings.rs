@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use flock_core::settings::{
     ClusterAction, ClusterSettings, MetricsSource, format_labels, parse_labels, parse_namespace,
 };
@@ -11,8 +13,8 @@ use gpui::{
 };
 
 use crate::kit::{
-    ActionMenu, Button, Column, InputEvent, KeyValue, MenuItem, SectionLabel, StatusText, Table,
-    TableEvent, TextField, TextFieldState, Toggle,
+    ActionMenu, Button, Column, InputEvent, KeyValue, MenuItem, SectionLabel, Select, SelectEvent,
+    StatusText, Table, TableEvent, TextField, TextFieldState, Toggle,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, LINE_PROSE, PAGE_HEADER, Palette, ROW_CATALOG, RULE, SPACE_1, SPACE_2,
@@ -56,10 +58,11 @@ struct CatalogRow {
 pub struct SettingsScreen {
     clusters: Vec<ClusterSummary>,
     catalog: ClusterCatalog,
+    namespaces: BTreeMap<ClusterId, Vec<SharedString>>,
     selected: Option<ClusterId>,
     loaded: Option<ClusterId>,
     table: Entity<Table<CatalogRow>>,
-    namespace: Entity<TextFieldState>,
+    namespace: Entity<Select>,
     labels: Entity<TextFieldState>,
     metrics: Entity<TextFieldState>,
     menu: Entity<ActionMenu>,
@@ -82,8 +85,12 @@ impl SettingsScreen {
                 .inset(SPACE_8)
                 .row_key(|r: &CatalogRow| r.summary.id.to_string().into())
         });
-        let namespace =
-            cx.new(|cx| TextFieldState::new(window, cx).placeholder(NAMESPACE_PLACEHOLDER));
+        let namespace = cx.new(|cx| {
+            Select::new("default-namespace", Vec::new(), cx)
+                .mono()
+                .placeholder(NAMESPACE_PLACEHOLDER)
+                .editable(window, cx)
+        });
         let labels = cx.new(|cx| TextFieldState::new(window, cx).placeholder(LABELS_PLACEHOLDER));
         let metrics = cx
             .new(|cx| TextFieldState::new(window, cx).placeholder(MetricsSource::Auto.label(None)));
@@ -101,13 +108,10 @@ impl SettingsScreen {
                 };
                 this.selected = table.read(cx).row(ix).map(|r| r.summary.id.clone());
                 this.refresh_menu(cx);
+                this.refresh_namespaces(cx);
                 cx.notify();
             }),
-            cx.subscribe(&namespace, |this, _, event: &InputEvent, cx| {
-                if commits(event) {
-                    this.commit(cx);
-                }
-            }),
+            cx.subscribe(&namespace, |this, _, _: &SelectEvent, cx| this.commit(cx)),
             cx.subscribe(&labels, |this, _, event: &InputEvent, cx| {
                 if commits(event) {
                     this.commit(cx);
@@ -122,6 +126,7 @@ impl SettingsScreen {
         Self {
             clusters: Vec::new(),
             catalog: ClusterCatalog::default(),
+            namespaces: BTreeMap::new(),
             selected: None,
             loaded: None,
             table,
@@ -137,6 +142,18 @@ impl SettingsScreen {
     pub fn set_snapshot(&mut self, snapshot: &Snapshot, cx: &mut Context<Self>) {
         self.clusters.clone_from(&snapshot.clusters);
         self.catalog.clone_from(&snapshot.catalog);
+        self.namespaces = snapshot
+            .details
+            .iter()
+            .map(|(cluster, detail)| {
+                let options = detail
+                    .namespaces
+                    .iter()
+                    .map(|namespace| namespace.name.clone().into())
+                    .collect();
+                (cluster.clone(), options)
+            })
+            .collect();
         let rows: Vec<CatalogRow> = self
             .clusters
             .iter()
@@ -172,7 +189,33 @@ impl SettingsScreen {
             .and_then(|id| self.clusters.iter().position(|c| &c.id == id));
         self.table.update(cx, |table, cx| table.select(index, cx));
         self.refresh_menu(cx);
+        self.refresh_namespaces(cx);
         cx.notify();
+    }
+
+    fn refresh_namespaces(&self, cx: &mut Context<Self>) {
+        let options = self
+            .selected
+            .as_ref()
+            .and_then(|id| self.namespaces.get(id))
+            .cloned()
+            .unwrap_or_default();
+        let value = if self.loaded == self.selected {
+            self.namespace
+                .read(cx)
+                .selected_label()
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            self.settings()
+                .and_then(|settings| settings.preferences.default_namespace.clone())
+                .unwrap_or_default()
+                .into()
+        };
+        self.namespace.update(cx, |select, cx| {
+            select.set_options(options, cx);
+            select.set_value(value, cx);
+        });
     }
 
     fn summary(&self) -> Option<&ClusterSummary> {
@@ -212,7 +255,7 @@ impl SettingsScreen {
         let namespace = preferences.default_namespace.clone().unwrap_or_default();
         let labels = format_labels(&preferences.labels);
         self.namespace
-            .update(cx, |field, cx| field.set_value(namespace, window, cx));
+            .update(cx, |select, cx| select.set_value(namespace.into(), cx));
         self.labels
             .update(cx, |field, cx| field.set_value(labels, window, cx));
         let metrics = preferences.metrics.label(settings.prometheus.as_deref());
@@ -222,7 +265,12 @@ impl SettingsScreen {
 
     fn edited(&self, cx: &Context<Self>) -> Option<(ClusterId, Preferences)> {
         let settings = self.settings()?;
-        let namespace = self.namespace.read(cx).value();
+        let namespace = self
+            .namespace
+            .read(cx)
+            .selected_label()
+            .cloned()
+            .unwrap_or_default();
         let labels = self.labels.read(cx).value();
         let metrics = MetricsSource::parse(&self.metrics.read(cx).value())?;
         let preferences = Preferences {
@@ -405,7 +453,7 @@ impl SettingsScreen {
         );
         section(PREFERENCES, palette)
             .gap(SPACE_6)
-            .child(labelled(DEFAULT_NAMESPACE, TextField::new(&self.namespace)))
+            .child(labelled(DEFAULT_NAMESPACE, self.namespace.clone()))
             .child(labelled(METRICS_SOURCE, TextField::new(&self.metrics)))
             .child(confirm)
             .child(notify)
@@ -577,6 +625,97 @@ fn columns() -> Vec<Column<CatalogRow>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn summary(id: &str) -> ClusterSummary {
+        ClusterSummary {
+            id: ClusterId::new(id),
+            name: id.to_owned(),
+            status: Status::Ok,
+            state: String::new(),
+            distro: String::new(),
+            region: String::new(),
+            version: None,
+            nodes: None,
+            problems: flock_core::Counts::default(),
+            nav: BTreeMap::new(),
+            metrics: None,
+        }
+    }
+
+    fn detail(name: &str) -> flock_core::ClusterDetail {
+        let namespace = flock_core::cluster::Namespace {
+            name: name.to_owned(),
+            status: Status::Ok,
+            phase: String::new(),
+            pods: 0,
+            problems: flock_core::Counts::default(),
+            cpu: 0.,
+            memory: 0.,
+            age: std::time::Duration::ZERO,
+        };
+        flock_core::ClusterDetail {
+            namespaces: vec![namespace],
+            ..Default::default()
+        }
+    }
+
+    #[gpui::test]
+    fn namespace_options_follow_live_snapshots_and_the_selected_cluster(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(|cx| {
+            crate::init(Some(crate::theme::Appearance::Dark), cx)
+                .unwrap_or_else(|error| panic!("UI init: {error}"));
+        });
+        let window = cx.add_window(SettingsScreen::new);
+        let first = summary("first");
+        let second = summary("second");
+        let mut snapshot = Snapshot {
+            clusters: vec![first.clone(), second.clone()],
+            details: BTreeMap::from([
+                (first.id.clone(), detail("old")),
+                (second.id.clone(), detail("other")),
+            ]),
+            ..Default::default()
+        };
+        window
+            .update(cx, |screen, _, cx| {
+                screen.set_snapshot(&snapshot, cx);
+                screen.namespace.update(cx, |select, cx| {
+                    select.set_selected(0, cx);
+                    assert_eq!(
+                        select.selected_label().map(SharedString::as_ref),
+                        Some("old")
+                    );
+                    select.set_value("future".into(), cx);
+                });
+                screen.loaded = Some(first.id.clone());
+                snapshot.details.insert(first.id.clone(), detail("new"));
+                screen.set_snapshot(&snapshot, cx);
+                screen.namespace.update(cx, |select, cx| {
+                    assert_eq!(
+                        select.selected_label().map(SharedString::as_ref),
+                        Some("future")
+                    );
+                    select.set_selected(0, cx);
+                    assert_eq!(
+                        select.selected_label().map(SharedString::as_ref),
+                        Some("new")
+                    );
+                });
+                screen.open(&second.id, cx);
+                screen.namespace.update(cx, |select, cx| {
+                    select.set_selected(0, cx);
+                    assert_eq!(
+                        select.selected_label().map(SharedString::as_ref),
+                        Some("other")
+                    );
+                    select.set_selected(usize::MAX, cx);
+                    assert_eq!(select.selected_label().map(SharedString::as_ref), Some(""));
+                });
+            })
+            .unwrap_or_else(|error| panic!("test window: {error}"));
+    }
 
     #[test]
     fn only_return_and_blur_save_a_field() {
