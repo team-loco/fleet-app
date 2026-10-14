@@ -1,13 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::history::{History, Location};
-use crate::resource::short_kind;
 use crate::{ClusterId, Page, Snapshot, Status};
 
-pub const FLOCK_KIND: &str = "flock";
-pub const LOGS_KIND: &str = "logs";
-pub const COMPARE_KIND: &str = "compare";
-pub const CLUSTER_KIND: &str = "cluster";
+pub const FLOCK_KIND: &str = "Flock";
+pub const LOGS_KIND: &str = "Logs";
+pub const COMPARE_KIND: &str = "Compare";
+pub const CLUSTER_KIND: &str = "Cluster";
 pub const MAX_PANES: usize = 2;
 const PER_MILLE: u16 = 1000;
 const EVEN: u16 = PER_MILLE / 2;
@@ -577,7 +576,7 @@ pub fn title(location: &Location, snapshot: &Snapshot) -> TabTitle {
 fn describe(location: &Location, snapshot: &Snapshot) -> (Option<Status>, String, String) {
     if let Some(key) = &location.flux_object {
         let status = snapshot.flux_object(key).map(crate::FluxObject::status);
-        return (status, short_kind(key.kind.label()), key.name.clone());
+        return (status, key.kind.label().to_owned(), key.name.clone());
     }
     if location.page.is_flock() {
         return (
@@ -601,7 +600,7 @@ fn describe(location: &Location, snapshot: &Snapshot) -> (Option<Status>, String
             pod_suffix(&resource.name).to_owned(),
         ),
         Page::Compare => (None, COMPARE_KIND.to_owned(), resource.name.clone()),
-        _ => (status, short_kind(&resource.kind), resource.name.clone()),
+        _ => (status, resource.kind.clone(), resource.name.clone()),
     }
 }
 
@@ -622,7 +621,7 @@ fn page_kind(page: Page) -> String {
         .iter()
         .find(|section| section.pages.contains(&page))
         .and_then(|section| section.label)
-        .map_or_else(|| CLUSTER_KIND.to_owned(), str::to_lowercase)
+        .map_or_else(|| CLUSTER_KIND.to_owned(), str::to_owned)
 }
 
 pub fn pod_suffix(name: &str) -> &str {
@@ -1042,7 +1041,7 @@ mod tests {
         );
         assert_eq!(nodes.cluster.as_deref(), Some("a"));
         let deployments = title(&at(Page::Deployments), &snapshot);
-        assert_eq!(deployments.kind, "workloads");
+        assert_eq!(deployments.kind, "Workloads");
         let pod = crate::ResourceRef {
             cluster: ClusterId::new("a"),
             kind: "Pod".into(),
@@ -1070,7 +1069,7 @@ mod tests {
         let workload = title(&workload, &snapshot);
         assert_eq!(
             (workload.kind.as_str(), workload.label.as_str()),
-            ("deploy", "checkout-api")
+            ("Deployment", "checkout-api")
         );
     }
 }

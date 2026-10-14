@@ -43,14 +43,14 @@ run = "cargo fmt --all --check"
 description = "Clippy with warnings denied, with and without Loco"
 run = [
   "cargo clippy --workspace --all-targets -- -D warnings",
-  "cargo clippy --workspace --all-targets --features flock/loco -- -D warnings",
+  "cargo clippy --workspace --all-targets --features flock-shots/loco -- -D warnings",
 ]
 
 [tasks.test]
 description = "Run tests with and without Loco"
 run = [
   "cargo nextest run --workspace --no-tests=pass",
-  "cargo nextest run --workspace --no-tests=pass --features flock/loco",
+  "cargo nextest run --workspace --no-tests=pass --features flock-shots/loco",
 ]
 
 [tasks.typos]
