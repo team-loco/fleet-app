@@ -13,6 +13,7 @@ mod log;
 mod matrix;
 mod menu;
 mod modal;
+mod navigation;
 mod overlay;
 mod popover;
 mod presence;
@@ -44,6 +45,7 @@ pub use log::{LOG_CAPACITY, LOG_FILTER_PLACEHOLDER, Level, LogLine, LogView, str
 pub use matrix::{Matrix, MatrixCell};
 pub use menu::{ActionMenu, MenuItem};
 pub use modal::Modal;
+pub use navigation::{HeaderNavigation, HistoryJump};
 pub use overlay::{
     ConfirmDialog, Overlays, Toast, confirm, layer as overlay_layer, toast, toast_statuses,
     toast_titles,

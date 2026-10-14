@@ -56,6 +56,7 @@ struct CatalogRow {
 }
 
 pub struct SettingsScreen {
+    pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
     clusters: Vec<ClusterSummary>,
     catalog: ClusterCatalog,
     namespaces: BTreeMap<ClusterId, Vec<SharedString>>,
@@ -124,6 +125,7 @@ impl SettingsScreen {
             }),
         ];
         Self {
+            navigation: None,
             clusters: Vec::new(),
             catalog: ClusterCatalog::default(),
             namespaces: BTreeMap::new(),
@@ -313,6 +315,7 @@ impl SettingsScreen {
             .border_b(RULE)
             .border_color(palette.line)
             .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
+            .children(self.navigation.clone())
             .child(
                 div()
                     .text_size(TEXT_TITLE)

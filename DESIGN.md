@@ -21,3 +21,8 @@ Presence helpers and honor reduced motion.
 
 Verify changed flows with `flock_shots::Ui` and headless dark/light screenshots. Never open the GUI
 for automated verification.
+
+Every pane's page header leads with ghost SVG Back/Forward controls from the kit. Disabled controls
+keep their size, tooltips name the destination and shortcut, and right-click opens the active tab's
+history menu in nearest-first order. `HeaderNavigation` owns this behavior across shell and screen
+headers; the shell routes navigation to the owning pane.

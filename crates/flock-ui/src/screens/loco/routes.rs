@@ -34,6 +34,7 @@ const MISSING: &str = "—";
 pub struct RoutesScreen {
     cluster_name: String,
     shown: usize,
+    pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
     routes: Routes,
     filter: Entity<FilterBar>,
     listeners: Entity<Table<Listener>>,
@@ -72,6 +73,7 @@ impl RoutesScreen {
         Self {
             cluster_name: String::new(),
             shown: 0,
+            navigation: None,
             routes: Routes::default(),
             filter,
             listeners,
@@ -165,7 +167,11 @@ impl Render for RoutesScreen {
             .flex()
             .flex_col()
             .size_full()
-            .child(PageTitle::new(TITLE).detail(self.routes.subtitle()))
+            .child(
+                PageTitle::new(TITLE)
+                    .leading(self.navigation.clone())
+                    .detail(self.routes.subtitle()),
+            )
             .child(self.filter.clone())
             .child(
                 div()

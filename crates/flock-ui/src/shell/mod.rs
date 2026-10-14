@@ -669,8 +669,20 @@ impl Shell {
                 .flex_col()
                 .size_full()
                 .min_w_0()
-                .capture_any_mouse_down(cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                .capture_any_mouse_down(cx.listener(move |this, event: &MouseDownEvent, _, cx| {
                     this.focus_pane(ix, cx);
+                    if let MouseButton::Navigate(direction) = event.button {
+                        let direction = match direction {
+                            gpui::NavigationDirection::Back => flock_core::history::Direction::Back,
+                            gpui::NavigationDirection::Forward => {
+                                flock_core::history::Direction::Forward
+                            }
+                        };
+                        if this.state.jump_history(direction, 1) {
+                            this.show_active(cx);
+                        }
+                        cx.stop_propagation();
+                    }
                 }))
                 .child(strip)
                 .child(div().flex().flex_1().min_h_0().child(page));

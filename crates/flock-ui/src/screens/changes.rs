@@ -36,6 +36,7 @@ const NOT_TARGETED: &str = "·";
 const SEPARATOR: &str = " · ";
 
 pub struct ChangesScreen {
+    pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
     log: ChangesLog,
     selected: Option<String>,
     view: Option<ViewKind>,
@@ -87,6 +88,7 @@ impl ChangesScreen {
             }),
         ];
         Self {
+            navigation: None,
             log: ChangesLog::default(),
             selected: None,
             view: None,
@@ -162,6 +164,7 @@ impl ChangesScreen {
             .border_color(palette.line)
             .text_size(TEXT_BODY)
             .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
+            .children(self.navigation.clone())
             .child(
                 div()
                     .text_size(TEXT_TITLE)

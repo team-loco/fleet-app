@@ -2,15 +2,15 @@ use std::rc::Rc;
 
 use gpui::{
     App, Context, ElementId, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent,
-    MouseButton, ParentElement, Pixels, Point, Render, SharedString, StatefulInteractiveElement,
-    Styled, Window, div, prelude::FluentBuilder, relative,
+    MouseButton, ParentElement, Pixels, Point, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, relative,
 };
 
 use super::button::{Button, IconButton};
 use super::popover::{self, Dismissal, Step};
 use crate::theme::{
-    ActiveTheme, CONTROL, FONT_MONO, MENU_WIDTH, RADIUS, ROW_MENU_PAD_Y, SPACE_1, SPACE_4, SPACE_5,
-    TEXT_BODY, TEXT_LABEL, TEXT_SMALL,
+    ActiveTheme, CONTROL, FONT_MONO, MENU_MAX_HEIGHT, MENU_WIDTH, RADIUS, ROW_MENU_PAD_Y, SPACE_1,
+    SPACE_4, SPACE_5, TEXT_BODY, TEXT_LABEL, TEXT_SMALL,
 };
 
 const MORE: &str = "⋯";
@@ -86,6 +86,7 @@ pub struct ActionMenu {
     dismissal: Dismissal,
     focus: FocusHandle,
     restore: Option<FocusHandle>,
+    scroll: ScrollHandle,
 }
 
 impl ActionMenu {
@@ -102,6 +103,7 @@ impl ActionMenu {
             dismissal: Dismissal::default(),
             focus: cx.focus_handle(),
             restore: None,
+            scroll: ScrollHandle::default(),
         }
     }
 
@@ -196,6 +198,9 @@ impl ActionMenu {
             direction,
         );
         self.highlighted = next;
+        if let Some(ix) = next {
+            self.scroll.scroll_to_item(ix);
+        }
         cx.notify();
     }
 
@@ -258,6 +263,7 @@ impl ActionMenu {
         div()
             .debug_selector(|| format!("{}-item-{ix}", self.id))
             .id(ix)
+            .flex_none()
             .flex()
             .flex_col()
             .gap(SPACE_1 / 2.)
@@ -333,6 +339,9 @@ impl Render for ActionMenu {
                 .collect();
             let surface = popover::surface("menu", &palette)
                 .w(MENU_WIDTH)
+                .max_h(MENU_MAX_HEIGHT)
+                .overflow_y_scroll()
+                .track_scroll(&self.scroll)
                 .track_focus(&self.focus)
                 .on_key_down(cx.listener(Self::key_down))
                 .on_mouse_down_out(cx.listener(|this, _, window, cx| {

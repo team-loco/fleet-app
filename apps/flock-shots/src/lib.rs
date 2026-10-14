@@ -594,6 +594,19 @@ impl Ui {
         self.click_with(selector, MouseButton::Middle, SINGLE, Modifiers::none())
     }
 
+    pub fn navigate(
+        &mut self,
+        selector: &'static str,
+        direction: gpui::NavigationDirection,
+    ) -> anyhow::Result<()> {
+        self.click_with(
+            selector,
+            MouseButton::Navigate(direction),
+            SINGLE,
+            Modifiers::none(),
+        )
+    }
+
     pub fn cmd_click(&mut self, selector: &'static str) -> anyhow::Result<()> {
         self.click_with(selector, MouseButton::Left, SINGLE, Modifiers::command())
     }

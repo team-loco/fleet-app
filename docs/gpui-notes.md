@@ -174,3 +174,12 @@ shipped `flock` binary never links it (`mise run bundle:loco` builds `-p flock` 
 
 `clippy::pedantic` is on; `match_same_arms` is allowed because AGENTS.md wants one arm per meaning, and
 `return_self_not_must_use` because builder methods are everywhere.
+
+## History navigation input
+
+The pinned gpui macOS adapter registers `swipeWithEvent:` in `window.rs`. In `events.rs`, an ended
+`NSEventTypeSwipe` with positive horizontal delta becomes a Back `MouseButton::Navigate` mouse-down;
+a negative delta becomes Forward. Mouse buttons 4/5 (native indices 3/4) use the same event. The
+shell captures these events in the pane under the pointer, focuses that pane and walks its active
+tab's history. Horizontal scroll-wheel input stays scrolling. Headless interaction tests dispatch
+the translated navigation events; they do not synthesize native trackpad gestures.

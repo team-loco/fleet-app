@@ -44,6 +44,7 @@ struct PlacementRow {
 }
 
 pub struct PlatformScreen {
+    pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
     loco: LocoCluster,
     placements: Entity<Table<PlacementRow>>,
     components: Entity<Table<Component>>,
@@ -83,6 +84,7 @@ impl PlatformScreen {
             }
         });
         Self {
+            navigation: None,
             loco: LocoCluster::default(),
             placements,
             components,
@@ -244,7 +246,11 @@ impl Render for PlatformScreen {
             .flex()
             .flex_col()
             .size_full()
-            .child(PageTitle::new(TITLE).detail(self.loco.platform.subtitle()))
+            .child(
+                PageTitle::new(TITLE)
+                    .leading(self.navigation.clone())
+                    .detail(self.loco.platform.subtitle()),
+            )
             .child(
                 div()
                     .id("loco-platform")

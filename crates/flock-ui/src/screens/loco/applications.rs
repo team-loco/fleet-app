@@ -57,6 +57,7 @@ impl AppRow {
 pub struct ApplicationsScreen {
     cluster_name: String,
     shown: usize,
+    pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
     applications: Applications,
     filter: Entity<FilterBar>,
     selected: Option<ResourceRef>,
@@ -130,6 +131,7 @@ impl ApplicationsScreen {
         Self {
             cluster_name: String::new(),
             shown: 0,
+            navigation: None,
             applications: Applications::default(),
             filter,
             selected: None,
@@ -256,7 +258,9 @@ impl ApplicationsScreen {
     }
 
     fn header(&self) -> impl IntoElement {
-        PageTitle::new(TITLE).detail(self.applications.total.to_string())
+        PageTitle::new(TITLE)
+            .leading(self.navigation.clone())
+            .detail(self.applications.total.to_string())
     }
 
     fn detail(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {

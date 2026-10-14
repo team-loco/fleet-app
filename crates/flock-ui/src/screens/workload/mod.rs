@@ -93,6 +93,7 @@ const YAML_NOTE: &str = "read-only";
 const YAML_INSPECTOR_WIDTH: Pixels = px(480.);
 
 pub struct WorkloadScreen {
+    pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
     target: ResourceRef,
     workload: Option<Workload>,
     unavailable: bool,
@@ -169,6 +170,7 @@ impl WorkloadScreen {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         Self {
+            navigation: None,
             target,
             workload: None,
             unavailable: false,
@@ -216,6 +218,7 @@ impl WorkloadScreen {
             .text_color(palette.mute)
             .child(workload.target.cluster.to_string());
         let header = PageHeader::new(workload.target.name.clone())
+            .leading(self.navigation.clone())
             .mono()
             .status(workload.status(), workload.ready_label())
             .action(cluster)
@@ -403,6 +406,7 @@ impl WorkloadScreen {
     fn header(&self, workload: &Workload, cx: &mut Context<Self>) -> impl IntoElement {
         let meta = Self::meta(workload, cx);
         PageHeader::new(workload.target.name.clone())
+            .leading(self.navigation.clone())
             .mono()
             .status(workload.status(), workload.ready_label())
             .action(self.menu.clone())
@@ -1008,6 +1012,9 @@ impl Render for WorkloadScreen {
             .flex_col()
             .bg(palette.editor);
         let Some(workload) = self.workload.clone() else {
+            let header = crate::kit::PageTitle::new(self.target.name.clone())
+                .leading(self.navigation.clone());
+            let root = root.child(header);
             if !self.unavailable {
                 return root.child(Skeleton::blocks());
             }

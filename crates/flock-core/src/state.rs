@@ -194,6 +194,15 @@ impl AppState {
         self.panes.add(Location::default())
     }
 
+    pub fn jump_history(&mut self, direction: crate::history::Direction, steps: usize) -> bool {
+        let tab = self.panes.active_mut();
+        let Some(target) = tab.history_mut().jump(direction, steps) else {
+            return false;
+        };
+        *tab.location_mut() = target;
+        true
+    }
+
     pub fn back(&mut self) -> bool {
         let tab = self.panes.active_mut();
         let Some(target) = tab.history_mut().back() else {

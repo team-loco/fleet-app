@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{ClusterId, Command, FluxKey, Page, ResourceRef, WorkloadKind};
+use crate::{ClusterId, Command, FluxKey, Page, ResourceRef, Snapshot, WorkloadKind};
 
 pub const HISTORY_LIMIT: usize = 50;
 
@@ -37,6 +37,32 @@ impl Location {
         Self {
             cluster: Some(cluster),
             ..Self::flock(page)
+        }
+    }
+
+    pub fn history_label(&self, snapshot: &Snapshot) -> String {
+        let subject = match (&self.resource, &self.flux_object) {
+            (Some(resource), _) => match &resource.namespace {
+                Some(namespace) => format!("{namespace}/{}", resource.name),
+                None => resource.name.clone(),
+            },
+            (None, Some(key)) => format!("{}/{}", key.namespace, key.name),
+            (None, None) => self.page.label().to_owned(),
+        };
+        let subject = if self.page == Page::Logs {
+            let container = self.container.as_deref().unwrap_or_default();
+            format!("Logs · {subject} · {container}")
+        } else if self.page == Page::Compare {
+            format!("Compare · {subject}")
+        } else {
+            subject
+        };
+        match &self.cluster {
+            Some(cluster) => {
+                let name = crate::tabs::cluster_name(cluster, snapshot);
+                format!("{subject} · {name}")
+            }
+            None => format!("{subject} · Flock"),
         }
     }
 
@@ -77,6 +103,12 @@ impl Location {
             None => vec![Command::SelectPage(self.page)],
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Direction {
+    Back,
+    Forward,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -121,8 +153,34 @@ impl History {
         Some(target)
     }
 
+    pub fn entries(&self, direction: Direction) -> impl ExactSizeIterator<Item = &Location> {
+        let stack = match direction {
+            Direction::Back => &self.back,
+            Direction::Forward => &self.forward,
+        };
+        stack.iter().rev()
+    }
+
+    pub fn jump(&mut self, direction: Direction, steps: usize) -> Option<Location> {
+        if steps == 0 || steps > self.entries(direction).len() {
+            return None;
+        }
+        let mut target = None;
+        for _ in 0..steps {
+            target = match direction {
+                Direction::Back => self.back(),
+                Direction::Forward => self.forward(),
+            };
+        }
+        target
+    }
+
     pub fn current(&self) -> Option<&Location> {
         self.current.as_ref()
+    }
+
+    pub fn can_go_forward(&self) -> bool {
+        !self.forward.is_empty()
     }
 
     pub fn can_go_back(&self) -> bool {
@@ -144,6 +202,92 @@ mod tests {
             cluster: (!page.is_flock()).then(|| ClusterId::new("a")),
             ..Location::flock(page)
         }
+    }
+
+    #[test]
+    fn history_entries_and_jumps_preserve_the_opposite_stack() {
+        let mut history = History::starting_at(page(Page::Overview));
+        for p in [Page::Nodes, Page::Pods, Page::Events] {
+            history.visit(page(p));
+        }
+        let entries: Vec<_> = history
+            .entries(Direction::Back)
+            .map(|entry| entry.page)
+            .collect();
+        assert_eq!(entries, [Page::Pods, Page::Nodes, Page::Overview]);
+        let unchanged = history.clone();
+        assert_eq!(history.jump(Direction::Back, 0), None);
+        assert_eq!(history.jump(Direction::Back, HISTORY_LIMIT), None);
+        assert_eq!(history, unchanged);
+        assert_eq!(history.jump(Direction::Back, 2), Some(page(Page::Nodes)));
+        assert!(history.can_go_forward());
+        let entries: Vec<_> = history
+            .entries(Direction::Forward)
+            .map(|entry| entry.page)
+            .collect();
+        assert_eq!(entries, [Page::Pods, Page::Events]);
+        assert_eq!(
+            history.jump(Direction::Forward, 2),
+            Some(page(Page::Events))
+        );
+        history.back();
+        history.visit(page(Page::Namespaces));
+        assert_eq!(history.entries(Direction::Forward).len(), 0);
+        assert!(!history.can_go_forward());
+    }
+
+    #[test]
+    fn history_labels_identify_pages_objects_logs_and_missing_clusters() {
+        let snapshot = Snapshot::default();
+        assert_eq!(
+            Location::default().history_label(&snapshot),
+            "Overview · Flock"
+        );
+        assert_eq!(page(Page::Nodes).history_label(&snapshot), "Nodes · a");
+        let resource = ResourceRef {
+            cluster: ClusterId::new("a"),
+            kind: "Pod".into(),
+            namespace: Some("shop".into()),
+            name: "cart-abc".into(),
+        };
+        let mut location = Location {
+            resource: Some(resource),
+            ..page(Page::Pods)
+        };
+        assert_eq!(location.history_label(&snapshot), "shop/cart-abc · a");
+        location.page = Page::Logs;
+        location.container = Some("api".into());
+        assert_eq!(
+            location.history_label(&snapshot),
+            "Logs · shop/cart-abc · api · a"
+        );
+        location.page = Page::Compare;
+        assert_eq!(
+            location.history_label(&snapshot),
+            "Compare · shop/cart-abc · a"
+        );
+        location.resource = None;
+        location.flux_object = Some(FluxKey {
+            cluster: ClusterId::new("a"),
+            kind: crate::FluxKind::Kustomization,
+            namespace: "flux-system".into(),
+            name: "infra".into(),
+        });
+        location.page = Page::GitOps;
+        assert_eq!(location.history_label(&snapshot), "flux-system/infra · a");
+    }
+
+    #[test]
+    fn history_labels_use_the_clusters_display_name() {
+        let mut snapshot = Snapshot::default();
+        let mut cluster =
+            crate::flock::tests::cluster("a", crate::Status::Ok, crate::Counts::default());
+        cluster.name = "prod-us-east".into();
+        snapshot.clusters.push(cluster);
+        assert_eq!(
+            page(Page::Nodes).history_label(&snapshot),
+            "Nodes · prod-us-east"
+        );
     }
 
     #[test]

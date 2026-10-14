@@ -554,3 +554,14 @@ hides them (`No Deployments in namespace <ns>`, `6 Deployments in other namespac
 A page still pending after `flock_core::watch::WATCH_SYNC_TIMEOUT` becomes an error naming the step
 it stalled on. Render the states headlessly with `mise run shot -- resources dark --state loading`
 (also `connecting`, `empty`, `error`); `Ui::with_state` drives them in interaction tests.
+
+## Pane history controls
+
+`HeaderNavigation` renders ghost SVG Back and Forward `IconButton`s before the page title. The
+shell supplies the pane's active `Tab` and snapshot; destinations use `Location::history_label`.
+An empty history direction disables its button without changing geometry. Enabled tooltips name
+the destination and ⌘[ or ⌘]. Right-click opens the shared `ActionMenu` in nearest-first order;
+choosing a row emits `HistoryJump` with the owning tab, direction and step count. The shell focuses
+that pane and restores its location through the existing navigation replay. Changing the active
+tab or history closes an open menu. `PageHeader::leading` and `PageTitle::leading` host the controls
+in screen-owned headers; shell-owned headers mount the same entity directly.

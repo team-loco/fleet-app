@@ -251,6 +251,7 @@ pub struct IconButton {
     tooltip: SharedString,
     bordered: bool,
     selected: bool,
+    disabled: bool,
     on_click: Option<ClickHandler>,
 }
 
@@ -282,8 +283,14 @@ impl IconButton {
             tooltip: tooltip.into(),
             bordered: false,
             selected: false,
+            disabled: false,
             on_click: None,
         }
+    }
+
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
     }
 
     pub fn bordered(mut self) -> Self {
@@ -332,23 +339,27 @@ impl RenderOnce for IconButton {
             .w(width)
             .h(height)
             .rounded(RADIUS)
-            .cursor_pointer()
+            .when(!self.disabled, Styled::cursor_pointer)
+            .when(self.disabled, |button| button.opacity(DISABLED_OPACITY))
             .text_size(TEXT_UI)
             .text_color(palette.fg2)
             .when(self.bordered, |button| {
                 button.border(RULE).border_color(palette.line2)
             })
             .when(self.selected, |button| button.bg(palette.sel))
-            .when(!self.selected, |button| {
+            .when(!self.selected && !self.disabled, |button| {
                 button.hover(move |style| style.bg(hover))
             })
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .when(!self.selected, |button| {
                 button.tooltip(Tooltip::text(self.tooltip))
             })
-            .when_some(self.on_click, |button, handler| {
-                button.on_click(move |event, window, cx| handler(event, window, cx))
-            })
+            .when_some(
+                self.on_click.filter(|_| !self.disabled),
+                |button, handler| {
+                    button.on_click(move |event, window, cx| handler(event, window, cx))
+                },
+            )
             .child(content)
     }
 }
