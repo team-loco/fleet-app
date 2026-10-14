@@ -14,15 +14,16 @@ use crate::kit::{
     Segmented, Select, SelectEvent, Table, TableEvent, Tooltip,
 };
 use crate::theme::{
-    ActiveTheme, FONT_MONO, PAGE_HEADER, Palette, ROW_COMMIT, ROW_ROLLOUT, RULE, SPACE_1, SPACE_2,
-    SPACE_3, SPACE_4, SPACE_6, SPACE_7, SPACE_8, TEXT_AXIS, TEXT_BODY, TEXT_CONTROL, TEXT_LABEL,
-    TEXT_MONO, TEXT_SMALL, TEXT_SUBHEADING, TEXT_TITLE,
+    ActiveTheme, FONT_MONO, MONO_ADVANCE, PAGE_HEADER, Palette, ROW_COMMIT, ROW_ROLLOUT, RULE,
+    SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6, SPACE_7, SPACE_8, TEXT_AXIS, TEXT_BODY,
+    TEXT_CONTROL, TEXT_LABEL, TEXT_MONO, TEXT_SMALL, TEXT_SUBHEADING, TEXT_TITLE,
 };
 
 const COMMIT_LIST: Pixels = px(360.);
 const DETAIL_MIN: Pixels = px(560.);
 const DETAIL_GROW: f32 = 999.;
 const LANE: Pixels = px(30.);
+const LANE_MAX: Pixels = px(96.);
 const CLUSTER_MENU: Pixels = px(180.);
 const ROLLOUT_GLYPH: Pixels = px(14.);
 const ROLLOUT_CLUSTER: Pixels = px(110.);
@@ -280,15 +281,26 @@ fn commit_columns(lanes: &[Lane]) -> Vec<Column<Commit>> {
         commit_summary(commit, palette).into_any_element()
     })
     .flex(1., Pixels::ZERO);
+    let width = lane_width(lanes);
     let lanes = lanes.iter().enumerate().map(|(ix, lane)| {
         let cluster = lane.cluster.clone();
         Column::new(lane.short.clone(), move |commit: &Commit, palette| {
             lane_cell(ix, commit, &cluster, palette)
         })
-        .fixed(LANE)
+        .fixed(width)
         .center()
     });
     std::iter::once(summary).chain(lanes).collect()
+}
+
+fn lane_width(lanes: &[Lane]) -> Pixels {
+    let widest = lanes
+        .iter()
+        .map(|lane| lane.short.chars().count())
+        .max()
+        .unwrap_or_default();
+    let chars = u16::try_from(widest).map_or(f32::MAX, f32::from);
+    (TEXT_AXIS * (MONO_ADVANCE * chars)).max(LANE).min(LANE_MAX)
 }
 
 fn commit_summary(commit: &Commit, palette: &Palette) -> impl IntoElement {
@@ -450,6 +462,7 @@ fn diff_line(line: &PatchLine) -> DiffLine {
         LineChange::Context => LineKind::Context,
         LineChange::Added => LineKind::Added,
         LineChange::Removed => LineKind::Removed,
+        LineChange::Hunk => LineKind::Hunk,
     };
     let converted = DiffLine::new(kind, Some(line.number), line.text.clone());
     match &line.note {
@@ -461,6 +474,20 @@ fn diff_line(line: &PatchLine) -> DiffLine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lanes_widen_to_fit_whole_cluster_names() {
+        let lane = |short: &str| Lane {
+            cluster: ClusterId::new(short),
+            short: short.into(),
+            label: short.into(),
+        };
+        assert_eq!(lane_width(&[lane("stg"), lane("use1")]), LANE);
+        let fleet = lane_width(&[lane("fleet-a"), lane("fleet-b")]);
+        assert!(fleet > LANE && fleet < LANE_MAX);
+        let long = "a-very-long-cluster-name-indeed";
+        assert_eq!(lane_width(&[lane(long)]), LANE_MAX);
+    }
 
     #[test]
     fn cluster_options_start_with_all_clusters() {
@@ -506,5 +533,19 @@ mod tests {
         assert_eq!(converted.kind, LineKind::Added);
         assert_eq!(converted.new, Some(48));
         assert_eq!(converted.note, Some("set by overlay".into()));
+    }
+
+    #[test]
+    fn hunk_headers_become_unnumbered_separators() {
+        let line = PatchLine {
+            change: LineChange::Hunk,
+            number: 48,
+            text: "@@ -48,2 +48,3 @@ jobs:".into(),
+            note: None,
+        };
+        let converted = diff_line(&line);
+        assert_eq!(converted.kind, LineKind::Hunk);
+        assert_eq!((converted.old, converted.new), (None, None));
+        assert_eq!(converted.text, "@@ -48,2 +48,3 @@ jobs:");
     }
 }

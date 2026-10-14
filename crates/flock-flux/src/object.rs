@@ -4,6 +4,10 @@ use thiserror::Error;
 
 use crate::{generated, redact};
 
+const READY: &str = "Ready";
+const FALSE: &str = "False";
+const UNKNOWN: &str = "Unknown";
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ObjectKind {
     Kustomization,
@@ -127,6 +131,7 @@ pub struct GitOpsObject {
     pub install_failures: i64,
     pub upgrade_failures: i64,
     pub spec: Value,
+    pub last_failure: Option<Condition>,
 }
 
 #[derive(Debug, Error)]
@@ -356,6 +361,7 @@ impl GitOpsObject {
                 .and_then(Value::as_i64)
                 .unwrap_or_default(),
             spec,
+            last_failure: None,
         })
     }
 
@@ -366,7 +372,24 @@ impl GitOpsObject {
     }
 
     pub fn ready(&self) -> Option<&Condition> {
-        self.condition("Ready")
+        let live = self.condition(READY);
+        let in_progress = live.is_some_and(|condition| condition.status == UNKNOWN);
+        match &self.last_failure {
+            Some(failure) if in_progress => Some(failure),
+            _ => live,
+        }
+    }
+
+    pub fn carry_failure(&mut self, remembered: Option<Condition>) -> Option<Condition> {
+        let live = self.condition(READY)?;
+        if live.status == FALSE {
+            return Some(live.clone());
+        }
+        if live.status != UNKNOWN {
+            return None;
+        }
+        self.last_failure.clone_from(&remembered);
+        remembered
     }
 
     pub fn revision(&self) -> Option<&str> {

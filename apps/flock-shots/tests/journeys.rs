@@ -513,7 +513,6 @@ fn live_returning_to_a_page_or_tab_never_shows_a_skeleton() -> anyhow::Result<()
 }
 
 #[test]
-#[ignore = "fails until #200: a failing Kustomization flaps out of Problems while Flux retries"]
 fn live_flux_failures_stay_flagged_for_two_minutes() -> anyhow::Result<()> {
     let Some(make) = kind()? else {
         return Ok(());

@@ -26,7 +26,7 @@ use git::{Mirrors, RepoKey};
 use grid::ClusterFluxView;
 use health::Workloads;
 use requests::Requests;
-use watch::{ClusterFlux, FluxInfo, KINDS};
+use watch::{ClusterFlux, Failures, FluxInfo, KINDS};
 
 const CHANGE_BUFFER: usize = 1;
 
@@ -248,14 +248,30 @@ impl GitOpsState {
 }
 
 fn parsed_objects(flux: &ClusterFlux) -> Vec<Parsed> {
-    KINDS
+    let mut objects: Vec<Parsed> = KINDS
         .iter()
         .flat_map(|kind| {
             flux.objects(*kind)
                 .into_iter()
                 .filter_map(move |object| parse(&object, *kind))
         })
-        .collect()
+        .collect();
+    carry_failures(&mut lock(&flux.failures), &mut objects);
+    objects
+}
+
+fn carry_failures(failures: &mut Failures, objects: &mut [Parsed]) {
+    let mut next = Failures::new();
+    for parsed in objects {
+        let Some(uid) = parsed.uid().map(str::to_owned) else {
+            continue;
+        };
+        let remembered = failures.remove(&uid);
+        if let Some(failure) = parsed.object.carry_failure(remembered) {
+            next.insert(uid, failure);
+        }
+    }
+    *failures = next;
 }
 
 fn cluster_health(objects: &[Parsed], now: Timestamp) -> Vec<FluxHealth> {
@@ -427,5 +443,30 @@ mod tests {
                 (Page::Sources, Counts::total(1)),
             ]
         );
+    }
+
+    #[test]
+    fn a_failing_kustomization_stays_failing_through_each_retry() {
+        let at = |ready: &str, reason: &str| {
+            let mut value = kustomization("broken", ready, "3e0ff8ae123b");
+            value["metadata"]["uid"] = serde_json::json!("uid-broken");
+            value["status"]["conditions"][0]["reason"] = serde_json::json!(reason);
+            vec![parsed(&value), parsed(&git_repository())]
+        };
+        let failing = Counts::total(1).with_err(1);
+        let mut failures = Failures::new();
+        for (ready, reason, expected) in [
+            ("False", "ArtifactFailed", failing),
+            ("Unknown", "Progressing", failing),
+            ("False", "ArtifactFailed", failing),
+            ("Unknown", "Progressing", failing),
+            ("True", "ReconciliationSucceeded", Counts::total(1)),
+            ("Unknown", "Progressing", Counts::total(1)),
+        ] {
+            let mut objects = at(ready, reason);
+            carry_failures(&mut failures, &mut objects);
+            let [(_, kustomizations), ..] = nav_counts(&objects);
+            assert_eq!(kustomizations, expected, "{ready} {reason}");
+        }
     }
 }

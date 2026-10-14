@@ -13,6 +13,20 @@ const PER_MILLE: u16 = 1000;
 const EVEN: u16 = PER_MILLE / 2;
 const NARROWEST: u16 = 100;
 const NAME_SEPARATOR: char = '-';
+const SHORT_NAME_MIN: usize = 3;
+const ENVIRONMENT_PREFIXES: [&str; 11] = [
+    "prod",
+    "production",
+    "preprod",
+    "staging",
+    "stage",
+    "stg",
+    "dev",
+    "development",
+    "qa",
+    "test",
+    "uat",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TabId(u64);
@@ -622,9 +636,8 @@ pub fn short_name(name: &str, names: &[&str]) -> String {
     let Some((head, rest)) = name.split_once(NAME_SEPARATOR) else {
         return name.to_owned();
     };
-    if head.is_empty() || rest.is_empty() {
-        return name.to_owned();
-    }
+    let environment = ENVIRONMENT_PREFIXES.contains(&head);
+    let readable = rest.chars().count() >= SHORT_NAME_MIN;
     let others = || names.iter().copied().filter(move |other| *other != name);
     let shared = others().any(|other| {
         other
@@ -635,7 +648,7 @@ pub fn short_name(name: &str, names: &[&str]) -> String {
         let remainder = other.split_once(NAME_SEPARATOR).map(|(_, r)| r);
         other == rest || remainder == Some(rest)
     });
-    if shared && !collides {
+    if environment && readable && shared && !collides {
         rest.to_owned()
     } else {
         name.to_owned()
@@ -675,7 +688,7 @@ mod tests {
     }
 
     #[test]
-    fn shared_leading_segments_drop_when_the_rest_stays_unique() {
+    fn only_a_shared_environment_prefix_drops_when_the_rest_stays_readable_and_unique() {
         assert_eq!(short_name("prod-us-east", &DEMO), "us-east");
         assert_eq!(short_name("prod-eu-west", &DEMO), "eu-west");
         assert_eq!(short_name("staging", &DEMO), "staging");
@@ -684,12 +697,20 @@ mod tests {
             short_name("prod-us-east", &["prod-us-east"]),
             "prod-us-east"
         );
-        let colliding = ["prod-a", "prod-b", "a"];
-        assert_eq!(short_name("prod-a", &colliding), "prod-a");
-        assert_eq!(short_name("prod-b", &colliding), "b");
-        let twins = ["prod-us-east", "prod-x", "dev-us-east"];
+        let fleet = ["fleet-a", "fleet-b"];
+        assert_eq!(short_name("fleet-a", &fleet), "fleet-a");
+        assert_eq!(short_name("fleet-b", &fleet), "fleet-b");
+        let teams = ["payments-east", "payments-west"];
+        assert_eq!(short_name("payments-east", &teams), "payments-east");
+        let short = ["prod-a", "prod-b"];
+        assert_eq!(short_name("prod-a", &short), "prod-a");
+        assert_eq!(short_name("prod-b", &short), "prod-b");
+        let colliding = ["prod-east", "prod-west", "east"];
+        assert_eq!(short_name("prod-east", &colliding), "prod-east");
+        assert_eq!(short_name("prod-west", &colliding), "west");
+        let twins = ["prod-us-east", "prod-xyz", "dev-us-east"];
         assert_eq!(short_name("prod-us-east", &twins), "prod-us-east");
-        assert_eq!(short_name("prod-x", &twins), "x");
+        assert_eq!(short_name("prod-xyz", &twins), "xyz");
         assert_eq!(short_name("-odd", &["-odd", "-x"]), "-odd");
     }
 

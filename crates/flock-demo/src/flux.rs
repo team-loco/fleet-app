@@ -340,7 +340,7 @@ fn peer_payments() -> Vec<FluxObject> {
     let staging = healthy_payments(STAGING, "48s");
     let dev = healthy_payments(DEV_KIND, "21s");
     let phase = Phase::Suspended {
-        since: ago(2 * DAY),
+        since: Some(ago(2 * DAY)),
     };
     let sentence = Sentence::text(
         "Suspended for the change freeze, so Flux applies nothing here. 2 commits behind fleet-infra/main.",
@@ -936,7 +936,7 @@ pub fn suspend(object: &FluxObject) -> Option<FluxObject> {
     }
     let mut next = object.clone();
     next.phase = Phase::Suspended {
-        since: Duration::ZERO,
+        since: Some(Duration::ZERO),
     };
     next.sentence = Sentence::text("Suspended, so Flux applies nothing here until it is resumed.");
     Some(next)
@@ -1042,7 +1042,7 @@ mod tests {
         assert_eq!(
             suspended.map(|o| o.phase),
             Some(Phase::Suspended {
-                since: Duration::ZERO
+                since: Some(Duration::ZERO)
             })
         );
     }

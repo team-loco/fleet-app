@@ -238,3 +238,13 @@ Settled; change only with a new entry that says why.
     is reserved for data that never loaded. `AppState` keeps a connected cluster's last detail and
     pod rows until a snapshot rebuilds them, so returning to a tab, pane or cluster renders what was
     in memory at once and the next snapshot refreshes it.
+33. **Suspended Flux objects lead with Resume** (#202; amends HANDOFF's "for example Reconcile"):
+    Reconcile cannot run on a suspended object, so the Flux object page's one primary action is
+    Resume while the object is suspended and Reconcile otherwise. The Actions menu keeps Suspend /
+    Resume as before, and ⌘R stays Reconcile.
+34. **Short cluster names drop only a shared environment prefix** (#203; amends 23): `tabs::short_name`
+    drops a leading segment only when it is an environment word (`prod`, `staging`, `dev`, `qa`,
+    `test`, `uat` and their spellings), another cluster shares it, and the rest has at least three
+    characters and names no other cluster. `prod-us-east` / `prod-eu-west` become `us-east` /
+    `eu-west`; `fleet-a` / `fleet-b` keep their whole names. Tabs, Compare and the Changes lane
+    headers all use it, and Changes lane columns widen to fit the name.

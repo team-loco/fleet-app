@@ -43,6 +43,64 @@ fn summaries_use_flux_reasons_and_precedence() -> TestResult {
     Ok(())
 }
 
+fn retry_cycle() -> Result<[GitOpsObject; 3], Box<dyn Error>> {
+    let mut value: Value = serde_json::from_str(KUSTOMIZATION)?;
+    let failed = json!([
+        {"type": "Reconciling", "status": "True", "reason": "ProgressingWithRetry",
+         "message": "Fetching manifests", "observedGeneration": 2, "lastTransitionTime": "2026-10-14T18:27:43Z"},
+        {"type": "Ready", "status": "False", "reason": "ArtifactFailed",
+         "message": "kustomization path not found: no such file or directory",
+         "observedGeneration": 2, "lastTransitionTime": "2026-10-14T18:27:43Z"}
+    ]);
+    let retrying = json!([
+        {"type": "Reconciling", "status": "True", "reason": "Progressing",
+         "message": "Fetching manifests", "observedGeneration": 2, "lastTransitionTime": "2026-10-14T18:27:43Z"},
+        {"type": "Ready", "status": "Unknown", "reason": "Progressing",
+         "message": "Reconciliation in progress", "observedGeneration": 2, "lastTransitionTime": "2026-10-14T18:27:43Z"}
+    ]);
+    let succeeded = json!([
+        {"type": "Ready", "status": "True", "reason": "ReconciliationSucceeded",
+         "message": "Applied revision main@sha1:a41e07c", "observedGeneration": 2, "lastTransitionTime": "2026-10-14T18:27:43Z"}
+    ]);
+    let mut at = |conditions: Value| -> Result<GitOpsObject, Box<dyn Error>> {
+        value["status"]["conditions"] = conditions;
+        Ok(GitOpsObject::from_json(&value)?)
+    };
+    Ok([at(failed)?, at(retrying)?, at(succeeded)?])
+}
+
+#[test]
+fn a_retry_after_a_failure_stays_failed_until_it_succeeds() -> TestResult {
+    let [failed, mut retrying, mut succeeded] = retry_cycle()?;
+    let mut fresh = retrying.clone();
+    assert_eq!(summarize(&failed, None).status, Status::Err);
+    assert_eq!(summarize(&retrying, None).status, Status::Progress);
+    let mut remembered = failed.clone().carry_failure(None);
+    remembered = retrying.carry_failure(remembered);
+    let summary = summarize(&retrying, None);
+    assert_eq!(summary.status, Status::Err);
+    assert_eq!(
+        summary.sentence,
+        "The build path does not exist in the source artifact."
+    );
+    remembered = succeeded.carry_failure(remembered);
+    assert_eq!(remembered, None);
+    assert_eq!(summarize(&succeeded, None).status, Status::Ok);
+    fresh.carry_failure(remembered);
+    assert_eq!(summarize(&fresh, None).status, Status::Progress);
+    Ok(())
+}
+
+#[test]
+fn a_remembered_failure_yields_to_a_newer_generation() -> TestResult {
+    let [failed, mut retrying, _] = retry_cycle()?;
+    let remembered = failed.clone().carry_failure(None);
+    retrying.generation = Some(3);
+    retrying.carry_failure(remembered);
+    assert_eq!(summarize(&retrying, None).status, Status::Progress);
+    Ok(())
+}
+
 #[test]
 fn condition_messages_drop_url_credentials() -> TestResult {
     let mut value: Value = serde_json::from_str(SOURCE)?;
