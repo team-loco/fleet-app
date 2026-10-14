@@ -4,9 +4,10 @@ use gpui::KeyBinding;
 
 use crate::actions::{
     ActivateTab, CloseTab, CloseWindow, CompareAcrossClusters, FocusContent, FocusFilter,
-    FocusSidebar, FollowLogs, GoBack, GoForward, NewTab, NewWindow, NextTab, OpenSelectedNewWindow,
-    OpenSettings, PreviousTab, QuickOpen, Quit, ShowAllClusters, ShowCommands, ShowFluxOwner,
-    ToggleClusterSwitcher, ToggleCommandPalette, ToggleDock, ToggleSidebar,
+    FocusPane, FocusSidebar, FollowLogs, GoBack, GoForward, NewTab, NewWindow, NextTab,
+    OpenSelectedInSplit, OpenSelectedNewWindow, OpenSettings, PreviousTab, QuickOpen, Quit,
+    ShowAllClusters, ShowCommands, ShowFluxOwner, SplitRight, ToggleClusterSwitcher,
+    ToggleCommandPalette, ToggleDock, ToggleSidebar,
 };
 use crate::kit::{SendBackTab, SendTab, TERMINAL_CONTEXT};
 use crate::screens::command::PALETTE_CONTEXT;
@@ -21,6 +22,8 @@ const TYPE_AHEAD: &str = "letters";
 const COMMAND_CLICK: &str = "cmd-click";
 const MIDDLE_CLICK: &str = "middle click";
 const DRAG: &str = "drag";
+const RIGHT_CLICK: &str = "right click";
+pub const PANE_KEYS: [&str; 2] = ["cmd-alt-1", "cmd-alt-2"];
 pub const TAB_KEYS: [&str; 9] = [
     "cmd-1", "cmd-2", "cmd-3", "cmd-4", "cmd-5", "cmd-6", "cmd-7", "cmd-8", "cmd-9",
 ];
@@ -165,8 +168,20 @@ pub const BINDINGS: &[Binding] = &[
     Binding::new(&["cmd-t"], "New tab on Flock home", Group::Tabs, |k, c| {
         KeyBinding::new(k, NewTab, c)
     }),
-    Binding::new(&["cmd-w"], "Close the tab", Group::Tabs, |k, c| {
-        KeyBinding::new(k, CloseTab, c)
+    Binding::new(
+        &["cmd-w"],
+        "Close the tab; closing a pane's last tab closes the pane",
+        Group::Tabs,
+        |k, c| KeyBinding::new(k, CloseTab, c),
+    ),
+    Binding::new(
+        &["cmd-\\"],
+        "Split right: open the tab in a second pane",
+        Group::Tabs,
+        |k, c| KeyBinding::new(k, SplitRight, c),
+    ),
+    Binding::new(&PANE_KEYS, "Focus pane 1 or 2", Group::Tabs, |k, c| {
+        KeyBinding::new(k, FocusPane(pane_index(k)), c)
     }),
     Binding::new(
         &["ctrl-tab", "cmd-alt-right"],
@@ -193,7 +208,16 @@ pub const BINDINGS: &[Binding] = &[
         "Close the tab under the pointer",
         Group::Tabs,
     ),
-    Binding::built_in(&[DRAG], "Reorder tabs", Group::Tabs),
+    Binding::built_in(
+        &[DRAG],
+        "Reorder tabs, or drop one on the other pane's strip to move it",
+        Group::Tabs,
+    ),
+    Binding::built_in(
+        &[RIGHT_CLICK],
+        "Tab menu: move to the other pane or a split, close",
+        Group::Tabs,
+    ),
     Binding::new(&["cmd-b"], "Toggle the sidebar", Group::View, |k, c| {
         KeyBinding::new(k, ToggleSidebar, c)
     }),
@@ -269,6 +293,13 @@ pub const BINDINGS: &[Binding] = &[
         |k, c| KeyBinding::new(k, OpenSelectedNewWindow, c),
     )
     .within(PALETTE_CONTEXT),
+    Binding::new(
+        &["cmd-shift-enter"],
+        "Open the result in a split",
+        Group::Palette,
+        |k, c| KeyBinding::new(k, OpenSelectedInSplit, c),
+    )
+    .within(PALETTE_CONTEXT),
     Binding::new(&["cmd-."], "Actions", Group::Workload, |k, c| {
         KeyBinding::new(k, workload::ToggleActions, c)
     })
@@ -329,6 +360,13 @@ fn tab_index(keys: &str) -> usize {
     TAB_KEYS
         .iter()
         .position(|tab| *tab == keys)
+        .unwrap_or_default()
+}
+
+fn pane_index(keys: &str) -> usize {
+    PANE_KEYS
+        .iter()
+        .position(|pane| *pane == keys)
         .unwrap_or_default()
 }
 
@@ -442,6 +480,11 @@ mod tests {
         assert_eq!(display("ctrl-`"), "⌃`");
         assert_eq!(tab_index("cmd-1"), 0);
         assert_eq!(tab_index("cmd-9"), 8);
+        assert_eq!(display("cmd-\\"), "⌘\\");
+        assert_eq!(display("cmd-alt-2"), "⌥⌘2");
+        assert_eq!(display("cmd-shift-enter"), "⌘⇧↵");
+        assert_eq!(display(RIGHT_CLICK), RIGHT_CLICK);
+        assert_eq!(pane_index("cmd-alt-2"), 1);
     }
 
     #[test]

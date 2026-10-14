@@ -123,20 +123,25 @@ impl Shell {
             self.screens_mut(ix).workload = None;
             return None;
         };
+        let compact = self.full_view(ix, cx);
         let current = self
             .screens(ix)
             .workload
             .as_ref()
             .filter(|(screen, _)| screen.read(cx).target() == &target)
             .map(|(screen, _)| screen.clone());
-        if current.is_some() {
-            return current;
+        if let Some(screen) = current {
+            screen.update(cx, |screen, cx| screen.set_compact(compact, cx));
+            return Some(screen);
         }
         let screen = cx.new(|cx| WorkloadScreen::new(target, window, cx));
         let subscription = cx.subscribe(&screen, move |shell, _, command: &Command, cx| {
             shell.pane_command(pane, command.clone(), cx);
         });
-        screen.update(cx, WorkloadScreen::watch);
+        screen.update(cx, |screen, cx| {
+            screen.set_compact(compact, cx);
+            screen.watch(cx);
+        });
         self.sync_workload_yaml(&screen, cx);
         self.screens_mut(ix).workload = Some((screen.clone(), subscription));
         Some(screen)
@@ -159,20 +164,25 @@ impl Shell {
             self.screens_mut(ix).logs = None;
             return None;
         };
+        let compact = self.panes.len() > 1;
         let current = self
             .screens(ix)
             .logs
             .as_ref()
             .filter(|(screen, _)| screen.read(cx).shows(&pod, &container))
             .map(|(screen, _)| screen.clone());
-        if current.is_some() {
-            return current;
+        if let Some(screen) = current {
+            screen.update(cx, |screen, cx| screen.set_compact(compact, cx));
+            return Some(screen);
         }
         let screen = cx.new(|cx| LogsScreen::new(pod, container, window, cx));
         let subscription = cx.subscribe(&screen, move |shell, _, command: &Command, cx| {
             shell.pane_command(pane, command.clone(), cx);
         });
-        screen.update(cx, LogsScreen::watch);
+        screen.update(cx, |screen, cx| {
+            screen.set_compact(compact, cx);
+            screen.watch(cx);
+        });
         self.screens_mut(ix).logs = Some((screen.clone(), subscription));
         Some(screen)
     }

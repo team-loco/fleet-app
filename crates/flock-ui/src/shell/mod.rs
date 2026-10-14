@@ -16,7 +16,7 @@ use flock_core::{
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement,
     IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, ParentElement, Render, Styled,
-    Subscription, Task, Window, div, prelude::FluentBuilder,
+    Subscription, Task, Window, div,
 };
 
 use crate::Store;
@@ -24,16 +24,17 @@ use crate::actions::{
     CompareAcrossClusters, FocusFilter, FollowLogs, OpenSettings, ShowAllClusters, ShowFluxOwner,
     ToggleClusterSwitcher, ToggleCommandPalette, ToggleSidebar,
 };
-use crate::kit::{FilterBar, Toast, toast};
+use crate::kit::{FilterBar, Split, Toast, toast};
 use crate::screens::ScreenEvent;
 use crate::screens::add_cluster::{AddClusterDialog, AddClusterEvent};
 use crate::screens::command::{CommandPalette, PaletteEvent};
 use crate::screens::workload::WorkloadScreen;
-use crate::theme::{self, ActiveTheme, RULE, TEXT_UI};
+use crate::theme::{self, ActiveTheme, TEXT_UI};
 use pane::PaneScreens;
 use switcher::{ClusterSwitcher, SwitcherEvent};
 
 pub(crate) const KEY_CONTEXT: &str = "Shell";
+const PANES_SPLIT: &str = "panes";
 
 pub struct NewWindowRequest(pub Vec<Command>);
 
@@ -55,6 +56,7 @@ pub struct Shell {
     loaded: bool,
     add_cluster: Option<(Entity<AddClusterDialog>, Subscription)>,
     switcher: Entity<ClusterSwitcher>,
+    tab_menu: Entity<crate::kit::ActionMenu>,
     _switcher_events: Subscription,
     _updates: Task<()>,
     _store: Entity<Store>,
@@ -95,6 +97,7 @@ impl Shell {
         theme::follow_window(window, cx);
         let (palette, palette_events) = Self::new_palette(window, cx);
         let (switcher, switcher_events) = Self::new_switcher(window, cx);
+        let tab_menu = cx.new(|cx| crate::kit::ActionMenu::context(tabs::TAB_MENU, cx));
         let state = AppState::default();
         let first = PaneScreens::new(state.panes().focused().id(), commands.clone(), window, cx);
         Self {
@@ -113,6 +116,7 @@ impl Shell {
             loaded: false,
             add_cluster: None,
             switcher,
+            tab_menu,
             _switcher_events: switcher_events,
             _updates: listen,
             _store: store,
@@ -189,6 +193,12 @@ impl Shell {
                 if let Some(commands) = self.state.window_commands(command) {
                     palette.update(cx, |palette, cx| palette.close(window, cx));
                     cx.emit(NewWindowRequest(commands));
+                }
+            }
+            PaletteEvent::Split(command) => {
+                if self.state.open_split(command) {
+                    palette.update(cx, |palette, cx| palette.close(window, cx));
+                    self.panes_changed(window, cx);
                 }
             }
         }
@@ -559,9 +569,11 @@ impl Shell {
             .flux_object
             .as_ref()
             .and_then(|key| snapshot.flux_page(key));
-        screens
-            .flux_object
-            .update(cx, |screen, cx| screen.set_page(object, cx));
+        let compact = self.full_view(ix, cx);
+        screens.flux_object.update(cx, |screen, cx| {
+            screen.set_page(object, cx);
+            screen.set_compact(compact, cx);
+        });
         #[cfg(feature = "loco")]
         screens
             .loco
@@ -615,8 +627,7 @@ impl Shell {
             .update(cx, |pods, cx| pods.show_terminal(window, cx));
     }
 
-    fn pane_views(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let palette = *cx.palette();
+    fn pane_views(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let mut views = Vec::new();
         for ix in 0..self.panes.len() {
             let leading = if ix == 0 {
@@ -627,13 +638,11 @@ impl Shell {
             let strip = self.tab_strip(ix, leading, cx);
             let page = self.page(ix, window, cx);
             let view = div()
+                .debug_selector(move || format!("pane-{ix}"))
                 .flex()
                 .flex_col()
-                .flex_1()
+                .size_full()
                 .min_w_0()
-                .when(ix > 0, |view| {
-                    view.border_l(RULE).border_color(palette.line2)
-                })
                 .capture_any_mouse_down(cx.listener(move |this, _: &MouseDownEvent, _, cx| {
                     this.focus_pane(ix, cx);
                 }))
@@ -641,7 +650,24 @@ impl Shell {
                 .child(div().flex().flex_1().min_h_0().child(page));
             views.push(view.into_any_element());
         }
-        views
+        let mut views = views.into_iter();
+        let (Some(first), second) = (views.next(), views.next()) else {
+            return div().into_any_element();
+        };
+        let Some(second) = second else {
+            return first;
+        };
+        let palette = *cx.palette();
+        let shell = cx.weak_entity();
+        Split::horizontal(PANES_SPLIT, first, second)
+            .ratio(self.state.panes().divider().share())
+            .line(palette.line2)
+            .on_resize(move |share, _, cx| {
+                shell
+                    .update(cx, |shell, cx| shell.resize_panes(share, cx))
+                    .ok();
+            })
+            .into_any_element()
     }
 }
 
@@ -703,10 +729,11 @@ impl Render for Shell {
                     .flex_1()
                     .min_h_0()
                     .child(self.sidebar(window, cx))
-                    .child(div().flex().flex_1().min_w_0().children(panes)),
+                    .child(div().flex().flex_1().min_w_0().child(panes)),
             )
             .child(self.status_bar(cx))
             .child(self.palette.clone())
+            .child(self.tab_menu.clone())
             .children(self.add_cluster.as_ref().map(|(dialog, _)| dialog.clone()))
             .child(crate::kit::overlay_layer(cx))
     }
@@ -878,6 +905,7 @@ mod tests {
                 })
                 .collect(),
             focused: 1,
+            ..flock_core::tabs::SavedWindow::default()
         };
         assert!(
             window

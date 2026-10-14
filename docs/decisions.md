@@ -35,7 +35,7 @@ Settled; change only with a new entry that says why.
     row per nav entry that has problems (worst status first, tooltip = entry name, click
     navigates); with no problems it is the chevron alone. `kit::VerticalLabel` and `ttf-parser` are
     removed.
-17. **Multiple windows**: one backend and one UI Store distribute snapshots to every window;
+17. **Multiple windows** (split deferral superseded by 30): one backend and one UI Store distribute snapshots to every window;
     each shell owns its navigation, screens, focus and streams. Backend navigation commands carry
     the shell entity id so page watches, YAML, workload streams and Flux details stay independent
     until that window closes; connections and the backend runtime remain shared. ⌥↵ opens a palette
@@ -191,3 +191,24 @@ Settled; change only with a new entry that says why.
     the 60px measured span of the three lights from x 10 plus 8px) of empty, draggable row, then the
     expand chevron. The controls' width animates with the sidebar's, so tabs never pass under the
     lights. Empty parts of the title row drag the window in both states.
+30. **Split right** (#77, design v3 `Split` and `PaneTabs`; product owner; supersedes the split
+    deferral in 17): ⌘\ or the 32px Split right button at the end of a pane's tab strip opens the
+    active tab in a second pane on the right; with two panes it opens it in the other pane instead,
+    since a window has at most two side-by-side panes (`tabs::MAX_PANES`, no vertical split). Each
+    pane has its own tabs, active tab, screens (`shell::pane::PaneScreens`) and backend scope: every
+    pane navigates the backend under its own `Command::ForWindow` id from a process-wide counter and
+    sends `Command::WindowClosed` for it when the pane or window closes, so page watches, YAML,
+    workload streams and Flux details stay independent per pane. A click anywhere in a pane focuses
+    it, ⌥⌘1 / ⌥⌘2 focus pane 1 or 2, and navigation from a pane's own screens focuses that pane
+    first; background commands from a screen (watch and stream requests) reach its pane's scope
+    without moving focus. The sidebar, status-bar switcher, palette and ⌘W follow the focused pane;
+    only the focused pane's active tab has the `acc` top line. Closing a pane's last tab closes the
+    pane; the window's last tab still falls back to Flock home. Tabs move to the other pane from the
+    tab's right-click menu (Move to the other pane, or Move to a split on the right when unsplit)
+    or by dropping them on the other pane's strip. ⌘⇧↵ in the palette opens the result in a split
+    (⌘↵ stays new tab, ⌥↵ new window). The 1px `line2` divider drags; its share
+    (`tabs::Divider`, thousandths, kept between 10% and 90%) is saved with the window's panes in
+    `tabs.json`. A split pane shows compact views: a workload shows its header, sentence, key
+    fields (`Workload::fields`) and pods; a Flux object its status block; logs only the lines. The
+    first two end with "Open full view →", which joins both panes into one with that tab active, so
+    no tab is lost. Every other page renders its full page.

@@ -21,13 +21,16 @@ Generated from the binding table in `crates/flock-ui/src/keymap.rs`; run `mise r
 | Keys | Action |
 |---|---|
 | ⌘T | New tab on Flock home |
-| ⌘W | Close the tab |
+| ⌘W | Close the tab; closing a pane's last tab closes the pane |
+| ⌘\ | Split right: open the tab in a second pane |
+| ⌥⌘1 / ⌥⌘2 | Focus pane 1 or 2 |
 | ⌃Tab / ⌥⌘→ | Next tab |
 | ⌃⇧Tab / ⌥⌘← | Previous tab |
 | ⌘1 / ⌘2 / ⌘3 / ⌘4 / ⌘5 / ⌘6 / ⌘7 / ⌘8 / ⌘9 | Select tab 1 to 9 |
 | ⌘-click / middle click | Open a page, row or result in a new tab |
 | middle click | Close the tab under the pointer |
-| drag | Reorder tabs |
+| drag | Reorder tabs, or drop one on the other pane's strip to move it |
+| right click | Tab menu: move to the other pane or a split, close |
 
 ## View
 
@@ -74,6 +77,7 @@ Generated from the binding table in `crates/flock-ui/src/keymap.rs`; run `mise r
 |---|---|
 | ⌘↵ | Open the result in a new tab |
 | ⌥↵ | Open the result in a new window |
+| ⌘⇧↵ | Open the result in a split |
 
 ## Workload page
 

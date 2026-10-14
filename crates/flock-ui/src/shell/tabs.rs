@@ -1,19 +1,28 @@
 use flock_core::tabs::{Tab, TabId, TabTitle, title};
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, ElementId, Hsla, InteractiveElement,
-    IntoElement, MouseButton, ParentElement, Render, SharedString, StatefulInteractiveElement,
-    Styled, Window, div, prelude::FluentBuilder,
+    IntoElement, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, Render, SharedString,
+    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, svg,
 };
 
 use super::Shell;
-use crate::kit::{Tooltip, status_symbols};
+use crate::assets::SPLIT;
+use crate::kit::{MenuItem, Tooltip, status_symbols};
 use crate::theme::{
-    ActiveTheme, FONT_MONO, FONT_STATUS, Palette, RULE, SPACE_3, SPACE_4, SPACE_6, TAB_CLOSE,
-    TEXT_BODY, TEXT_GLYPH, TEXT_LABEL, TEXT_UI, TITLE_ROW,
+    ActiveTheme, FONT_MONO, FONT_STATUS, ICON_SPLIT, Palette, RULE, SPACE_3, SPACE_4, SPACE_6,
+    SPLIT_BUTTON, TAB_CLOSE, TEXT_BODY, TEXT_GLYPH, TEXT_LABEL, TEXT_UI, TITLE_ROW,
 };
 
 const CLOSE_GLYPH: &str = "×";
 const CLOSE_TOOLTIP: &str = "Close tab  ⌘W";
+const SPLIT_TOOLTIP: &str = "Split right  ⌘\\";
+pub(super) const TAB_MENU: &str = "tab-menu";
+const MOVE_TO_OTHER: &str = "Move to the other pane";
+const MOVE_TO_OTHER_DESCRIPTION: &str = "Keep this tab and show it beside the other pane's tabs.";
+const MOVE_TO_SPLIT: &str = "Move to a split on the right";
+const MOVE_TO_SPLIT_DESCRIPTION: &str = "Show this tab in its own pane beside the others.";
+const CLOSE_ITEM: &str = "Close tab";
+const CLOSE_KEYS: &str = "⌘W";
 
 #[derive(Clone)]
 pub(super) struct DraggedTab {
@@ -90,6 +99,7 @@ impl Shell {
             .track_scroll(&scroll)
             .children(children)
             .child(rest);
+        let split = split_button(pane_ix, &palette, cx);
         div()
             .debug_selector(move || strip_selector(pane_ix))
             .flex()
@@ -99,7 +109,68 @@ impl Shell {
             .bg(palette.chrome)
             .children(leading)
             .child(tabs)
+            .child(split)
             .into_any_element()
+    }
+
+    fn open_tab_menu(
+        &mut self,
+        id: TabId,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let panes = self.state.panes();
+        let Some(pane_ix) = panes.pane_of(id) else {
+            return;
+        };
+        let shell = cx.weak_entity();
+        let run = move |change: fn(&mut Shell, TabId, &mut Window, &mut Context<Shell>)| {
+            let shell = shell.clone();
+            move |window: &mut Window, cx: &mut App| {
+                shell
+                    .update(cx, |shell, cx| change(shell, id, window, cx))
+                    .ok();
+            }
+        };
+        let mut items = Vec::new();
+        if panes.panes().len() > 1 {
+            items.push(
+                MenuItem::new(MOVE_TO_OTHER, run(Shell::move_to_other_pane))
+                    .description(MOVE_TO_OTHER_DESCRIPTION),
+            );
+        } else {
+            let alone = panes
+                .panes()
+                .get(pane_ix)
+                .is_none_or(|p| p.tabs().len() < 2);
+            items.push(
+                MenuItem::new(MOVE_TO_SPLIT, run(Shell::move_to_split))
+                    .description(MOVE_TO_SPLIT_DESCRIPTION)
+                    .disabled(alone),
+            );
+        }
+        items.push(MenuItem::new(CLOSE_ITEM, run(Shell::close_tab)).shortcut(CLOSE_KEYS));
+        self.tab_menu
+            .update(cx, |menu, cx| menu.show_at(position, items, window, cx));
+    }
+
+    fn move_to_other_pane(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
+        let panes = self.state.panes();
+        let Some(from) = panes.pane_of(id) else {
+            return;
+        };
+        let to = (from + 1) % panes.panes().len();
+        let end = panes.panes().get(to).map_or(0, |pane| pane.tabs().len());
+        if self.state.panes_mut().move_tab(id, to, end) {
+            self.panes_changed(window, cx);
+        }
+    }
+
+    fn move_to_split(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.panes_mut().split_off(id) {
+            self.panes_changed(window, cx);
+        }
     }
 
     fn tab(
@@ -149,6 +220,12 @@ impl Shell {
                     this.close_tab(id, window, cx);
                 }
             }))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.open_tab_menu(id, event.position, window, cx);
+                }),
+            )
             .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
             .drag_over::<DraggedTab>(move |style, _, _, _| style.bg(hover))
             .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
@@ -182,16 +259,15 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let active = self.state.panes().active().id();
+        let across = self.state.panes().pane_of(id) != Some(pane);
         if !self.state.panes_mut().move_tab(id, pane, to) {
             return;
         }
-        self.sync_panes(window, cx);
-        if self.state.panes().active().id() == active {
+        if across {
+            self.panes_changed(window, cx);
+        } else {
             self.save_tabs(cx);
             cx.notify();
-        } else {
-            self.show_active(cx);
         }
     }
 }
@@ -202,6 +278,43 @@ struct Shown {
     ix: usize,
     active: bool,
     focused: bool,
+}
+
+fn split_button(pane: usize, palette: &Palette, cx: &mut Context<Shell>) -> AnyElement {
+    let hover = palette.hover;
+    let selector = if pane == 0 {
+        "split-right".to_owned()
+    } else {
+        format!("pane-{pane}-split-right")
+    };
+    div()
+        .debug_selector(move || selector.clone())
+        .id(("split-right", pane))
+        .flex()
+        .flex_col()
+        .flex_none()
+        .w(SPLIT_BUTTON)
+        .h_full()
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover))
+        .tooltip(Tooltip::text(SPLIT_TOOLTIP))
+        .on_mouse_down(MouseButton::Left, |_, _, cx: &mut App| {
+            cx.stop_propagation();
+        })
+        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+            this.focus_pane(pane, cx);
+            this.split_right(window, cx);
+        }))
+        .child(
+            div()
+                .flex()
+                .flex_1()
+                .items_center()
+                .justify_center()
+                .child(svg().path(SPLIT).size(ICON_SPLIT).text_color(palette.mute)),
+        )
+        .child(div().h(RULE).bg(palette.line))
+        .into_any_element()
 }
 
 fn strip_selector(pane: usize) -> String {

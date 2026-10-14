@@ -9,8 +9,9 @@ use gpui::{
 
 use super::Shell;
 use crate::actions::{
-    ActivateTab, CloseInspector, CloseTab, CloseWindow, FocusContent, FocusSidebar, GoBack,
-    GoForward, NewTab, NextTab, PreviousTab, QuickOpen, ShowCommands, ToggleDock,
+    ActivateTab, CloseInspector, CloseTab, CloseWindow, FocusContent, FocusPane, FocusSidebar,
+    GoBack, GoForward, NewTab, NextTab, PreviousTab, QuickOpen, ShowCommands, SplitRight,
+    ToggleDock,
 };
 use crate::kit::DockState;
 use crate::kit::list_keys::{Nav, TypeAhead, find, typed};
@@ -44,6 +45,13 @@ impl Shell {
         .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
             let active = this.state.panes().active().id();
             this.close_tab(active, window, cx);
+        }))
+        .on_action(cx.listener(|this, _: &SplitRight, window, cx| {
+            this.split_right(window, cx);
+        }))
+        .on_action(cx.listener(|this, action: &FocusPane, _, cx| {
+            this.focus_pane(action.0, cx);
+            this.keys.refocus = true;
         }))
         .on_action(cx.listener(|this, _: &NewTab, _, cx| {
             this.state.new_tab();

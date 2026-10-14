@@ -19,6 +19,7 @@ pub struct LogsScreen {
     logs: Entity<LogView>,
     filter: Entity<TextFieldState>,
     stream: Option<Task<()>>,
+    compact: bool,
     _filter_events: Subscription,
 }
 
@@ -45,7 +46,15 @@ impl LogsScreen {
             logs,
             filter,
             stream: None,
+            compact: false,
             _filter_events: filter_events,
+        }
+    }
+
+    pub fn set_compact(&mut self, compact: bool, cx: &mut Context<Self>) {
+        if self.compact != compact {
+            self.compact = compact;
+            cx.notify();
         }
     }
 
@@ -110,6 +119,12 @@ impl LogsScreen {
 impl Render for LogsScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
+        if self.compact {
+            return div()
+                .size_full()
+                .bg(palette.editor)
+                .child(self.logs.clone());
+        }
         let facts = [
             self.container.as_str(),
             self.pod.namespace.as_deref().unwrap_or_default(),

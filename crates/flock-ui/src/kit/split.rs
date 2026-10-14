@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use gpui::{
     Animation, AnimationExt, AnyElement, App, Axis, Bounds, CursorStyle, ElementId, Entity, Global,
@@ -14,6 +15,8 @@ const DEFAULT_RATIO: f32 = 0.6;
 struct SplitRatios(HashMap<SharedString, f32>);
 
 impl Global for SplitRatios {}
+
+pub type OnResize = Rc<dyn Fn(f32, &mut Window, &mut App)>;
 
 struct SplitState {
     bounds: Bounds<Pixels>,
@@ -40,6 +43,8 @@ pub struct Split {
     second: AnyElement,
     ratio: f32,
     collapsed: bool,
+    line: Option<Hsla>,
+    on_resize: Option<OnResize>,
 }
 
 impl Split {
@@ -72,6 +77,8 @@ impl Split {
             second: second.into_any_element(),
             ratio: DEFAULT_RATIO,
             collapsed: false,
+            line: None,
+            on_resize: None,
         }
     }
 
@@ -82,6 +89,16 @@ impl Split {
 
     pub fn collapsed(mut self, collapsed: bool) -> Self {
         self.collapsed = collapsed;
+        self
+    }
+
+    pub fn line(mut self, color: Hsla) -> Self {
+        self.line = Some(color);
+        self
+    }
+
+    pub fn on_resize(mut self, on_resize: impl Fn(f32, &mut Window, &mut App) + 'static) -> Self {
+        self.on_resize = Some(Rc::new(on_resize));
         self
     }
 }
@@ -96,13 +113,19 @@ fn store_ratio(id: SharedString, ratio: f32, cx: &mut App) {
     cx.default_global::<SplitRatios>().0.insert(id, ratio);
 }
 
-fn divider(axis: Axis, state: &Entity<SplitState>, color: Hsla) -> impl IntoElement {
+fn divider(
+    selector: String,
+    axis: Axis,
+    state: &Entity<SplitState>,
+    color: Hsla,
+) -> impl IntoElement {
     let state = state.clone();
     let cursor = match axis {
         Axis::Horizontal => CursorStyle::ResizeLeftRight,
         Axis::Vertical => CursorStyle::ResizeUpDown,
     };
     let hit = div()
+        .debug_selector(move || selector.clone())
         .id("splitter-hit")
         .absolute()
         .cursor(cursor)
@@ -119,6 +142,30 @@ fn divider(axis: Axis, state: &Entity<SplitState>, color: Hsla) -> impl IntoElem
         Axis::Horizontal => line.w(RULE).h_full(),
         Axis::Vertical => line.h(RULE).w_full(),
     }
+}
+
+fn drag_ratio(
+    state: &Entity<SplitState>,
+    axis: Axis,
+    event: &MouseMoveEvent,
+    cx: &mut App,
+) -> Option<f32> {
+    let (dragging, bounds) = {
+        let state = state.read(cx);
+        (state.dragging, state.bounds)
+    };
+    if !dragging {
+        return None;
+    }
+    if !event.dragging() {
+        state.update(cx, |state, _| state.dragging = false);
+        return None;
+    }
+    let (offset, total) = match axis {
+        Axis::Horizontal => (event.position.x - bounds.origin.x, bounds.size.width),
+        Axis::Vertical => (event.position.y - bounds.origin.y, bounds.size.height),
+    };
+    Some(clamp_ratio(offset / total, total, SPLIT_MIN))
 }
 
 impl RenderOnce for Split {
@@ -140,7 +187,10 @@ impl RenderOnce for Split {
             }
             changed.then_some(state.generation)
         });
-        let ratio = stored_ratio(&id, self.ratio, cx);
+        let ratio = match &self.on_resize {
+            Some(_) => self.ratio,
+            None => stored_ratio(&id, self.ratio, cx),
+        };
         let first_grow = ratio;
         let second_grow = if self.collapsed { 0. } else { 1. - ratio };
         let recorder = {
@@ -152,7 +202,12 @@ impl RenderOnce for Split {
             .absolute()
             .size_full()
         };
-        let handle = divider(axis, &state, palette.line);
+        let handle = divider(
+            format!("{id}-divider"),
+            axis,
+            &state,
+            self.line.unwrap_or(palette.line),
+        );
         let first = div()
             .flex_basis(Pixels::ZERO)
             .flex_grow(first_grow)
@@ -188,6 +243,7 @@ impl RenderOnce for Split {
         let moving = state.clone();
         let releasing = state.clone();
         let store_id = id.clone();
+        let on_resize = self.on_resize.clone();
         div()
             .id(ElementId::NamedInteger(id, 0))
             .relative()
@@ -195,24 +251,14 @@ impl RenderOnce for Split {
             .flex()
             .when(axis == Axis::Vertical, Styled::flex_col)
             .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
-                let (dragging, bounds) = {
-                    let state = moving.read(cx);
-                    (state.dragging, state.bounds)
-                };
-                if !dragging {
-                    return;
+                let resized = drag_ratio(&moving, axis, event, cx);
+                if let Some(ratio) = resized {
+                    match &on_resize {
+                        Some(on_resize) => on_resize(ratio, window, cx),
+                        None => store_ratio(store_id.clone(), ratio, cx),
+                    }
+                    window.refresh();
                 }
-                if !event.dragging() {
-                    moving.update(cx, |state, _| state.dragging = false);
-                    return;
-                }
-                let (offset, total) = match axis {
-                    Axis::Horizontal => (event.position.x - bounds.origin.x, bounds.size.width),
-                    Axis::Vertical => (event.position.y - bounds.origin.y, bounds.size.height),
-                };
-                let ratio = clamp_ratio(offset / total, total, SPLIT_MIN);
-                store_ratio(store_id.clone(), ratio, cx);
-                window.refresh();
             })
             .on_mouse_up(MouseButton::Left, move |_, _, cx| {
                 releasing.update(cx, |state, _| state.dragging = false);

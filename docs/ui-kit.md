@@ -63,6 +63,7 @@ PageHeader::new("checkout-api")
     .action(self.menu.clone())                 // Entity<ActionMenu>
     .sentence("One pod is crash-looping, so the rollout to revision 37 is stuck.")
     .meta(div().flex().gap(SPACE_4).child("payments ·").child(Link::new("ks", "apps-payments")))
+    .footer(full_view_link("workload-full-view", &open))   // optional last line (compact panes)
 ```
 
 `MetaLine` is a mono, muted line of facts under a list page's header (Cluster overview: distro,
@@ -323,6 +324,23 @@ Split::horizontal("workload-split", main_content, inspector)   // or Split::vert
 Element; the divider drags (each pane keeps at least `SPLIT_MIN`) and the ratio is remembered per
 id for the session, so recreating the screen restores it. Children should fill their pane
 (`size_full`, own scrolling).
+
+`.line(palette.line2)` recolours the divider and `.on_resize(|share, window, cx| ..)` hands the
+ratio to the caller instead of the session store; the caller then passes it back through
+`.ratio(..)` on every render. The shell's two panes use both (`Split::horizontal("panes", ..)`,
+divider selector `panes-divider`) and keep the share in `tabs::Divider`, saved with the window.
+
+## Panes and compact views
+
+With two panes (`tabs::MAX_PANES`) each pane is a column of its own tab strip (ending in the 32px
+Split right button, `split-right` / `pane-1-split-right`) over its page; selectors for the second
+pane carry a `pane-1-` prefix (`pane-1-tab-0`). A split pane renders compact views:
+`WorkloadScreen::set_compact(Some(full_view))` draws the header (name, status, cluster), the
+sentence, `Workload::fields()` as 26px label/value rows and a three-column Pods table, without the
+action menu, inspector or dock; `FluxObjectPage::set_compact` draws only the header block;
+`LogsScreen::set_compact(true)` draws the log lines alone. `screens::full_view_link(id, &open)`
+draws the "Open full view →" link (`PageHeader::footer`), which joins the panes into one with that
+tab active. Other pages render their full page.
 
 ## Dock (Logs / Events / Terminal)
 

@@ -7,7 +7,9 @@ use gpui::{
     anchored, deferred, div, ease_out_quint, point, prelude::FluentBuilder,
 };
 
-use crate::actions::{CompareAcrossClusters, FollowLogs, OpenSelectedNewWindow, ShowFluxOwner};
+use crate::actions::{
+    CompareAcrossClusters, FollowLogs, OpenSelectedInSplit, OpenSelectedNewWindow, ShowFluxOwner,
+};
 use crate::kit::list_keys::Nav;
 use crate::kit::status_symbols;
 use crate::kit::{
@@ -37,6 +39,7 @@ const FOOTER_START: &[&str] = &[
     "↵ open",
     "⌘↵ open in new tab",
     "⌥↵ open in new window",
+    "⌘⇧↵ open in split",
 ];
 const FOOTER_END: &str = "esc";
 
@@ -51,6 +54,7 @@ pub enum PaletteEvent {
     Run(Command),
     NewTab(Command),
     NewWindow(Command),
+    Split(Command),
 }
 
 pub struct CommandPalette {
@@ -180,6 +184,13 @@ impl CommandPalette {
         if let Some(ix) = self.selected {
             self.run(ix, cx);
         }
+    }
+
+    fn emit_selected(&self, event: fn(Command) -> PaletteEvent, cx: &mut Context<Self>) {
+        if let Some(hit) = self.selected.and_then(|ix| self.results.hits.get(ix)) {
+            cx.emit(event(hit.command.clone()));
+        }
+        cx.stop_propagation();
     }
 
     fn open_selected_in_tab(&mut self, cx: &mut Context<Self>) {
@@ -443,10 +454,10 @@ impl Render for CommandPalette {
             .id("command-palette")
             .key_context(PALETTE_CONTEXT)
             .capture_action(cx.listener(|this, _: &OpenSelectedNewWindow, _, cx| {
-                if let Some(hit) = this.selected.and_then(|ix| this.results.hits.get(ix)) {
-                    cx.emit(PaletteEvent::NewWindow(hit.command.clone()));
-                }
-                cx.stop_propagation();
+                this.emit_selected(PaletteEvent::NewWindow, cx);
+            }))
+            .capture_action(cx.listener(|this, _: &OpenSelectedInSplit, _, cx| {
+                this.emit_selected(PaletteEvent::Split, cx);
             }))
             .flex()
             .flex_col()

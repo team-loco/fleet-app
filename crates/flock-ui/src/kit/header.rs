@@ -18,6 +18,7 @@ pub struct PageHeader {
     actions: Vec<AnyElement>,
     sentence: Option<AnyElement>,
     meta: Option<AnyElement>,
+    footer: Option<AnyElement>,
 }
 
 impl PageHeader {
@@ -29,6 +30,7 @@ impl PageHeader {
             actions: Vec::new(),
             sentence: None,
             meta: None,
+            footer: None,
         }
     }
 
@@ -54,6 +56,11 @@ impl PageHeader {
 
     pub fn meta(mut self, meta: impl IntoElement) -> Self {
         self.meta = Some(meta.into_any_element());
+        self
+    }
+
+    pub fn footer(mut self, footer: impl IntoElement) -> Self {
+        self.footer = Some(footer.into_any_element());
         self
     }
 }
@@ -111,6 +118,9 @@ impl RenderOnce for PageHeader {
                         .text_color(mute)
                         .child(meta),
                 )
+            })
+            .when_some(self.footer, |header, footer| {
+                header.child(div().text_size(TEXT_UI).child(footer))
             })
     }
 }

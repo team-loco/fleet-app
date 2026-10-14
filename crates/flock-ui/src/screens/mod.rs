@@ -22,7 +22,7 @@ use gpui::{
     AnyElement, App, AppContext, Context, Entity, FocusHandle, IntoElement, Subscription, Window,
 };
 
-use crate::kit::{FilterBar, MenuItem};
+use crate::kit::{FilterBar, Link, MenuItem};
 
 pub use events::EventsScreen;
 pub use flux_list::FluxListScreen;
@@ -32,6 +32,14 @@ pub use overview::OverviewScreen;
 pub use resources::ResourcesScreen;
 
 pub const NODE_KIND: &str = "Node";
+pub const OPEN_FULL_VIEW: &str = "Open full view →";
+
+pub type FullView = std::rc::Rc<dyn Fn(&mut Window, &mut App)>;
+
+pub fn full_view_link(id: &'static str, open: &FullView) -> Link {
+    let open = open.clone();
+    Link::new(id, OPEN_FULL_VIEW).on_click(move |_, window, cx| open(window, cx))
+}
 pub const OPEN_IN_NEW_TAB: &str = "Open in new tab";
 const NEW_TAB_DESCRIPTION: &str = "Keep this page and open it in a tab beside it.";
 

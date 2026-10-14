@@ -1,6 +1,7 @@
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use flock_core::tabs::{PaneId, TabId};
+use flock_core::tabs::{Divider, PaneId, TabId};
 use flock_core::{Command, Sender, Snapshot};
 use gpui::{AppContext as _, Context, Entity, EventEmitter, ScrollHandle, Subscription, Window};
 
@@ -16,7 +17,7 @@ use crate::screens::logs::LogsScreen;
 use crate::screens::pods::PodsScreen;
 use crate::screens::settings::SettingsScreen;
 use crate::screens::workload::WorkloadScreen;
-use crate::screens::{ClusterPages, ScreenEvent};
+use crate::screens::{ClusterPages, FullView, ScreenEvent};
 
 const FIRST_SCOPE: u64 = 1;
 
@@ -160,8 +161,17 @@ fn forward<T: EventEmitter<Command>>(
 
 impl Shell {
     pub(super) fn pane_command(&mut self, pane: PaneId, command: Command, cx: &mut Context<Self>) {
-        self.focus_pane_id(pane, cx);
-        self.dispatch(command, cx);
+        if self.state.window_commands(&command).is_some() {
+            self.focus_pane_id(pane, cx);
+            self.dispatch(command, cx);
+            return;
+        }
+        let Some(ix) = self.panes.iter().position(|screens| screens.pane == pane) else {
+            return;
+        };
+        self.ui_effects(&command, cx);
+        self.screens(ix).scope.send(command);
+        cx.notify();
     }
 
     pub(super) fn pane_screen_event(
@@ -218,6 +228,52 @@ impl Shell {
             self.panes.push(screens);
         }
         created
+    }
+
+    pub(super) fn panes_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sync_panes(window, cx);
+        self.show_all(cx);
+    }
+
+    pub(super) fn split_right(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.panes_mut().split();
+        self.panes_changed(window, cx);
+    }
+
+    pub(super) fn resize_panes(&mut self, share: f32, cx: &mut Context<Self>) {
+        if self.state.panes_mut().set_divider(Divider::at(share)) {
+            self.save_tabs(cx);
+            cx.notify();
+        }
+    }
+
+    pub(super) fn full_view(&self, ix: usize, cx: &Context<Self>) -> Option<FullView> {
+        if self.panes.len() < 2 {
+            return None;
+        }
+        let pane = self.screens(ix).pane;
+        let shell = cx.weak_entity();
+        let open: FullView = Rc::new(move |window, cx| {
+            shell
+                .update(cx, |shell, cx| shell.open_full_view(pane, window, cx))
+                .ok();
+        });
+        Some(open)
+    }
+
+    fn open_full_view(&mut self, pane: PaneId, window: &mut Window, cx: &mut Context<Self>) {
+        let tab = self
+            .state
+            .panes()
+            .panes()
+            .iter()
+            .find(|candidate| candidate.id() == pane)
+            .map(|candidate| candidate.active().id());
+        if let Some(tab) = tab
+            && self.state.panes_mut().join(tab)
+        {
+            self.panes_changed(window, cx);
+        }
     }
 
     pub(super) fn screens(&self, ix: usize) -> &PaneScreens {

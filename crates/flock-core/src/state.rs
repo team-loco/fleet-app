@@ -178,6 +178,18 @@ impl AppState {
         Some(self.panes.open(location))
     }
 
+    pub fn open_split(&mut self, command: &Command) -> bool {
+        let Some(commands) = self.window_commands(command) else {
+            return false;
+        };
+        let mut location = self.location().clone();
+        for command in &commands {
+            navigate(&mut location, command, &self.snapshot);
+        }
+        self.panes.split_to(location);
+        true
+    }
+
     pub fn new_tab(&mut self) -> TabId {
         self.panes.add(Location::default())
     }
@@ -460,6 +472,24 @@ mod tests {
             None
         );
         assert_eq!(source.window_commands(&Command::ToggleSidebar), None);
+    }
+
+    #[test]
+    fn opening_a_result_in_a_split_navigates_only_the_new_pane() {
+        let mut state = loaded();
+        state.apply(&Command::SelectCluster(Some(ClusterId::new("a"))));
+        assert!(state.open_split(&Command::SelectPage(Page::Pods)));
+        assert_eq!(state.panes().panes().len(), 2);
+        assert_eq!(state.location().page, Page::Pods);
+        assert_eq!(state.location().cluster, Some(ClusterId::new("a")));
+        let left = state
+            .panes()
+            .panes()
+            .first()
+            .map(|pane| pane.active().location().page);
+        assert_eq!(left, Some(Page::ClusterOverview));
+        assert!(!state.open_split(&Command::ToggleSidebar));
+        assert_eq!(state.panes().panes().len(), 2);
     }
 
     #[test]
@@ -865,6 +895,7 @@ mod tests {
                 active: 1,
             }],
             focused: 0,
+            ..SavedWindow::default()
         };
         let mut state = AppState::default();
         state.restore(&saved);

@@ -133,6 +133,7 @@ pub enum Screen {
     AddCluster,
     AddClusterCheck,
     Workload,
+    Split,
     Pods,
     PodsShell,
     Kustomization,
@@ -184,6 +185,7 @@ impl Screen {
             Self::AddCluster => vec![Command::OpenAddCluster(AddClusterStep::Pick)],
             Self::AddClusterCheck => vec![Command::OpenAddCluster(AddClusterStep::Check)],
             Self::Workload => vec![sample, Command::OpenResource(preset.deployment())],
+            Self::Split => vec![sample, Command::OpenResource(preset.deployment())],
             Self::Pods => vec![sample, Command::SelectPage(Page::Pods)],
             Self::PodsShell => vec![sample, Command::SelectPage(Page::Pods)],
             Self::Kustomization => flux_screen(preset.flux(
@@ -230,7 +232,17 @@ impl Screen {
                 cluster: other.clone(),
                 ..deployment
             }),
-            ..Location::page_on(other, Page::Deployments)
+            ..Location::page_on(other.clone(), Page::Deployments)
+        };
+        let other_key = FluxKey::new(
+            other.as_str(),
+            FluxKind::Kustomization,
+            FLUX_NAMESPACE,
+            SAMPLE_KUSTOMIZATION,
+        );
+        let other_kustomization = Location {
+            flux_object: Some(other_key),
+            ..Location::page_on(other, Page::Kustomizations)
         };
         let key = FluxKey::new(
             cluster.as_str(),
@@ -264,11 +276,26 @@ impl Screen {
             Self::Workload => (vec![workload, kustomization, elsewhere], 0),
             Self::Switcher => (vec![workload, kustomization, elsewhere], 0),
             Self::Kustomization => (vec![workload, kustomization, logs], 1),
+            Self::Split => {
+                let left = SavedPane {
+                    tabs: vec![workload, logs, kustomization],
+                    active: 0,
+                };
+                let right = SavedPane {
+                    tabs: vec![elsewhere, other_kustomization],
+                    active: 0,
+                };
+                return Some(SavedWindow {
+                    panes: vec![left, right],
+                    ..SavedWindow::default()
+                });
+            }
             _ => return None,
         };
         Some(SavedWindow {
             panes: vec![SavedPane { tabs, active }],
             focused: 0,
+            ..SavedWindow::default()
         })
     }
 }
@@ -325,6 +352,7 @@ pub fn root_view(
         Screen::AddClusterCheck => shell_view(store, screen, preset, window, cx),
         Screen::Gitops => shell_view(store, screen, preset, window, cx),
         Screen::Workload => shell_view(store, screen, preset, window, cx),
+        Screen::Split => shell_view(store, screen, preset, window, cx),
         Screen::Pods => shell_view(store, screen, preset, window, cx),
         Screen::PodsShell => shell_view(store, screen, preset, window, cx),
         Screen::Kustomization => shell_view(store, screen, preset, window, cx),

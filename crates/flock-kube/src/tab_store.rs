@@ -75,6 +75,7 @@ mod tests {
                 active: 1,
             }],
             focused: 0,
+            ..SavedWindow::default()
         };
         Session {
             windows: vec![window.clone(), window],
