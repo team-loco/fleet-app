@@ -12,7 +12,8 @@ use flock_core::history::Location;
 use flock_core::palette::{COMPARE_KEY, LOGS_KEY, OWNER_KEY, resource_commands};
 use flock_core::resource::short_kind;
 use flock_core::{
-    AddClusterStep, AppState, ClusterSummary, Command, Page, Preferences, Sender, Status, Update,
+    AddClusterStep, AppState, ClusterId, ClusterSummary, Command, Page, Preferences, Sender,
+    Status, Update,
 };
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement,
@@ -307,6 +308,10 @@ impl Shell {
         self.switcher.read(cx).is_open()
     }
 
+    pub fn cluster_settings_selection(&self, cx: &App) -> Option<ClusterId> {
+        self.focused_screens().settings.read(cx).selected().cloned()
+    }
+
     pub fn open_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.switcher
             .update(cx, |switcher, cx| switcher.show(window, cx));
@@ -434,11 +439,7 @@ impl Shell {
         crate::session::record(self.window_id, saved, cx);
     }
 
-    pub(super) fn retarget(
-        &mut self,
-        cluster: Option<&flock_core::ClusterId>,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn retarget(&mut self, cluster: Option<&ClusterId>, cx: &mut Context<Self>) {
         self.state.retarget(cluster);
         self.show_active(cx);
     }

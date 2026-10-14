@@ -179,6 +179,10 @@ impl SettingsScreen {
         self.sync_selection(cx);
     }
 
+    pub fn selected(&self) -> Option<&ClusterId> {
+        self.selected.as_ref()
+    }
+
     pub fn open(&mut self, cluster: &ClusterId, cx: &mut Context<Self>) {
         self.selected = Some(cluster.clone());
         self.sync_selection(cx);

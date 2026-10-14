@@ -78,6 +78,10 @@ fn the_sidebar_buttons_collapse_and_expand_it() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn settings_selection(ui: &Ui) -> Option<ClusterId> {
+    ui.read(Shell::cluster_settings_selection)
+}
+
 fn cluster_at(ui: &Ui, ix: usize) -> anyhow::Result<ClusterSummary> {
     ui.state()
         .snapshot
@@ -146,9 +150,10 @@ fn cluster_actions_open_from_the_switcher() -> anyhow::Result<()> {
     ui.press("escape")?;
     assert!(ui.bounds("switcher-back").is_none());
     assert!(ui.read(Shell::switcher_open));
-    ui.press("cmd-.")?;
+    ui.press("down cmd-.")?;
     ui.click("switcher-action-0")?;
     assert_eq!(ui.state().location().page, Page::ClusterSettings);
+    assert_eq!(settings_selection(&ui), Some(cluster_at(&ui, 1)?.id));
     assert!(!ui.read(Shell::switcher_open));
     Ok(())
 }
@@ -1060,9 +1065,10 @@ fn row_menus_carry_each_objects_actions_and_inspectors_keep_only_the_primary() -
     assert!(pods.bounds("pods-row-menu-item-0").is_some());
 
     let mut flock = Ui::open(Screen::Flock)?;
-    flock.right_click("flock-clusters-row-0")?;
+    flock.right_click("flock-clusters-row-2")?;
     flock.click("flock-clusters-row-menu-item-1")?;
     assert_eq!(flock.state().location().page, Page::ClusterSettings);
+    assert_eq!(settings_selection(&flock), Some(cluster_at(&flock, 2)?.id));
     Ok(())
 }
 
@@ -1316,6 +1322,7 @@ fn the_switcher_gear_opens_settings_and_right_click_offers_connection_actions() 
     let gear: &'static str = staging.replace("row", "gear").leak();
     ui.click(gear)?;
     assert_eq!(ui.state().location().page, Page::ClusterSettings);
+    assert_eq!(settings_selection(&ui), Some(ClusterId::new("staging")));
     assert!(!ui.read(Shell::switcher_open));
     Ok(())
 }
@@ -2199,8 +2206,11 @@ fn empty_utilization_opens_the_selected_clusters_metrics_settings() -> anyhow::R
     assert!(ui.bounds("utilization-chart").is_some());
     assert!(ui.bounds("metrics-empty").is_some());
     assert!(ui.bounds("metrics-note").is_none());
+    let origin = ui.state().location().cluster.clone();
     ui.click("metrics-settings")?;
     assert_eq!(ui.state().location().page, Page::ClusterSettings);
+    assert!(origin.is_some());
+    assert_eq!(settings_selection(&ui), origin);
     Ok(())
 }
 
