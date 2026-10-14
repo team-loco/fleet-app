@@ -1,5 +1,6 @@
 pub mod assets;
 mod gallery;
+pub mod highlight;
 pub mod keymap;
 pub mod kit;
 pub mod prefs;

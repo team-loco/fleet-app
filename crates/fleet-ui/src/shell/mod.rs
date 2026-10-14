@@ -130,7 +130,7 @@ impl Shell {
         });
         let compare = cx.new(CompareScreen::new);
         let settings = cx.new(|cx| SettingsScreen::new(window, cx));
-        let app_settings = cx.new(AppSettingsScreen::new);
+        let app_settings = cx.new(|cx| AppSettingsScreen::new(window, cx));
         let screen_commands = [
             Self::forward(&app_settings, cx),
             Self::forward(&compare, cx),

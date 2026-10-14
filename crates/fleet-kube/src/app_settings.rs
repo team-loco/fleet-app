@@ -53,7 +53,7 @@ impl SettingsStore {
 mod tests {
     use std::fs;
 
-    use fleet_core::app_settings::{PollInterval, Refresh, ThemeChoice};
+    use fleet_core::app_settings::{Highlight, PollInterval, Refresh, Rgb, ThemeChoice};
 
     use super::*;
 
@@ -87,6 +87,12 @@ mod tests {
         };
         let mut settings = AppSettings {
             theme: ThemeChoice::Light,
+            primary: Highlight::Custom(Rgb {
+                r: 0xd9,
+                g: 0x46,
+                b: 0x8a,
+            }),
+            secondary: Highlight::Graphite,
             refresh: Refresh {
                 metrics: PollInterval::Seconds60,
                 ..Refresh::default()

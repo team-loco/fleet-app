@@ -24,13 +24,12 @@ pub(crate) fn init(cx: &mut App) {
 }
 
 pub fn install(settings: AppSettings, save: Saver, bundled: bool, cx: &mut App) {
-    let choice = settings.theme;
+    theme::configure(&settings, cx);
     cx.set_global(Settings {
         current: settings,
         save: Some(save),
         bundled,
     });
-    theme::set_choice(choice, cx);
 }
 
 pub fn current(cx: &App) -> &AppSettings {
@@ -49,10 +48,10 @@ pub fn update(cx: &mut App, change: impl FnOnce(&mut AppSettings)) -> Result<(),
         return Ok(());
     }
     let save = cx.global::<Settings>().save.clone();
-    let theme = next.theme;
     cx.global_mut::<Settings>().current = next.clone();
-    if theme != before.theme {
-        theme::set_choice(theme, cx);
+    let themed = |s: &AppSettings| (s.theme, s.primary, s.secondary);
+    if themed(&next) != themed(&before) {
+        theme::configure(&next, cx);
     }
     save.map_or(Ok(()), |save| save(&next))
 }
@@ -94,5 +93,35 @@ mod tests {
         assert_eq!(saved.len(), 3);
         assert_eq!(saved[0].theme, ThemeChoice::Light);
         assert_eq!(saved[1].refresh.metrics, PollInterval::Seconds5);
+    }
+
+    #[gpui::test]
+    fn highlights_apply_at_once_and_follow_the_mode(cx: &mut TestAppContext) {
+        use fleet_core::app_settings::Highlight;
+        cx.update(|cx| {
+            crate::init(None, cx).unwrap_or_else(|error| panic!("UI init: {error}"));
+            install(
+                AppSettings::default(),
+                Rc::new(|_: &AppSettings| Ok(())),
+                false,
+                cx,
+            );
+            let dark = Palette::dark();
+            assert_eq!(update(cx, |s| s.theme = ThemeChoice::Dark), Ok(()));
+            assert_eq!(update(cx, |s| s.primary = Highlight::Orange), Ok(()));
+            assert_ne!(cx.palette().acc, dark.acc);
+            assert_eq!(cx.palette().sel, dark.sel);
+            let kit = gpui_component::Theme::global(cx).primary;
+            assert_eq!(kit, cx.palette().acc);
+            assert_eq!(update(cx, |s| s.secondary = Highlight::Teal), Ok(()));
+            assert_ne!(cx.palette().sel, dark.sel);
+            let orange_dark = cx.palette().acc;
+            assert_eq!(update(cx, |s| s.theme = ThemeChoice::Light), Ok(()));
+            assert_ne!(cx.palette().acc, orange_dark);
+            assert_ne!(cx.palette().acc, Palette::light().acc);
+            assert_eq!(cx.palette().editor, Palette::light().editor);
+            assert_eq!(update(cx, |s| s.primary = Highlight::Blue), Ok(()));
+            assert_eq!(cx.palette().acc, Palette::light().acc);
+        });
     }
 }

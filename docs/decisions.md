@@ -121,3 +121,14 @@ Settled; change only with a new entry that says why.
     dropped when the rest stays unique). The strip scrolls horizontally and keeps the active tab
     in view. The Workload dock stays; "Open logs in tab" opens the selected pod's logs as a tab.
     A cluster that leaves the snapshot no longer resets its tabs to Fleet home.
+24. **Two highlight colours, not themes**: requested by the product owner instead of a theme
+    registry. Fleet Dark and Fleet Light stay the only token sets (HANDOFF's table). Settings →
+    Appearance has a Primary highlight (the accent family: `acc`, `onacc`, `focus`, `accbg`; links,
+    primary buttons, the focus ring, the active tab line) and a Secondary highlight (the selection
+    family: `sel`, `selfg`, `selline`). Each is a preset (Blue, Purple, Teal, Green, Orange, Pink,
+    Graphite) or a custom `#rrggbb`, saved in `AppSettings` (`primary`, `secondary`). Blue is the
+    HANDOFF tokens unchanged. Any other choice keeps only its hue and saturation and
+    `fleet_ui::highlight::apply` derives the dark and light variants, stepping lightness until
+    accent text is ≥ 4.5:1 on `editor`, `panel` and its own tint, `onacc` is ≥ 4.5:1 on `acc`,
+    and `selfg`, `fg`, `fg2`, `mute` are ≥ 4.5:1 and status glyphs ≥ 3:1 on `sel`. The override
+    applies to every window at once and to the gpui-component kit theme.

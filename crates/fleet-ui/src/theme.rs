@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use fleet_core::Status;
-use fleet_core::app_settings::ThemeChoice;
+use fleet_core::app_settings::{Highlight, ThemeChoice};
+use fleet_core::{AppSettings, Status};
 use gpui::{App, Global, Hsla, Pixels, Window, WindowAppearance, px, rgb, rgba};
 
 const ANSI_BASE: [u32; 16] = [
@@ -130,6 +130,8 @@ pub const TOGGLE_WIDTH: Pixels = px(28.);
 pub const TOGGLE_HEIGHT: Pixels = px(16.);
 pub const TOGGLE_KNOB: Pixels = px(12.);
 pub const CHECKBOX: Pixels = px(14.);
+pub const SWATCH: Pixels = px(20.);
+pub const HEX_FIELD: Pixels = px(96.);
 pub const CHECKBOX_TICK: Pixels = px(10.);
 
 pub const KV_LABEL: Pixels = px(72.);
@@ -359,10 +361,19 @@ pub struct Theme {
     pub forced: Option<Appearance>,
     pub choice: ThemeChoice,
     pub appearance: Appearance,
+    pub primary: Highlight,
+    pub secondary: Highlight,
     pub palette: Palette,
 }
 
 impl Global for Theme {}
+
+impl Theme {
+    fn derive(&self) -> Palette {
+        let base = Palette::for_appearance(self.appearance);
+        crate::highlight::apply(base, self.appearance, self.primary, self.secondary)
+    }
+}
 
 pub trait ActiveTheme {
     fn palette(&self) -> &Palette;
@@ -387,13 +398,16 @@ pub fn init(forced: Option<Appearance>, cx: &mut App) {
     let choice = ThemeChoice::default();
     let os = Appearance::from_window(cx.window_appearance());
     let appearance = resolve(forced, choice, os);
+    let palette = Palette::for_appearance(appearance);
     cx.set_global(Theme {
         forced,
         choice,
         appearance,
-        palette: Palette::for_appearance(appearance),
+        primary: Highlight::default(),
+        secondary: Highlight::default(),
+        palette,
     });
-    sync_component_theme(appearance, cx);
+    sync_component_theme(appearance, &palette, cx);
 }
 
 pub fn follow_window(window: &Window, cx: &mut App) {
@@ -401,8 +415,11 @@ pub fn follow_window(window: &Window, cx: &mut App) {
     show(os, cx);
 }
 
-pub fn set_choice(choice: ThemeChoice, cx: &mut App) {
-    cx.global_mut::<Theme>().choice = choice;
+pub fn configure(settings: &AppSettings, cx: &mut App) {
+    let theme = cx.global_mut::<Theme>();
+    theme.choice = settings.theme;
+    theme.primary = settings.primary;
+    theme.secondary = settings.secondary;
     let os = Appearance::from_window(cx.window_appearance());
     if show(os, cx) {
         cx.refresh_windows();
@@ -412,23 +429,27 @@ pub fn set_choice(choice: ThemeChoice, cx: &mut App) {
 fn show(os: Appearance, cx: &mut App) -> bool {
     let theme = cx.global::<Theme>();
     let appearance = resolve(theme.forced, theme.choice, os);
-    if appearance == theme.appearance {
+    let mut next = Theme {
+        appearance,
+        ..*theme
+    };
+    next.palette = next.derive();
+    if next.appearance == theme.appearance && next.palette == theme.palette {
         return false;
     }
-    let theme = cx.global_mut::<Theme>();
-    theme.appearance = appearance;
-    theme.palette = Palette::for_appearance(appearance);
-    sync_component_theme(appearance, cx);
+    let palette = next.palette;
+    cx.set_global(next);
+    sync_component_theme(appearance, &palette, cx);
     true
 }
 
-fn sync_component_theme(appearance: Appearance, cx: &mut App) {
+fn sync_component_theme(appearance: Appearance, palette: &Palette, cx: &mut App) {
     let mode = match appearance {
         Appearance::Dark => gpui_component::ThemeMode::Dark,
         Appearance::Light => gpui_component::ThemeMode::Light,
     };
     gpui_component::Theme::change(mode, None, cx);
-    let palette = Palette::for_appearance(appearance);
+    let palette = *palette;
     gpui_component::Theme::update(cx, |theme| {
         theme.font_family = FONT_SANS.into();
         theme.mono_font_family = FONT_MONO.into();
