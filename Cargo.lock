@@ -1981,12 +1981,15 @@ dependencies = [
  "flock",
  "flock-core",
  "flock-demo",
+ "flock-kube",
  "flock-ui",
  "flock-update",
  "gpui-pre",
  "gpui-pre-apple",
  "gpui-pre-platform",
  "image",
+ "kube",
+ "serde_norway",
  "tempfile",
 ]
 

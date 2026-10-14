@@ -1,3 +1,4 @@
+use flock_core::emptiness::Noun;
 use flock_core::filter::TextFilter;
 use flock_core::loco::{
     AppFilter, Application, Applications, ControllerObject, LocoCommand, Workspace, short_digest,
@@ -14,6 +15,7 @@ use crate::kit::{
     Button, Column, FilterBar, FilterEvent, InspectorPane, KeyValue, Link, MenuItem, PageTitle,
     SectionHeader, StatusGlyph, StatusText, Table, TableEvent, chip_label,
 };
+use crate::screens::{ListShape, empty_list};
 use crate::theme::{
     ActiveTheme, FONT_MONO, LINE_PROSE, Palette, RADIUS, ROW_TABLE_MAX, ROW_TABLE_MIN, RULE,
     SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_HEADING, TEXT_LABEL,
@@ -33,7 +35,6 @@ const ROUTE_LINE: f32 = 1.7;
 const TITLE: &str = "Applications";
 const LOGS: &str = "Logs";
 const NOTHING_SELECTED: &str = "Select an application to see what the controller made of it.";
-const NO_APPLICATIONS: &str = "No applications match the filter.";
 const SEPARATOR: &str = " · ";
 const MISSING: &str = "—";
 const ROUTE_LINK: &str = "→";
@@ -54,6 +55,8 @@ impl AppRow {
 }
 
 pub struct ApplicationsScreen {
+    cluster_name: String,
+    shown: usize,
     applications: Applications,
     filter: Entity<FilterBar>,
     selected: Option<ResourceRef>,
@@ -79,7 +82,6 @@ impl ApplicationsScreen {
                 .column_gap(SPACE_5)
                 .span_rows(group_row)
                 .row_key(AppRow::key)
-                .empty(NO_APPLICATIONS)
         });
         let objects = cx.new(|cx| {
             Table::new("loco-app-objects", object_columns(), cx)
@@ -126,6 +128,8 @@ impl ApplicationsScreen {
             }),
         ];
         Self {
+            cluster_name: String::new(),
+            shown: 0,
             applications: Applications::default(),
             filter,
             selected: None,
@@ -182,6 +186,11 @@ impl ApplicationsScreen {
             .and_then(|selected| self.applications.find(selected))
     }
 
+    pub fn set_cluster_name(&mut self, name: &str) {
+        self.cluster_name.clear();
+        self.cluster_name.push_str(name);
+    }
+
     pub fn filter_bar(&self) -> &Entity<FilterBar> {
         &self.filter
     }
@@ -203,6 +212,7 @@ impl ApplicationsScreen {
             .iter()
             .filter(|row| matches!(row, AppRow::App(_)))
             .count();
+        self.shown = shown;
         let total = self.applications.iter().count();
         self.filter.update(cx, |bar, cx| {
             bar.set_chips(chips, cx);
@@ -390,6 +400,17 @@ impl ApplicationsScreen {
 impl Render for ApplicationsScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
+        let shape = ListShape {
+            shown: self.shown,
+            total: self.applications.iter().count(),
+            namespace: None,
+            noun: Noun::of(Page::LocoApplications),
+            cluster: &self.cluster_name,
+        };
+        let rows: AnyElement = match empty_list(&shape, &self.filter, None, cx) {
+            Some(empty) => empty.into_any_element(),
+            None => self.list.clone().into_any_element(),
+        };
         let list = div()
             .flex()
             .flex_col()
@@ -400,7 +421,7 @@ impl Render for ApplicationsScreen {
             .border_color(palette.line)
             .child(self.header())
             .child(self.filter.clone())
-            .child(div().flex_1().min_h_0().child(self.list.clone()));
+            .child(div().flex_1().min_h_0().child(rows));
         let content = self.detail(&palette, cx);
         let detail = InspectorPane::new("loco-application-inspector", content).width(DETAIL_WIDTH);
         div().flex().size_full().child(list).child(detail)

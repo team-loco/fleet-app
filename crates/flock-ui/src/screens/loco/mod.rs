@@ -95,6 +95,17 @@ impl LocoScreens {
         cx: &mut Context<Self>,
     ) {
         self.page = location.page;
+        let name = location
+            .cluster
+            .as_ref()
+            .map(|id| flock_core::tabs::cluster_name(id, snapshot))
+            .unwrap_or_default();
+        self.applications
+            .update(cx, |screen, _| screen.set_cluster_name(&name));
+        self.builds
+            .update(cx, |screen, _| screen.set_cluster_name(&name));
+        self.routes
+            .update(cx, |screen, _| screen.set_cluster_name(&name));
         let loco = location
             .cluster
             .as_ref()

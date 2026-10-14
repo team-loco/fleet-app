@@ -1,5 +1,6 @@
+use flock_core::emptiness::Noun;
 use flock_core::loco::{Build, BuildLogLine, Builds, LocoCommand, LogTone};
-use flock_core::{Command, ResourceRef, Status};
+use flock_core::{Command, Page, ResourceRef, Status};
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla, IntoElement,
     ParentElement, Pixels, Render, SharedString, Styled, Subscription, Window, div, px,
@@ -10,6 +11,7 @@ use crate::kit::{
     Button, Column, ConfirmDialog, FilterBar, FilterEvent, Level, LogLine, LogView, PageTitle,
     StatusGlyph, Table, TableEvent, confirm,
 };
+use crate::screens::{ListShape, empty_list};
 use crate::theme::{
     ActiveTheme, FONT_MONO, Palette, ROW_TABLE_MAX, ROW_TABLE_MIN, RULE, SPACE_3, SPACE_5, SPACE_7,
     SPACE_8, TEXT_BODY, TEXT_SMALL,
@@ -26,9 +28,10 @@ const LIST_MAX_HEIGHT: Pixels = px(300.);
 
 const TITLE: &str = "Builds";
 const CANCEL: &str = "Cancel build";
-const NO_BUILDS: &str = "No builds match.";
 
 pub struct BuildsScreen {
+    cluster_name: String,
+    shown: usize,
     builds: Builds,
     selected: Option<ResourceRef>,
     shown_log: Vec<BuildLogLine>,
@@ -47,7 +50,6 @@ impl BuildsScreen {
             Table::new("loco-builds", build_columns(), cx)
                 .row_height(ROW_TABLE_MAX)
                 .row_key(|build: &Build| build.resource.to_string().into())
-                .empty(NO_BUILDS)
         });
         let log = cx.new(|_| LogView::new("loco-build-log").plain().inset(SPACE_8));
         let subscription = cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
@@ -61,6 +63,8 @@ impl BuildsScreen {
             this.refresh(cx);
         });
         Self {
+            cluster_name: String::new(),
+            shown: 0,
             builds: Builds::default(),
             selected: None,
             shown_log: Vec::new(),
@@ -73,6 +77,11 @@ impl BuildsScreen {
 
     pub fn filter_bar(&self) -> &Entity<FilterBar> {
         &self.filter
+    }
+
+    pub fn set_cluster_name(&mut self, name: &str) {
+        self.cluster_name.clear();
+        self.cluster_name.push_str(name);
     }
 
     pub fn set_builds(&mut self, builds: Builds, cx: &mut Context<Self>) {
@@ -90,6 +99,7 @@ impl BuildsScreen {
             .cloned()
             .collect();
         let shown = rows.len();
+        self.shown = shown;
         let total = self.builds.builds.len();
         self.filter
             .update(cx, |bar, cx| bar.set_matches(shown, total, cx));
@@ -219,6 +229,23 @@ impl BuildsScreen {
 impl Render for BuildsScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
+        let shape = ListShape {
+            shown: self.shown,
+            total: self.builds.builds.len(),
+            namespace: None,
+            noun: Noun::of(Page::LocoBuilds),
+            cluster: &self.cluster_name,
+        };
+        if let Some(empty) = empty_list(&shape, &self.filter, None, cx) {
+            return div()
+                .flex()
+                .flex_col()
+                .size_full()
+                .child(PageTitle::new(TITLE).detail(self.builds.subtitle()))
+                .child(self.filter.clone())
+                .child(empty)
+                .into_any_element();
+        }
         let summary = self
             .current()
             .cloned()
@@ -237,6 +264,7 @@ impl Render for BuildsScreen {
             )
             .children(summary)
             .child(div().flex_1().min_h_0().child(self.log.clone()))
+            .into_any_element()
     }
 }
 

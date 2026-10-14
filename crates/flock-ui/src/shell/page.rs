@@ -77,12 +77,21 @@ impl Shell {
         }
         let loading = self.load_view(ix, &location, cx);
         let body = if let Some(view) = loading {
+            let bar = self.filter_bar_at(ix, &location, cx);
             div()
-                .id("page-content")
                 .flex_1()
                 .min_h_0()
-                .overflow_y_scroll()
-                .child(view)
+                .flex()
+                .flex_col()
+                .children(bar)
+                .child(
+                    div()
+                        .id("page-content")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .child(view),
+                )
                 .into_any_element()
         } else if location.page == Page::Pods && self.has_detail(&location) {
             div()
@@ -205,7 +214,7 @@ impl Shell {
             .min_w_0()
             .h_full()
             .bg(palette.editor)
-            .child(EmptyState::new(sentence, action))
+            .child(EmptyState::new(sentence).action(action))
             .into_any_element()
     }
 

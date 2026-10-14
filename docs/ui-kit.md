@@ -535,8 +535,17 @@ a skeleton again (decision 32). The shell renders:
 - `Skeleton::rows()` for tables and `Skeleton::blocks()` for meters and charts, shimmering over
   `theme::SKELETON_SHIMMER` (still under reduced motion)
 - `ConnectionProgress::new(cluster, step)` above the skeleton while the cluster is connecting
-- `EmptyState::new(sentence, action)`: no icon, one sentence and one `Button`
+- `EmptyState::new(sentence).detail(text).action(button)`: no icon, one sentence, an optional muted line and buttons.
+  `EmptyState::for_list(&Emptiness, Noun, cluster, &filter, show_all)` builds the list variants below
 - `ErrorState::new(reason, retry)`: status glyph, the backend reason on one line, Retry
+
+The filter bar is always the first row of a list page, so every state sits under it: the shell draws
+the page's `FilterBar` above the skeleton, connection progress and error, and each list screen draws
+its own empty state in place of the table. `flock_core::emptiness::Emptiness::classify` tells three
+empties apart: the cluster has none (`No Deployments in <cluster>`, no button), the namespace picker
+hides them (`No Deployments in namespace <ns>`, `6 Deployments in other namespaces`, primary
+`Show all namespaces`), or the text or chip filter hides them (`No Deployments match "<text>"`, primary
+`Clear filter`). Only Retry on error states is a button that reloads; empty states have no Refresh.
 
 A page still pending after `flock_core::watch::WATCH_SYNC_TIMEOUT` becomes an error naming the step
 it stalled on. Render the states headlessly with `mise run shot -- resources dark --state loading`

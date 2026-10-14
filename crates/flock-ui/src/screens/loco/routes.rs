@@ -1,5 +1,6 @@
-use flock_core::Status;
+use flock_core::emptiness::Noun;
 use flock_core::loco::{Listener, Route, RouteFilter, Routes};
+use flock_core::{Page, Status};
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, Hsla, InteractiveElement,
     IntoElement, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled,
@@ -12,6 +13,7 @@ use crate::kit::{
     Column, FilterBar, FilterEvent, PageTitle, SectionHeader, StatusGlyph, Table, TableEvent,
     chip_label,
 };
+use crate::screens::{ListShape, empty_list};
 use crate::theme::{
     ActiveTheme, FONT_MONO, Palette, ROW_TABLE, RULE, SPACE_2, SPACE_8, TEXT_SMALL,
 };
@@ -27,10 +29,11 @@ const ROUTE_BACKEND_MIN: Pixels = px(180.);
 const ROUTE_READY: Pixels = px(64.);
 const ROUTE_STATUS_MIN: Pixels = px(200.);
 const ROUTE_STATUS_WEIGHT: f32 = 1.2;
-const NO_PROBLEMS: &str = "No routes with problems.";
 const MISSING: &str = "—";
 
 pub struct RoutesScreen {
+    cluster_name: String,
+    shown: usize,
     routes: Routes,
     filter: Entity<FilterBar>,
     listeners: Entity<Table<Listener>>,
@@ -52,7 +55,6 @@ impl RoutesScreen {
             Table::new("loco-routes", route_columns(), cx)
                 .row_height(ROW_TABLE)
                 .click_opens()
-                .empty(NO_PROBLEMS)
                 .fit_content()
         });
         let subscription = cx.subscribe(&table, |_, table, event: &TableEvent, cx| {
@@ -68,12 +70,19 @@ impl RoutesScreen {
             this.refresh(cx);
         });
         Self {
+            cluster_name: String::new(),
+            shown: 0,
             routes: Routes::default(),
             filter,
             listeners,
             table,
             _subscriptions: [subscription, filtered],
         }
+    }
+
+    pub fn set_cluster_name(&mut self, name: &str) {
+        self.cluster_name.clear();
+        self.cluster_name.push_str(name);
     }
 
     pub fn set_routes(&mut self, routes: Routes, cx: &mut Context<Self>) {
@@ -102,6 +111,7 @@ impl RoutesScreen {
         let filter = RouteFilter::ALL.get(chip).copied().unwrap_or_default();
         let rows = self.routes.ranked(filter, &query);
         let shown = rows.len();
+        self.shown = shown;
         let total = self.routes.routes.len();
         self.filter.update(cx, |bar, cx| {
             bar.set_chips(chips, cx);
@@ -140,6 +150,17 @@ impl Render for RoutesScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
         let header = self.routes_header(&palette);
+        let shape = ListShape {
+            shown: self.shown,
+            total: self.routes.routes.len(),
+            namespace: None,
+            noun: Noun::of(Page::LocoRoutes),
+            cluster: &self.cluster_name,
+        };
+        let routes: AnyElement = match empty_list(&shape, &self.filter, None, cx) {
+            Some(empty) => empty.into_any_element(),
+            None => self.table.clone().into_any_element(),
+        };
         div()
             .flex()
             .flex_col()
@@ -167,7 +188,7 @@ impl Render for RoutesScreen {
                             .pb(SPACE_8)
                             .border_t(RULE)
                             .border_color(palette.line)
-                            .child(self.table.clone()),
+                            .child(routes),
                     ),
             )
     }

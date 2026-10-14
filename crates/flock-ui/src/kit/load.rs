@@ -1,10 +1,13 @@
+use std::rc::Rc;
+
 use flock_core::Status;
+use flock_core::emptiness::{Emptiness, Noun};
 use gpui::{
-    AnimationExt, AnyElement, App, Hsla, InteractiveElement, IntoElement, ParentElement, Pixels,
-    RenderOnce, SharedString, Styled, Window, div, linear_color_stop, linear_gradient,
+    AnimationExt, AnyElement, App, Entity, Hsla, InteractiveElement, IntoElement, ParentElement,
+    Pixels, RenderOnce, SharedString, Styled, Window, div, linear_color_stop, linear_gradient,
 };
 
-use super::{Button, StatusText};
+use super::{Button, FilterBar, StatusText};
 use crate::theme::{
     self, ActiveTheme, CHART_HEIGHT, Palette, ROW_TABLE, RULE, SKELETON_CHART_WIDTH,
     SKELETON_GRADIENT_ANGLE, SKELETON_GRADIENT_END, SKELETON_GRADIENT_START, SKELETON_METER_HEIGHT,
@@ -159,34 +162,96 @@ impl RenderOnce for ConnectionProgress {
     }
 }
 
+pub type ShowAll = Rc<dyn Fn(&mut Window, &mut App)>;
+
+const CLEAR_FILTER: &str = "Clear filter";
+const SHOW_ALL_NAMESPACES: &str = "Show all namespaces";
+
 #[derive(IntoElement)]
 pub struct EmptyState {
+    selector: &'static str,
     sentence: SharedString,
-    action: Button,
+    detail: Option<SharedString>,
+    actions: Vec<Button>,
 }
 
 impl EmptyState {
-    pub fn new(sentence: impl Into<SharedString>, action: Button) -> Self {
+    pub fn new(sentence: impl Into<SharedString>) -> Self {
         Self {
+            selector: "empty-state",
             sentence: sentence.into(),
-            action,
+            detail: None,
+            actions: Vec::new(),
         }
+    }
+
+    pub fn detail(mut self, detail: impl Into<SharedString>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+
+    pub fn action(mut self, action: Button) -> Self {
+        self.actions.push(action);
+        self
+    }
+
+    pub fn for_list(
+        emptiness: &Emptiness,
+        noun: Noun,
+        cluster: &str,
+        filter: &Entity<FilterBar>,
+        show_all: Option<ShowAll>,
+    ) -> Self {
+        let mut state = Self::new(emptiness.sentence(noun, cluster));
+        state.selector = match emptiness {
+            Emptiness::Cluster => "empty-state-cluster",
+            Emptiness::Namespace { .. } => "empty-state-namespace",
+            Emptiness::Filter { .. } => "empty-state-filter",
+        };
+        state.detail = emptiness.detail(noun).map(SharedString::from);
+        match (emptiness, show_all) {
+            (Emptiness::Namespace { .. }, Some(show_all)) => {
+                let all = Button::new("empty-show-all-namespaces", SHOW_ALL_NAMESPACES)
+                    .primary()
+                    .on_click(move |_, window, cx| show_all(window, cx));
+                state.actions.push(all);
+            }
+            (Emptiness::Filter { .. }, _) => {
+                let filter = filter.clone();
+                let clear = Button::new("empty-clear-filter", CLEAR_FILTER)
+                    .primary()
+                    .on_click(move |_, window, cx| {
+                        filter.update(cx, |bar, cx| bar.clear(window, cx));
+                    });
+                state.actions.push(clear);
+            }
+            (Emptiness::Cluster | Emptiness::Namespace { .. }, _) => {}
+        }
+        state
     }
 }
 
 impl RenderOnce for EmptyState {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let palette = *cx.palette();
+        let selector = self.selector;
+        let actions =
+            (!self.actions.is_empty()).then(|| div().flex().gap(SPACE_4).children(self.actions));
         div()
-            .debug_selector(|| "empty-state".to_owned())
+            .debug_selector(|| selector.to_owned())
             .flex()
             .flex_col()
             .items_start()
             .gap(SPACE_5)
             .px(SPACE_8)
             .pt(SPACE_8)
-            .text_color(cx.palette().fg2)
+            .text_color(palette.fg2)
             .child(self.sentence)
-            .child(self.action)
+            .children(
+                self.detail
+                    .map(|detail| div().text_color(palette.mute).child(detail)),
+            )
+            .children(actions)
     }
 }
 

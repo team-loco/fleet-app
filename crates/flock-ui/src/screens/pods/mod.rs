@@ -1,10 +1,13 @@
 use crate::kit::SelectableText;
+use flock_core::emptiness::Noun;
 use flock_core::pods::{
     Container, Pod, PodFilter, PodQuery, filter_counts, namespaces, nav_counts,
 };
 use flock_core::resources::{POD_LIST, namespace_choices};
 use flock_core::settings::NamespaceSelection;
-use flock_core::{ClusterId, Command, Counts, Preferences, ResourceRef, Seen, Snapshot, Status};
+use flock_core::{
+    ClusterId, Command, Counts, Page, Preferences, ResourceRef, Seen, Snapshot, Status,
+};
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, InteractiveElement,
     IntoElement, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled,
@@ -17,10 +20,10 @@ use streams::{LogSession, SEARCH_PLACEHOLDER, ShellSession, TERMINAL_ID};
 
 use crate::kit::{
     Button, Column, ConfirmDialog, DockState, FilterBar, FilterEvent, InputEvent, InspectorPane,
-    KeyValue, Link, LogView, MenuItem, SectionLabel, Select, SelectEvent, StatusGlyph, StatusText,
-    Table, TableEvent, Terminal, TextFieldState, chip_label, confirm, swap_in,
+    KeyValue, Link, LogView, MenuItem, SectionLabel, Select, SelectEvent, ShowAll, StatusGlyph,
+    StatusText, Table, TableEvent, Terminal, TextFieldState, chip_label, confirm, swap_in,
 };
-use crate::screens::new_tab_item;
+use crate::screens::{ListShape, empty_list, new_tab_item};
 use crate::theme::{
     ActiveTheme, CONTAINER_SQUARE, CONTAINER_SQUARE_GAP, FONT_MONO, LINE_PROSE, Palette,
     RADIUS_SMALL, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, TEXT_BODY,
@@ -43,12 +46,13 @@ const ALL_NAMESPACES: &str = "All namespaces";
 const MISSING: &str = "—";
 const TRUE: &str = "True";
 const FALSE: &str = "False";
-const NO_PODS: &str = "No pods match the filter.";
 const NO_EVENTS: &str = "No recent events.";
 const NO_SELECTION: &str = "Select a pod to see its containers, conditions and events.";
 pub struct PodsScreen {
     pods: Vec<Pod>,
     cluster: Option<ClusterId>,
+    names: Vec<(ClusterId, String)>,
+    shown: usize,
     query: PodQuery,
     selected: Option<ResourceRef>,
     container: Option<String>,
@@ -84,7 +88,6 @@ impl PodsScreen {
                 .row_actions(move |pod: &Pod| menu_items(pod, &screen))
                 .row_key(|pod: &Pod| pod.name.clone().into())
                 .column_gap(SPACE_7)
-                .empty(NO_PODS)
         });
         let search = cx.new(|cx| TextFieldState::new(window, cx).placeholder(SEARCH_PLACEHOLDER));
         let namespace = cx.new(|cx| {
@@ -148,6 +151,8 @@ impl PodsScreen {
         Self {
             pods: Vec::new(),
             cluster: None,
+            names: Vec::new(),
+            shown: 0,
             query: PodQuery::default(),
             selected: None,
             container: None,
@@ -168,6 +173,11 @@ impl PodsScreen {
 
     pub fn set_snapshot(&mut self, snapshot: &Snapshot, cx: &mut Context<Self>) {
         self.pods.clone_from(&snapshot.pods);
+        self.names = snapshot
+            .clusters
+            .iter()
+            .map(|cluster| (cluster.id.clone(), cluster.name.clone()))
+            .collect();
         self.refresh(cx);
     }
 
@@ -288,6 +298,7 @@ impl PodsScreen {
             .map(|(filter, n)| chip_label(filter.label(), n))
             .collect();
         let shown = rows.len();
+        self.shown = shown;
         let total = self.cluster_total();
         self.filter.update(cx, |bar, cx| {
             bar.set_chips(chips, cx);
@@ -316,6 +327,20 @@ impl PodsScreen {
             table.select(position, cx);
         });
         self.sync_selection(cx);
+    }
+
+    fn show_all_namespaces(&mut self, cx: &mut Context<Self>) {
+        self.namespace
+            .update(cx, |select, cx| select.set_selected(0, cx));
+        self.choose_namespace(None, cx);
+    }
+
+    fn cluster_name(&self) -> &str {
+        let named = self
+            .names
+            .iter()
+            .find(|(id, _)| Some(id) == self.cluster.as_ref());
+        named.map_or("", |(_, name)| name.as_str())
     }
 
     fn cluster_total(&self) -> usize {
@@ -815,7 +840,28 @@ impl Render for PodsScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let inspector = self.inspector(cx);
         let dock = self.dock_view(cx).into_any_element();
-        let table = div().flex_1().min_w_0().h_full().child(self.table.clone());
+        let namespace = self.query.namespace.as_deref().map(|namespace| {
+            let inside = self.pods.iter().filter(|pod| {
+                Some(&pod.cluster) == self.cluster.as_ref() && pod.namespace == namespace
+            });
+            (namespace, inside.count())
+        });
+        let shape = ListShape {
+            shown: self.shown,
+            total: self.cluster_total(),
+            namespace,
+            noun: Noun::of(Page::Pods),
+            cluster: self.cluster_name(),
+        };
+        let screen = cx.weak_entity();
+        let show_all: ShowAll = std::rc::Rc::new(move |_, cx| {
+            let _ = screen.update(cx, PodsScreen::show_all_namespaces);
+        });
+        let list: AnyElement = match empty_list(&shape, &self.filter, Some(show_all), cx) {
+            Some(empty) => empty.into_any_element(),
+            None => self.table.clone().into_any_element(),
+        };
+        let table = div().flex_1().min_w_0().h_full().child(list);
         div()
             .size_full()
             .flex()

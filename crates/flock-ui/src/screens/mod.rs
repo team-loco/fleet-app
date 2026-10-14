@@ -17,12 +17,13 @@ mod resources;
 pub mod settings;
 pub mod workload;
 
+use flock_core::emptiness::{Emptiness, Noun};
 use flock_core::{ClusterSummary, Command, Counts, Page, ResourceKind, ResourceRef, Snapshot};
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, FocusHandle, IntoElement, Subscription, Window,
 };
 
-use crate::kit::{FilterBar, Link, MenuItem};
+use crate::kit::{EmptyState, FilterBar, Link, MenuItem, ShowAll};
 
 pub use events::EventsScreen;
 pub use flux_list::FluxListScreen;
@@ -30,6 +31,34 @@ pub use namespaces::NamespacesScreen;
 pub use nodes::NodesScreen;
 pub use overview::OverviewScreen;
 pub use resources::ResourcesScreen;
+
+pub(crate) struct ListShape<'a> {
+    pub shown: usize,
+    pub total: usize,
+    pub namespace: Option<(&'a str, usize)>,
+    pub noun: Noun,
+    pub cluster: &'a str,
+}
+
+pub(crate) fn empty_list(
+    shape: &ListShape,
+    filter: &Entity<FilterBar>,
+    show_all: Option<ShowAll>,
+    cx: &App,
+) -> Option<EmptyState> {
+    if shape.shown > 0 {
+        return None;
+    }
+    let text = filter.read(cx).text(cx);
+    let emptiness = Emptiness::classify(shape.total, shape.namespace, &text);
+    Some(EmptyState::for_list(
+        &emptiness,
+        shape.noun,
+        shape.cluster,
+        filter,
+        show_all,
+    ))
+}
 
 pub const NODE_KIND: &str = "Node";
 pub const OPEN_FULL_VIEW: &str = "Open full view →";
@@ -109,7 +138,7 @@ impl ClusterPages {
             && is_flux_list(page)
         {
             self.flux.update(cx, |screen, cx| {
-                screen.set(&cluster.id, page, &snapshot.flux, cx);
+                screen.set(cluster, page, &snapshot.flux, cx);
             });
             return;
         }
@@ -126,7 +155,7 @@ impl ClusterPages {
             }),
             Page::Namespaces => self
                 .namespaces
-                .update(cx, |screen, cx| screen.set(&cluster.id, detail, cx)),
+                .update(cx, |screen, cx| screen.set(cluster, detail, cx)),
             Page::Events => self.events.update(cx, |screen, cx| {
                 screen.set(cluster, detail, preferences, cx);
             }),

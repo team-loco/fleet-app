@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
+use flock_core::emptiness::Noun;
 use flock_core::filter::StatusFilter;
 use flock_core::resources::{
     Resource, filter_counts, filter_resources, namespace_choices, namespaces_of,
@@ -17,10 +19,11 @@ use gpui::{
 
 use super::ScreenEvent;
 use crate::kit::{
-    CodeView, Column, ConfirmDialog, FilterBar, FilterEvent, IconButton, Inspector, MenuItem,
-    Presence, Select, SelectEvent, Table, TableEvent, chip_label, confirm, slide_in, slide_out,
+    CodeView, Column, ConfirmDialog, EmptyState, FilterBar, FilterEvent, IconButton, Inspector,
+    MenuItem, Presence, Select, SelectEvent, ShowAll, Table, TableEvent, chip_label, confirm,
+    slide_in, slide_out,
 };
-use crate::screens::new_tab_item;
+use crate::screens::{ListShape, empty_list, new_tab_item};
 use crate::theme::SPACE_3;
 
 const ALL_NAMESPACES: &str = "All namespaces";
@@ -101,8 +104,10 @@ fn cell_widths(kind: ResourceKind) -> &'static [Cell] {
 
 pub struct ResourcesScreen {
     cluster: Option<ClusterId>,
+    cluster_name: String,
     kind: ResourceKind,
     rows: Vec<Resource>,
+    shown: usize,
     confirm_destructive: bool,
     namespace: Option<String>,
     preferences: Preferences,
@@ -156,8 +161,10 @@ impl ResourcesScreen {
         ];
         Self {
             cluster: None,
+            cluster_name: String::new(),
             kind: ResourceKind::Deployment,
             rows: Vec::new(),
+            shown: 0,
             confirm_destructive: true,
             namespace: None,
             preferences: Preferences::default(),
@@ -200,6 +207,7 @@ impl ResourcesScreen {
             self.selected = None;
         }
         self.cluster = Some(cluster.id.clone());
+        self.cluster_name.clone_from(&cluster.name);
         self.kind = kind;
         if let Some((_, namespace, name)) = self.revealed.take_if(|(k, _, _)| *k == kind) {
             self.show_namespace_of(&namespace, cx);
@@ -263,6 +271,31 @@ impl ResourcesScreen {
         cx.emit(ScreenEvent::Command(command));
     }
 
+    fn show_all_namespaces(&mut self, cx: &mut Context<Self>) {
+        self.namespaces
+            .update(cx, |select, cx| select.set_selected(0, cx));
+        self.choose_namespace(None, cx);
+    }
+
+    fn empty_state(&self, cx: &mut Context<Self>) -> Option<EmptyState> {
+        let namespace = self.namespace.as_deref().map(|namespace| {
+            let inside = self.rows.iter().filter(|r| r.namespace == namespace);
+            (namespace, inside.count())
+        });
+        let shape = ListShape {
+            shown: self.shown,
+            total: self.rows.len(),
+            namespace,
+            noun: Noun::of(self.kind.page()),
+            cluster: &self.cluster_name,
+        };
+        let screen = cx.weak_entity();
+        let show_all: ShowAll = Rc::new(move |_, cx| {
+            let _ = screen.update(cx, ResourcesScreen::show_all_namespaces);
+        });
+        empty_list(&shape, &self.filter, Some(show_all), cx)
+    }
+
     pub fn filter_bar(&self) -> &Entity<FilterBar> {
         &self.filter
     }
@@ -280,7 +313,6 @@ impl ResourcesScreen {
             Table::new(format!("resources-{}", kind.name()), columns(kind), cx)
                 .row_key(|r: &Resource| format!("{}/{}", r.namespace, r.name).into())
                 .row_status(|r: &Resource| (r.status != Status::Ok).then_some(r.status))
-                .empty("Nothing matches the filter.")
         });
         let subscription = cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
             let ix = match *event {
@@ -314,6 +346,7 @@ impl ResourcesScreen {
         let chip = StatusFilter::at(chip);
         let rows: Vec<Resource> = base.into_iter().filter(|r| chip.keeps(r.status)).collect();
         let shown = rows.len();
+        self.shown = shown;
         let total = self.rows.len();
         self.filter.update(cx, |bar, cx| {
             bar.set_chips(chips, cx);
@@ -438,6 +471,10 @@ impl ResourcesScreen {
 impl Render for ResourcesScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let table = self.table(cx);
+        let body: AnyElement = match self.empty_state(cx) {
+            Some(empty) => empty.into_any_element(),
+            None => table.into_any_element(),
+        };
         let current = self.selected_row().cloned();
         self.presence.track(current.as_ref(), presence, cx);
         let inspector = match current {
@@ -461,7 +498,7 @@ impl Render for ResourcesScreen {
                     .flex()
                     .flex_col()
                     .child(self.filter.clone())
-                    .child(div().flex_1().min_h_0().child(table)),
+                    .child(div().flex_1().min_h_0().child(body)),
             )
             .children(inspector)
     }
