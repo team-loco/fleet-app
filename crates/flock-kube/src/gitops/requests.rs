@@ -72,6 +72,7 @@ mod tests {
 
     fn object(phase: Phase) -> FluxObject {
         FluxObject {
+            labels: BTreeMap::new(),
             uid: Uid::default(),
             key: FluxKey::new(
                 "a",

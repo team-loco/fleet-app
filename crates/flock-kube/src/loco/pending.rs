@@ -97,6 +97,7 @@ mod tests {
 
     fn cluster(deployment: Status, build: BuildPhase) -> LocoCluster {
         let application = Application {
+            labels: BTreeMap::new(),
             resource: reference("Application", "resource-web"),
             name: "resource-web".into(),
             environment: String::new(),
@@ -122,6 +123,7 @@ mod tests {
             route: None,
         };
         let build = Build {
+            labels: BTreeMap::new(),
             resource: reference("Build", "b1"),
             id: "b1".into(),
             service: "resource-web".into(),

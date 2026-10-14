@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::filter::{StatusFilter, TextFilter};
@@ -128,13 +129,14 @@ pub struct Resource {
     pub cells: Vec<String>,
     pub age: Duration,
     pub yaml: String,
+    pub labels: BTreeMap<String, String>,
 }
 
 impl Resource {
     pub fn matches(&self, namespace: Option<&str>, query: &TextFilter) -> bool {
         let in_namespace = namespace.is_none_or(|ns| ns == self.namespace);
         let fields = [self.name.as_str(), self.namespace.as_str()];
-        in_namespace && query.matches(Some(&self.namespace), &fields)
+        in_namespace && query.matches_labeled(Some(&self.namespace), &self.labels, &fields)
     }
 }
 
@@ -173,7 +175,18 @@ pub(crate) mod tests {
             cells: Vec::new(),
             age: Duration::ZERO,
             yaml: String::new(),
+            labels: BTreeMap::new(),
         }
+    }
+
+    #[test]
+    fn label_filters_match_resource_metadata() {
+        let mut row = resource("payments", "checkout", Status::Ok);
+        row.labels.insert("app".into(), "cart".into());
+        assert!(row.matches(None, &TextFilter::parse("checkout ns:pay label:app=cart")));
+        assert!(row.matches(None, &TextFilter::parse("l:app")));
+        assert!(!row.matches(None, &TextFilter::parse("l:app=web")));
+        assert!(!row.matches(Some("web"), &TextFilter::parse("l:app")));
     }
 
     #[test]

@@ -109,7 +109,9 @@ fn sync_row(kind: FluxKind, row: &matrix::Row, clusters: &[&ClusterFluxView<'_>]
         .first()
         .map(|(_, parsed)| row_detail(parsed))
         .unwrap_or_default();
+    let label_sets = present.iter().map(|(_, parsed)| parsed.labels()).collect();
     SyncRow {
+        label_sets,
         kind,
         namespace: row.identity.namespace.clone(),
         name: row.identity.name.clone(),

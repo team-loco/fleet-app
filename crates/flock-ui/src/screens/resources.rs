@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use flock_core::emptiness::Noun;
-use flock_core::filter::StatusFilter;
+use flock_core::filter::{StatusFilter, label_values};
 use flock_core::resources::{
     Resource, filter_counts, filter_resources, namespace_choices, namespaces_of,
 };
@@ -334,6 +334,14 @@ impl ResourcesScreen {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
+        let namespace = self.namespace.as_ref();
+        let labels = label_values(
+            self.rows
+                .iter()
+                .filter(|row| namespace.is_none_or(|namespace| &row.namespace == namespace))
+                .map(|row| &row.labels),
+        );
+        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
         let (query, chip) = {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
@@ -627,6 +635,7 @@ mod tests {
             cells: Vec::new(),
             age: std::time::Duration::ZERO,
             yaml: String::new(),
+            labels: std::collections::BTreeMap::new(),
         }
     }
 

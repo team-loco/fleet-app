@@ -16,6 +16,7 @@ pub const ACTIVE_PHASE: &str = "Active";
 #[derive(Clone, Debug, PartialEq)]
 pub struct Namespace {
     pub name: String,
+    pub labels: BTreeMap<String, String>,
     pub status: Status,
     pub phase: String,
     pub pods: u32,
@@ -27,7 +28,11 @@ pub struct Namespace {
 
 impl Namespace {
     pub fn matches(&self, query: &TextFilter) -> bool {
-        query.matches(Some(&self.name), &[self.name.as_str(), self.phase.as_str()])
+        query.matches_labeled(
+            Some(&self.name),
+            &self.labels,
+            &[self.name.as_str(), self.phase.as_str()],
+        )
     }
 
     pub fn cpu_label(&self) -> String {
@@ -153,6 +158,14 @@ mod tests {
     }
 
     #[test]
+    fn namespace_label_tokens_match_its_metadata() {
+        let mut namespace = namespace("payments", Counts::default());
+        namespace.labels.insert("team".into(), "checkout".into());
+        assert!(namespace.matches(&TextFilter::parse("ns:pay label:team=checkout")));
+        assert!(!namespace.matches(&TextFilter::parse("label:team=platform")));
+    }
+
+    #[test]
     fn namespace_filter_matches_its_name() {
         let ns = namespace("payments", Counts::default());
         assert!(ns.matches(&TextFilter::parse("pay")));
@@ -162,6 +175,7 @@ mod tests {
 
     fn namespace(name: &str, problems: Counts) -> Namespace {
         Namespace {
+            labels: BTreeMap::new(),
             name: name.into(),
             status: problems.status(),
             phase: ACTIVE_PHASE.into(),

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use super::{Workspace, short_digest};
@@ -72,6 +73,7 @@ impl BuildLogLine {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Build {
+    pub labels: BTreeMap<String, String>,
     pub resource: ResourceRef,
     pub job_uid: Uid,
     pub id: String,
@@ -101,7 +103,7 @@ impl Build {
             self.workspace.label(),
             self.workspace.namespace.as_str(),
         ];
-        query.matches(Some(&self.workspace.namespace), &fields)
+        query.matches_labeled(Some(&self.workspace.namespace), &self.labels, &fields)
     }
 
     pub fn took_label(&self) -> String {
@@ -186,6 +188,7 @@ mod tests {
 
     fn build(phase: BuildPhase, digest: Option<&str>, cache: Option<u8>) -> Build {
         Build {
+            labels: BTreeMap::new(),
             resource: ResourceRef {
                 cluster: ClusterId::new("prod"),
                 kind: "Build".into(),
@@ -210,6 +213,14 @@ mod tests {
             buildkit: Status::Ok,
             log: Vec::new(),
         }
+    }
+
+    #[test]
+    fn list_label_tokens_match_metadata() {
+        let mut build = build(BuildPhase::Running, None, None);
+        build.labels.insert("team".into(), "checkout".into());
+        assert!(build.matches(&TextFilter::parse("label:team=checkout")));
+        assert!(!build.matches(&TextFilter::parse("l:team=platform")));
     }
 
     #[test]

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use flock_core::Status;
 use flock_core::loco::{Listener, Route, Routes};
 
@@ -158,6 +160,7 @@ fn http_routes() -> Vec<Route> {
     seeds
         .into_iter()
         .map(|seed| Route {
+            labels: BTreeMap::new(),
             status: seed.status,
             name: seed.name.into(),
             host: seed.host.map(Into::into),

@@ -282,6 +282,7 @@ fn events(problems: &[&Problem], template: &[Event], present: &BTreeSet<&str>) -
         .iter()
         .filter(|p| p.target.kind != CLUSTER_KIND)
         .map(|p| Event {
+            labels: BTreeMap::new(),
             details: crate::detail::event_details(
                 &format!("{}/{}", p.target.kind.to_lowercase(), p.target.name),
                 p.status,

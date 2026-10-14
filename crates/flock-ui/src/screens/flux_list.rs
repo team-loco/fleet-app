@@ -1,5 +1,5 @@
 use flock_core::emptiness::Noun;
-use flock_core::filter::StatusFilter;
+use flock_core::filter::{StatusFilter, label_values};
 use flock_core::overview::plural;
 use flock_core::{ClusterSummary, Command, Counts, FluxAction, FluxObject, Page};
 use gpui::{
@@ -102,6 +102,8 @@ impl FluxListScreen {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
+        let labels = label_values(self.objects.iter().map(|object| &object.labels));
+        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
         let (query, chip) = {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
@@ -111,7 +113,7 @@ impl FluxListScreen {
             .iter()
             .filter(|o| {
                 let fields = [o.key.name.as_str(), o.key.kind.label()];
-                query.matches(Some(&o.key.namespace), &fields)
+                query.matches_labeled(Some(&o.key.namespace), &o.labels, &fields)
             })
             .collect();
         let chips = StatusFilter::counts(base.iter().map(|o| o.status()))

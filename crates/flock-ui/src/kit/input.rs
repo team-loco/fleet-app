@@ -10,9 +10,11 @@ use crate::theme::{
 };
 
 pub use gpui_component::input::{
-    Escape as TextFieldEscape, InputEvent, InputState as TextFieldState, MoveDown as TextFieldDown,
-    MoveEnd as TextFieldEnd, MoveHome as TextFieldHome, MovePageDown as TextFieldPageDown,
-    MovePageUp as TextFieldPageUp, MoveUp as TextFieldUp, TextareaState as TextAreaState,
+    Backspace as TextFieldBackspace, Enter as TextFieldEnter, Escape as TextFieldEscape,
+    IndentInline as TextFieldTab, InputEvent, InputState as TextFieldState,
+    MoveDown as TextFieldDown, MoveEnd as TextFieldEnd, MoveHome as TextFieldHome,
+    MovePageDown as TextFieldPageDown, MovePageUp as TextFieldPageUp, MoveUp as TextFieldUp,
+    TextareaState as TextAreaState,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

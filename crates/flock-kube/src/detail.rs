@@ -339,7 +339,9 @@ pub fn namespaces(
             let name = ns.metadata.name.clone().unwrap_or_default();
             let facts = index.namespaces.get(&name).cloned().unwrap_or_default();
             let totals = used.get(name.as_str()).copied().unwrap_or_default();
+            let labels = ns.metadata.labels.clone().unwrap_or_default();
             Namespace {
+                labels,
                 status: facts.problems.status(),
                 phase: ns
                     .status
@@ -431,7 +433,9 @@ pub fn event(event: &core::Event, now: Timestamp) -> Event {
             .or_else(|| event.reporting_instance.clone())
             .unwrap_or_default(),
     };
+    let labels = event.metadata.labels.clone().unwrap_or_default();
     Event {
+        labels,
         details,
         status,
         reason,

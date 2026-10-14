@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -335,6 +336,7 @@ pub enum FluxDetail {
 pub struct FluxObject {
     pub key: FluxKey,
     pub uid: Uid,
+    pub labels: BTreeMap<String, String>,
     pub phase: Phase,
     pub sentence: Sentence,
     pub applied: Option<Revision>,
@@ -506,6 +508,7 @@ pub(crate) mod tests {
 
     pub(crate) fn object(cluster: &str, phase: Phase, revision: &str) -> FluxObject {
         FluxObject {
+            labels: BTreeMap::new(),
             uid: Uid::default(),
             key: FluxKey::new(cluster, FluxKind::Kustomization, "flux-system", "apps"),
             phase,

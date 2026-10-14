@@ -664,6 +664,7 @@ mod tests {
 
     fn detail(name: &str) -> flock_core::ClusterDetail {
         let namespace = flock_core::cluster::Namespace {
+            labels: BTreeMap::new(),
             name: name.to_owned(),
             status: Status::Ok,
             phase: String::new(),

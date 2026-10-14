@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::filter::TextFilter;
 use crate::{ResourceRef, Status};
 
@@ -31,6 +33,7 @@ impl Listener {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Route {
+    pub labels: BTreeMap<String, String>,
     pub status: Status,
     pub name: String,
     pub host: Option<String>,
@@ -52,7 +55,7 @@ impl Route {
             .application
             .as_ref()
             .and_then(|a| a.namespace.as_deref());
-        query.matches(namespace, &fields)
+        query.matches_labeled(namespace, &self.labels, &fields)
     }
 
     pub fn host_label(&self) -> &str {
@@ -151,6 +154,7 @@ mod tests {
 
     fn route(name: &str, status: Status, ready: Option<(u32, u32)>) -> Route {
         Route {
+            labels: BTreeMap::new(),
             status,
             name: name.into(),
             host: None,
@@ -159,6 +163,14 @@ mod tests {
             detail: String::new(),
             application: None,
         }
+    }
+
+    #[test]
+    fn list_label_tokens_match_metadata() {
+        let mut route = route("web", Status::Ok, None);
+        route.labels.insert("team".into(), "checkout".into());
+        assert!(route.matches(&TextFilter::parse("label:team=checkout")));
+        assert!(!route.matches(&TextFilter::parse("l:team=platform")));
     }
 
     #[test]

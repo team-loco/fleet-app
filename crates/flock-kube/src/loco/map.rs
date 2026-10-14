@@ -308,7 +308,9 @@ fn application(
         })
         .map(|deployment| uid_of(&deployment.metadata))
         .unwrap_or_default();
+    let labels = resource.metadata.labels.clone().unwrap_or_default();
     Application {
+        labels,
         resource: reference(
             &inputs.cluster,
             &model.application.kind,
@@ -594,7 +596,9 @@ fn route(cluster: &ClusterId, model: &RouteModel, metadata: &ObjectMeta) -> Rout
     let application = annotation(metadata, APPLICATION_NAME)
         .zip(annotation(metadata, APPLICATION_NAMESPACE))
         .map(|(name, namespace)| reference(cluster, "Application", namespace, name));
+    let labels = metadata.labels.clone().unwrap_or_default();
     Route {
+        labels,
         status,
         name: model.route.name.clone(),
         host: model.hostnames.first().cloned(),
@@ -688,7 +692,9 @@ fn build_row(
                 .to_string()
         });
     let container = |name: &str| container_status(pod, name, phase);
+    let labels = build.metadata.labels.clone().unwrap_or_default();
     Build {
+        labels,
         resource: reference(
             &inputs.cluster,
             &model.build.kind,

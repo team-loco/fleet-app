@@ -195,6 +195,7 @@ fn application(seed: &AppSeed, namespace: &str) -> Application {
     let replicas = format!("{}/{}", seed.ready, seed.desired);
     let deployment_status = if failing { Status::Err } else { Status::Ok };
     Application {
+        labels: BTreeMap::new(),
         resource: app_ref(seed.id),
         name: seed.name.into(),
         environment: seed.environment.into(),
@@ -379,6 +380,7 @@ fn build(seed: &BuildSeed) -> Build {
     let name = format!("build-{}", seed.id);
     let took = Duration::from_secs(seed.took_secs);
     let mut build = Build {
+        labels: BTreeMap::new(),
         resource: ResourceRef {
             cluster: ClusterId::new(CLUSTER),
             kind: "Build".into(),

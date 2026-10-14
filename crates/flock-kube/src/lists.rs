@@ -35,6 +35,7 @@ const DEFAULT_REPLICAS: i32 = 1;
 const DEFAULT_COMPLETIONS: i32 = 1;
 
 fn row(meta: &ObjectMeta, status: Status, cells: Vec<String>, now: Timestamp) -> Resource {
+    let labels = meta.labels.clone().unwrap_or_default();
     Resource {
         namespace: meta.namespace.clone().unwrap_or_default(),
         name: meta.name.clone().unwrap_or_default(),
@@ -43,6 +44,7 @@ fn row(meta: &ObjectMeta, status: Status, cells: Vec<String>, now: Timestamp) ->
         cells,
         age: age(meta, now),
         yaml: String::new(),
+        labels,
     }
 }
 
@@ -450,7 +452,7 @@ mod tests {
     #[test]
     fn deployment_cells_and_status_follow_its_pods() {
         let item: Arc<Deployment> = parse(json!({
-            "metadata": { "name": "checkout-api", "namespace": "payments", "creationTimestamp": at(60) },
+            "metadata": { "name": "checkout-api", "namespace": "payments", "creationTimestamp": at(60), "labels": { "app": "checkout" } },
             "spec": {
                 "replicas": 3,
                 "selector": {},
@@ -465,6 +467,10 @@ mod tests {
             ["2/3", "3", "2", "ghcr.io/acme/checkout-api:2.14.0"]
         );
         assert_eq!(rolling.status, Status::Progress);
+        assert_eq!(
+            rolling.labels.get("app").map(String::as_str),
+            Some("checkout")
+        );
         let crashing = PodIndex::build(
             &[replica_pod(
                 "checkout-api-7f9c-x2lqp",

@@ -95,3 +95,4 @@ Spec column points at `design/`.
 | NAVBTN | visible per-pane back/forward controls, history menus and mouse navigation (#191) | claude | back-forward-buttons | done |
 | CHART | Persist seven days of utilization history and render every chart window (#193) | claude | utilization-history | done |
 | SETTINGS | Open Cluster settings on the cluster each link came from (#219) | claude | settings-cluster-context | done |
+| FILTER | Clear filter placeholder, namespace/label completion and removable tokens (#189) | claude | filter-bar-ux | done |
