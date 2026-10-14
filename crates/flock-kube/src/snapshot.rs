@@ -3,13 +3,7 @@ use std::sync::Arc;
 
 use flock_core::home::ClusterMetrics;
 use flock_core::{ClusterId, ClusterSummary, Counts, Page, ResourceKind, Status};
-use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
-use k8s_openapi::api::batch::v1::{CronJob, Job};
-use k8s_openapi::api::core::v1::{
-    ConfigMap, Event, Namespace, Node, PersistentVolumeClaim, Pod, Secret, Service,
-};
-use k8s_openapi::api::networking::v1::Ingress;
-use kube::api::PartialObjectMeta;
+use k8s_openapi::api::core::v1::{Node, Pod};
 
 use crate::manager::{ClusterHandle, ConnectionStatus};
 use crate::provider::region;
@@ -83,7 +77,7 @@ pub fn pod_health(pod: &Pod) -> PodHealth {
     PodHealth::Healthy
 }
 
-fn count(len: usize) -> u32 {
+pub(crate) fn count(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)
 }
 
@@ -155,6 +149,23 @@ pub fn page_kind(page: Page) -> Option<WatchKind> {
     }
 }
 
+pub const BACKGROUND_KINDS: [WatchKind; 14] = [
+    WatchKind::Nodes,
+    WatchKind::Namespaces,
+    WatchKind::Events,
+    WatchKind::Pods,
+    WatchKind::Deployments,
+    WatchKind::StatefulSets,
+    WatchKind::DaemonSets,
+    WatchKind::Jobs,
+    WatchKind::CronJobs,
+    WatchKind::Services,
+    WatchKind::Ingresses,
+    WatchKind::ConfigMaps,
+    WatchKind::Secrets,
+    WatchKind::PersistentVolumeClaims,
+];
+
 pub const OVERVIEW_KINDS: [WatchKind; 7] = [
     WatchKind::Namespaces,
     WatchKind::Events,
@@ -187,50 +198,29 @@ pub fn page_watches(page: Page, namespace: Option<&str>) -> Vec<(WatchKind, Opti
     scoped.chain([(WatchKind::Namespaces, None)]).collect()
 }
 
-fn kind_total(handle: &ClusterHandle, kind: &WatchKind) -> Option<u32> {
-    let len = match kind {
-        WatchKind::Namespaces => handle.objects::<Namespace>().len(),
-        WatchKind::Events => handle.objects::<Event>().len(),
-        WatchKind::Deployments => handle.objects::<Deployment>().len(),
-        WatchKind::StatefulSets => handle.objects::<StatefulSet>().len(),
-        WatchKind::DaemonSets => handle.objects::<DaemonSet>().len(),
-        WatchKind::ReplicaSets => handle.objects::<ReplicaSet>().len(),
-        WatchKind::Jobs => handle.objects::<Job>().len(),
-        WatchKind::CronJobs => handle.objects::<CronJob>().len(),
-        WatchKind::Services => handle.objects::<Service>().len(),
-        WatchKind::Ingresses => handle.objects::<Ingress>().len(),
-        WatchKind::ConfigMaps => handle.objects::<PartialObjectMeta<ConfigMap>>().len(),
-        WatchKind::Secrets => handle.objects::<PartialObjectMeta<Secret>>().len(),
-        WatchKind::ServiceAccounts => return None,
-        WatchKind::NetworkPolicies => return None,
-        WatchKind::PersistentVolumeClaims => handle.objects::<PersistentVolumeClaim>().len(),
-        WatchKind::Nodes => return None,
-        WatchKind::Pods => return None,
-        WatchKind::Custom(_) => return None,
-    };
-    Some(count(len))
+pub struct Facts<'a> {
+    pub problems: Counts,
+    pub metrics: Option<ClusterMetrics>,
+    pub nodes: &'a [Arc<Node>],
+    pub nav: BTreeMap<Page, Counts>,
 }
 
 pub fn summarize(
     id: ClusterId,
     name: String,
     handle: &ClusterHandle,
-    problems: Counts,
-    metrics: Option<ClusterMetrics>,
+    facts: Facts<'_>,
 ) -> ClusterSummary {
+    let Facts {
+        problems,
+        metrics,
+        nodes,
+        nav,
+    } = facts;
     let context = handle.context();
     let info = handle.info();
     let connection = handle.status();
-    let nodes = handle.objects::<Node>();
     let (status, state) = cluster_state(&connection, problems);
-    let mut nav = BTreeMap::from([(Page::Nodes, node_counts(&nodes))]);
-    for kind in handle.cluster_wide_kinds() {
-        let page = kind_page(&kind);
-        let total = kind_total(handle, &kind);
-        if let (Some(page), Some(total)) = (page, total) {
-            nav.insert(page, Counts::total(total));
-        }
-    }
     let synced_nodes = !nodes.is_empty();
     ClusterSummary {
         id,
@@ -249,28 +239,6 @@ pub fn summarize(
         nav,
         metrics,
     }
-}
-
-pub fn kind_page(kind: &WatchKind) -> Option<Page> {
-    let pages = [
-        Page::Nodes,
-        Page::Namespaces,
-        Page::Events,
-        Page::Pods,
-        Page::Deployments,
-        Page::StatefulSets,
-        Page::DaemonSets,
-        Page::Jobs,
-        Page::CronJobs,
-        Page::Services,
-        Page::Ingresses,
-        Page::ConfigMaps,
-        Page::Secrets,
-        Page::Pvcs,
-    ];
-    pages
-        .into_iter()
-        .find(|page| page_kind(*page).as_ref() == Some(kind))
 }
 
 #[cfg(test)]
@@ -384,9 +352,7 @@ mod tests {
             page_kind(Page::Pvcs),
             Some(WatchKind::PersistentVolumeClaims)
         );
-        assert_eq!(kind_page(&WatchKind::Deployments), Some(Page::Deployments));
         assert_eq!(page_kind(Page::GitOps), None);
-        assert_eq!(kind_page(&WatchKind::ReplicaSets), None);
         assert_eq!(
             page_kinds(Page::ClusterOverview).len(),
             OVERVIEW_KINDS.len()

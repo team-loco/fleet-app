@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use flock_core::resources::{Resource, ResourceKind};
 use flock_core::time::age as age_label;
-use flock_core::{Status, Uid};
+use flock_core::{Counts, Status, Uid};
 use jiff::Timestamp;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
@@ -18,6 +18,7 @@ use crate::clock::{age, between};
 use crate::detail::PodIndex;
 use crate::manager::ClusterHandle;
 use crate::problems::OwnerKey;
+use crate::snapshot::count;
 
 const MISSING: &str = "—";
 const LIST_SEPARATOR: &str = ",";
@@ -78,6 +79,26 @@ fn or_missing(value: String) -> String {
     }
 }
 
+fn deployment_status(item: &Deployment, pods: &PodIndex) -> Status {
+    let status = item.status.as_ref();
+    let desired = item
+        .spec
+        .as_ref()
+        .and_then(|s| s.replicas)
+        .unwrap_or(DEFAULT_REPLICAS);
+    let ready = status.and_then(|s| s.ready_replicas).unwrap_or_default();
+    let stalled = status
+        .and_then(|s| s.conditions.as_ref())
+        .into_iter()
+        .flatten()
+        .any(|c| c.reason.as_deref() == Some(PROGRESS_DEADLINE));
+    if stalled {
+        return Status::Err;
+    }
+    let issue = pods.issue(&owner(&item.metadata, ResourceKind::Deployment));
+    rollout(ready, desired, issue)
+}
+
 pub fn deployment(item: &Deployment, pods: &PodIndex, now: Timestamp) -> Resource {
     let spec = item.spec.as_ref();
     let status = item.status.as_ref();
@@ -87,17 +108,7 @@ pub fn deployment(item: &Deployment, pods: &PodIndex, now: Timestamp) -> Resourc
     let available = status
         .and_then(|s| s.available_replicas)
         .unwrap_or_default();
-    let stalled = status
-        .and_then(|s| s.conditions.as_ref())
-        .into_iter()
-        .flatten()
-        .any(|c| c.reason.as_deref() == Some(PROGRESS_DEADLINE));
-    let issue = pods.issue(&owner(&item.metadata, ResourceKind::Deployment));
-    let health = if stalled {
-        Status::Err
-    } else {
-        rollout(ready, desired, issue)
-    };
+    let health = deployment_status(item, pods);
     let cells = vec![
         format!("{ready}/{desired}"),
         updated.to_string(),
@@ -107,15 +118,29 @@ pub fn deployment(item: &Deployment, pods: &PodIndex, now: Timestamp) -> Resourc
     row(&item.metadata, health, cells, now)
 }
 
-pub fn stateful_set(item: &StatefulSet, pods: &PodIndex, now: Timestamp) -> Resource {
-    let spec = item.spec.as_ref();
-    let desired = spec.and_then(|s| s.replicas).unwrap_or(DEFAULT_REPLICAS);
+fn stateful_set_replicas(item: &StatefulSet) -> (i32, i32) {
+    let desired = item
+        .spec
+        .as_ref()
+        .and_then(|s| s.replicas)
+        .unwrap_or(DEFAULT_REPLICAS);
     let ready = item
         .status
         .as_ref()
         .and_then(|s| s.ready_replicas)
         .unwrap_or_default();
+    (ready, desired)
+}
+
+fn stateful_set_status(item: &StatefulSet, pods: &PodIndex) -> Status {
+    let (ready, desired) = stateful_set_replicas(item);
     let issue = pods.issue(&owner(&item.metadata, ResourceKind::StatefulSet));
+    rollout(ready, desired, issue)
+}
+
+pub fn stateful_set(item: &StatefulSet, pods: &PodIndex, now: Timestamp) -> Resource {
+    let spec = item.spec.as_ref();
+    let (ready, desired) = stateful_set_replicas(item);
     let service = spec
         .and_then(|s| s.service_name.clone())
         .unwrap_or_default();
@@ -124,16 +149,27 @@ pub fn stateful_set(item: &StatefulSet, pods: &PodIndex, now: Timestamp) -> Reso
         or_missing(service),
         image(spec.map(|s| &s.template)),
     ];
-    row(&item.metadata, rollout(ready, desired, issue), cells, now)
+    row(&item.metadata, stateful_set_status(item, pods), cells, now)
 }
 
-pub fn daemon_set(item: &DaemonSet, pods: &PodIndex, now: Timestamp) -> Resource {
-    let spec = item.spec.as_ref();
+fn daemon_set_pods(item: &DaemonSet) -> (i32, i32) {
     let status = item.status.as_ref();
     let desired = status
         .map(|s| s.desired_number_scheduled)
         .unwrap_or_default();
     let ready = status.map(|s| s.number_ready).unwrap_or_default();
+    (ready, desired)
+}
+
+fn daemon_set_status(item: &DaemonSet, pods: &PodIndex) -> Status {
+    let (ready, desired) = daemon_set_pods(item);
+    let issue = pods.issue(&owner(&item.metadata, ResourceKind::DaemonSet));
+    rollout(ready, desired, issue)
+}
+
+pub fn daemon_set(item: &DaemonSet, pods: &PodIndex, now: Timestamp) -> Resource {
+    let spec = item.spec.as_ref();
+    let (ready, desired) = daemon_set_pods(item);
     let selector = spec
         .and_then(|s| s.template.spec.as_ref())
         .and_then(|s| s.node_selector.as_ref())
@@ -142,14 +178,13 @@ pub fn daemon_set(item: &DaemonSet, pods: &PodIndex, now: Timestamp) -> Resource
             pairs.join(LIST_SEPARATOR)
         })
         .unwrap_or_default();
-    let issue = pods.issue(&owner(&item.metadata, ResourceKind::DaemonSet));
     let cells = vec![
         desired.to_string(),
         ready.to_string(),
         or_missing(selector),
         image(spec.map(|s| &s.template)),
     ];
-    row(&item.metadata, rollout(ready, desired, issue), cells, now)
+    row(&item.metadata, daemon_set_status(item, pods), cells, now)
 }
 
 fn job_outcome(item: &Job) -> (Status, &'static str) {
@@ -202,6 +237,14 @@ pub fn job(item: &Job, now: Timestamp) -> Resource {
     row(&item.metadata, health, cells, now)
 }
 
+fn cron_job_status(item: &CronJob) -> Status {
+    if item.spec.suspend.unwrap_or_default() {
+        Status::Suspended
+    } else {
+        Status::Ok
+    }
+}
+
 pub fn cron_job(item: &CronJob, now: Timestamp) -> Resource {
     let spec = &item.spec;
     let suspended = spec.suspend.unwrap_or_default();
@@ -210,11 +253,7 @@ pub fn cron_job(item: &CronJob, now: Timestamp) -> Resource {
     let last = status
         .and_then(|s| s.last_schedule_time.as_ref())
         .map_or_else(|| MISSING.to_owned(), |t| age_label(between(t.0, now)));
-    let health = if suspended {
-        Status::Suspended
-    } else {
-        Status::Ok
-    };
+    let health = cron_job_status(item);
     let suspend = if suspended { "True" } else { "False" };
     let cells = vec![
         spec.schedule.clone(),
@@ -278,15 +317,20 @@ pub fn secret(item: &PartialObjectMeta<Secret>, now: Timestamp) -> Resource {
     row(&item.metadata, Status::Ok, cells, now)
 }
 
+fn pvc_status(item: &PersistentVolumeClaim) -> Status {
+    let phase = item.status.as_ref().and_then(|s| s.phase.as_deref());
+    match phase.unwrap_or_default() {
+        BOUND => Status::Ok,
+        PENDING => Status::Warn,
+        _ => Status::Err,
+    }
+}
+
 pub fn pvc(item: &PersistentVolumeClaim, now: Timestamp) -> Resource {
     let status = item.status.as_ref();
     let spec = item.spec.as_ref();
     let phase = status.and_then(|s| s.phase.clone()).unwrap_or_default();
-    let health = match phase.as_str() {
-        BOUND => Status::Ok,
-        PENDING => Status::Warn,
-        _ => Status::Err,
-    };
+    let health = pvc_status(item);
     let capacity = status
         .and_then(|s| s.capacity.as_ref())
         .and_then(|c| c.get(STORAGE))
@@ -344,6 +388,39 @@ pub fn rows(
         }),
         ResourceKind::PersistentVolumeClaim => {
             map(&handle.objects::<PersistentVolumeClaim>(), |i| pvc(i, now))
+        }
+    }
+}
+
+fn tally<K>(items: &[Arc<K>], status: impl Fn(&K) -> Status) -> Counts {
+    Counts::of(items.iter().map(|item| status(item)))
+}
+
+pub fn counts(handle: &ClusterHandle, kind: ResourceKind, pods: &PodIndex) -> Counts {
+    match kind {
+        ResourceKind::Deployment => tally(&handle.objects::<Deployment>(), |i| {
+            deployment_status(i, pods)
+        }),
+        ResourceKind::StatefulSet => tally(&handle.objects::<StatefulSet>(), |i| {
+            stateful_set_status(i, pods)
+        }),
+        ResourceKind::DaemonSet => tally(&handle.objects::<DaemonSet>(), |i| {
+            daemon_set_status(i, pods)
+        }),
+        ResourceKind::Job => tally(&handle.objects::<Job>(), |i| job_outcome(i).0),
+        ResourceKind::CronJob => tally(&handle.objects::<CronJob>(), cron_job_status),
+        ResourceKind::Service => Counts::total(count(handle.objects::<Service>().len())),
+        ResourceKind::Ingress => Counts::total(count(handle.objects::<Ingress>().len())),
+        ResourceKind::ConfigMap => {
+            let maps = handle.objects::<PartialObjectMeta<ConfigMap>>();
+            Counts::total(count(maps.len()))
+        }
+        ResourceKind::Secret => {
+            let secrets = handle.objects::<PartialObjectMeta<Secret>>();
+            Counts::total(count(secrets.len()))
+        }
+        ResourceKind::PersistentVolumeClaim => {
+            tally(&handle.objects::<PersistentVolumeClaim>(), pvc_status)
         }
     }
 }

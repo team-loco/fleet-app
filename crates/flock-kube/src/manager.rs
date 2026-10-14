@@ -135,6 +135,7 @@ impl Shared {
             (builtin, _) => spawn_builtin(
                 builtin,
                 key.namespace.as_deref(),
+                self.settings.event_limit,
                 &self.runtime,
                 client.clone(),
                 signals,
@@ -345,6 +346,9 @@ impl ClusterHandle {
 
     fn entry_state(&self, kind: &WatchKind) -> WatchState {
         let watches = lock(&self.shared.watches);
+        if let Some(all) = watches.get(&WatchKey::all(kind.clone())) {
+            return all.state.clone();
+        }
         let states: Vec<WatchState> = watches
             .iter()
             .filter(|(key, _)| &key.kind == kind)

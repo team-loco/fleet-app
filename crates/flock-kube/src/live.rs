@@ -36,10 +36,9 @@ use crate::paste;
 use crate::probe::find_prometheus;
 use crate::problems::order;
 use crate::provider::AuthKind;
-use crate::resources::WatchKind;
 use crate::settings::KubeSettings;
 use crate::shell_env::{ShellEnv, capture, user_shell};
-use crate::snapshot::page_watches;
+use crate::snapshot::{BACKGROUND_KINDS, page_watches};
 use crate::store::{ClusterStore, Pin, SavedCluster, SavedPreferences};
 use crate::task::TaskGuard;
 use crate::throttle::Throttle;
@@ -49,7 +48,6 @@ use crate::watch::KubeconfigWatcher;
 const THREAD_NAME: &str = "flock-kube";
 pub const SNAPSHOT_INTERVAL: Duration = DEFAULT_SNAPSHOTS.duration();
 const EXTENSION_POLL_INTERVAL: Duration = SNAPSHOT_INTERVAL;
-const BASELINE_KINDS: [WatchKind; 2] = [WatchKind::Nodes, WatchKind::Pods];
 const DEFAULT_WINDOW: u64 = 0;
 const MISSING_STATE: &str = "Not in kubeconfig";
 const CHANGED_STATE: &str = "Context changed";
@@ -105,11 +103,29 @@ enum Fetched {
 struct Connected {
     id: ClusterId,
     handle: ClusterHandle,
-    _baseline: Vec<Subscription>,
+    _background: Vec<Subscription>,
     extras: Extras,
     usage_task: Option<TaskGuard>,
     pod_usage_task: Option<TaskGuard>,
     prometheus_task: Option<TaskGuard>,
+}
+
+impl Connected {
+    fn watching(id: ClusterId, handle: ClusterHandle, settings: &KubeSettings) -> Self {
+        let background = BACKGROUND_KINDS
+            .iter()
+            .map(|kind| handle.subscribe(kind.clone()))
+            .collect();
+        Self {
+            id,
+            handle,
+            _background: background,
+            extras: Extras::new(settings.usage_samples()),
+            usage_task: None,
+            pod_usage_task: None,
+            prometheus_task: None,
+        }
+    }
 }
 
 struct Inspecting {
@@ -272,22 +288,8 @@ impl Live {
             }
             self.manager.disconnect(&context.id);
             let handle = self.manager.connect(context.clone());
-            let baseline = BASELINE_KINDS
-                .iter()
-                .map(|kind| handle.subscribe(kind.clone()))
-                .collect();
-            self.clusters.insert(
-                context.id.clone(),
-                Connected {
-                    id,
-                    handle,
-                    _baseline: baseline,
-                    extras: Extras::new(self.settings.usage_samples()),
-                    usage_task: None,
-                    pod_usage_task: None,
-                    prometheus_task: None,
-                },
-            );
+            let cluster = Connected::watching(id, handle, &self.settings);
+            self.clusters.insert(context.id.clone(), cluster);
         }
         self.gitops
             .sync(self.clusters.values().map(|c| (&c.id, &c.handle)));
@@ -946,12 +948,12 @@ impl Live {
         &self,
         clusters: &mut [ClusterSummary],
     ) -> BTreeMap<ClusterId, flock_core::loco::LocoCluster> {
-        let mut loco = self.navigation.loco.snapshot(clusters);
+        let mut loco = self.navigation.loco.snapshot(clusters, None);
         for navigation in self.windows.values() {
-            if crate::loco::is_loco_page(navigation.page) {
-                let selected = navigation.selected.as_ref();
-                let snapshot = navigation.loco.snapshot(clusters);
-                loco.extend(snapshot.into_iter().filter(|(id, _)| Some(id) == selected));
+            if crate::loco::is_loco_page(navigation.page)
+                && let Some(selected) = navigation.selected.as_ref()
+            {
+                loco.extend(navigation.loco.snapshot(clusters, Some(selected)));
             }
         }
         loco
@@ -1446,6 +1448,7 @@ mod tests {
 
     use super::*;
     use crate::provider::{ExecCommand, Provider};
+    use crate::resources::WatchKind;
 
     fn context(file: &str, name: &str) -> KubeContext {
         KubeContext {
@@ -1559,7 +1562,7 @@ mod tests {
                     id: ClusterId::new(name),
                     handle,
                     extras,
-                    _baseline: Vec::new(),
+                    _background: Vec::new(),
                     usage_task: None,
                     pod_usage_task: None,
                     prometheus_task: None,
@@ -1572,6 +1575,132 @@ mod tests {
             assert_eq!(live.clusters.len(), 2);
             assert!(live.disconnected.is_empty());
         }
+    }
+
+    const LIST_PATIENCE: Duration = Duration::from_secs(10);
+    const LIST_POLL: Duration = Duration::from_millis(20);
+    const EMPTY_LIST: &str =
+        r#"{"kind":"List","apiVersion":"v1","metadata":{"resourceVersion":"1"},"items":[]}"#;
+    const DEPLOYMENTS_PATH: &str = "/apis/apps/v1/deployments";
+    const PODS_PATH: &str = "/api/v1/pods";
+    const EVENTS_PATH: &str = "/api/v1/events";
+
+    fn list(items: &[serde_json::Value]) -> String {
+        serde_json::json!({
+            "kind": "List",
+            "apiVersion": "v1",
+            "metadata": { "resourceVersion": "1" },
+            "items": items,
+        })
+        .to_string()
+    }
+
+    fn failing_cluster() -> (ClusterManager, ClusterHandle, Receiver<ClusterEvent>) {
+        use crate::problems::tests::{at, crash_status, replica_pod};
+        let pod = replica_pod(
+            "checkout-api-7f9c-x2lqp",
+            "checkout-api",
+            "7f9c",
+            &crash_status(),
+        );
+        let pods = list(&[serde_json::to_value(&*pod).unwrap_or_default()]);
+        let deployments = list(&[serde_json::json!({
+            "metadata": { "name": "checkout-api", "namespace": "payments", "creationTimestamp": at(60) },
+            "spec": { "replicas": 1, "selector": {}, "template": {} },
+            "status": { "readyReplicas": 0 }
+        })]);
+        let events = list(&[serde_json::json!({
+            "metadata": { "name": "checkout-api.1", "namespace": "payments" },
+            "involvedObject": { "kind": "Pod", "name": "checkout-api-7f9c-x2lqp" },
+            "type": "Warning",
+            "reason": "BackOff",
+            "lastTimestamp": at(1)
+        })]);
+        let (client, _) = crate::fake::client(LIST_POLL, move |method, path| {
+            if method != http::Method::GET {
+                return None;
+            }
+            if path.contains("watch=true") {
+                return Some((http::StatusCode::OK, String::new()));
+            }
+            let body = if path.starts_with(DEPLOYMENTS_PATH) {
+                deployments.clone()
+            } else if path.starts_with(PODS_PATH) {
+                pods.clone()
+            } else if path.starts_with(EVENTS_PATH) {
+                events.clone()
+            } else {
+                EMPTY_LIST.to_owned()
+            };
+            Some((http::StatusCode::OK, body))
+        });
+        crate::fake::supervised(&client)
+    }
+
+    #[tokio::test]
+    async fn a_cluster_nobody_opened_still_counts_and_flags_every_nav_kind() {
+        let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let mut live = test_live(dir.path());
+        let (_manager, handle, _events) = failing_cluster();
+        let id = ClusterId::new("a");
+        let key = handle.id().clone();
+        let cluster = Connected::watching(id.clone(), handle, &live.settings);
+        live.clusters.insert(key, cluster);
+        let deadline = tokio::time::Instant::now() + LIST_PATIENCE;
+        let nav = loop {
+            let snapshot = live.snapshot();
+            let nav = snapshot
+                .cluster(&id)
+                .map(|c| c.nav.clone())
+                .unwrap_or_default();
+            let listed = [
+                Page::Deployments,
+                Page::Pods,
+                Page::Events,
+                Page::ConfigMaps,
+            ];
+            if listed.iter().all(|page| nav.contains_key(page)) {
+                break nav;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "nav never filled: {nav:?}"
+            );
+            tokio::time::sleep(LIST_POLL).await;
+        };
+        assert!(live.snapshot().details.is_empty());
+        assert_eq!(
+            nav.get(&Page::Deployments),
+            Some(&Counts::total(1).with_err(1))
+        );
+        assert_eq!(nav.get(&Page::Pods), Some(&Counts::total(1).with_err(1)));
+        assert_eq!(nav.get(&Page::Events), Some(&Counts::default().with_err(1)));
+        assert_eq!(nav.get(&Page::ConfigMaps), Some(&Counts::total(0)));
+        let pages = Command::SelectPage(Page::Deployments);
+        for command in [Command::SelectCluster(Some(id.clone())), pages] {
+            live.apply(&window_command(FIRST_WINDOW, command));
+        }
+        let shown = live.snapshot();
+        let Some(detail) = shown.detail(&id) else {
+            panic!("the opened cluster has no detail");
+        };
+        let listed = shown
+            .cluster(&id)
+            .map(|c| c.nav.clone())
+            .unwrap_or_default();
+        for kind in flock_core::ResourceKind::ALL {
+            let rows = Counts::of(detail.resources(kind).iter().map(|row| row.status));
+            assert_eq!(listed.get(&kind.page()), Some(&rows), "{kind:?}");
+        }
+        live.apply(&window_command(
+            FIRST_WINDOW,
+            Command::SelectPage(Page::Overview),
+        ));
+        let after = live.snapshot();
+        let flagged = after
+            .cluster(&id)
+            .and_then(|c| c.nav.get(&Page::Deployments));
+        assert_eq!(flagged, Some(&Counts::total(1).with_err(1)));
     }
 
     #[tokio::test]
@@ -1589,7 +1718,7 @@ mod tests {
                 id: id.clone(),
                 handle,
                 extras,
-                _baseline: Vec::new(),
+                _background: Vec::new(),
                 usage_task: None,
                 pod_usage_task: None,
                 prometheus_task: None,
@@ -1639,7 +1768,7 @@ mod tests {
                     id,
                     handle,
                     extras,
-                    _baseline: Vec::new(),
+                    _background: Vec::new(),
                     usage_task: None,
                     pod_usage_task: None,
                     prometheus_task: None,

@@ -359,7 +359,7 @@ pub fn namespaces(
     rows
 }
 
-fn last_seen(event: &core::Event) -> Option<Timestamp> {
+pub(crate) fn last_seen(event: &core::Event) -> Option<Timestamp> {
     event
         .series
         .as_ref()
@@ -371,15 +371,28 @@ fn last_seen(event: &core::Event) -> Option<Timestamp> {
         .or_else(|| event.metadata.creation_timestamp.as_ref().map(|t| t.0))
 }
 
-pub fn event(event: &core::Event, now: Timestamp) -> Event {
-    let reason = event.reason.clone().unwrap_or_default();
-    let status = if event.type_.as_deref() != Some(WARNING) {
+pub fn event_status(event: &core::Event) -> Status {
+    let reason = event.reason.as_deref().unwrap_or_default();
+    if event.type_.as_deref() != Some(WARNING) {
         Status::Ok
-    } else if ERROR_REASONS.contains(&reason.as_str()) {
+    } else if ERROR_REASONS.contains(&reason) {
         Status::Err
     } else {
         Status::Warn
-    };
+    }
+}
+
+pub fn event_counts(events: &[Arc<core::Event>]) -> Counts {
+    let flagged = Counts::of(events.iter().map(|event| event_status(event)));
+    Counts {
+        total: None,
+        ..flagged
+    }
+}
+
+pub fn event(event: &core::Event, now: Timestamp) -> Event {
+    let reason = event.reason.clone().unwrap_or_default();
+    let status = event_status(event);
     let involved = &event.involved_object;
     let object = format!(
         "{}/{}",
