@@ -421,6 +421,14 @@ impl Ui {
         self.run(Step::Keys(keys.to_owned()))
     }
 
+    pub fn press_unsettled(&mut self, keys: &str) -> anyhow::Result<()> {
+        let step = Step::Keys(keys.to_owned());
+        self.cx.update(|window, cx| apply(&step, window, cx))?;
+        self.steps.push(step);
+        self.cx.background_executor.run_until_parked();
+        Ok(())
+    }
+
     pub fn type_text(&mut self, text: &str) -> anyhow::Result<()> {
         self.run(Step::Text(text.to_owned()))
     }
@@ -535,6 +543,13 @@ impl Ui {
     fn run(&mut self, step: Step) -> anyhow::Result<()> {
         self.cx.update(|window, cx| apply(&step, window, cx))?;
         self.steps.push(step);
+        self.settle()
+    }
+
+    pub fn advance_clock(&mut self, by: Duration) -> anyhow::Result<()> {
+        self.cx.background_executor.advance_clock(by);
+        std::thread::sleep(by);
+        self.cx.update(|window, _| window.refresh());
         self.settle()
     }
 

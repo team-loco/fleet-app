@@ -6,11 +6,12 @@ use gpui::{
 };
 
 use super::Shell;
+use super::tab_motion::{self, Ghost};
 use crate::assets::SPLIT;
 use crate::kit::{MenuItem, Tooltip, status_symbols};
 use crate::theme::{
     ActiveTheme, FONT_MONO, FONT_STATUS, ICON_SPLIT, Palette, RULE, SPACE_3, SPACE_4, SPACE_6,
-    SPLIT_BUTTON, TAB_CLOSE, TEXT_BODY, TEXT_GLYPH, TEXT_LABEL, TEXT_UI, TITLE_ROW,
+    SPLIT_BUTTON, TAB_CLOSE, TAB_ENTER, TEXT_BODY, TEXT_GLYPH, TEXT_LABEL, TEXT_UI, TITLE_ROW,
 };
 
 const CLOSE_GLYPH: &str = "×";
@@ -59,22 +60,42 @@ impl Shell {
         let active = pane.active_index();
         let active_id = pane.active().id();
         let tabs: Vec<(usize, Tab)> = pane.tabs().iter().cloned().enumerate().collect();
+        let current: Vec<(TabId, TabTitle)> = tabs
+            .iter()
+            .map(|(_, tab)| (tab.id(), title(tab.location(), &self.state.snapshot)))
+            .collect();
+        let animate = !cx.reduce_motion();
         let screens = self.screens_mut(pane_ix);
+        let changed = screens.motion.track(&current, animate);
         if screens.shown != Some(active_id) {
             screens.shown = Some(active_id);
-            screens.strip.scroll_to_item(active);
+            let child = screens.motion.child_index(active);
+            screens.strip.scroll_to_item(child);
         }
         let scroll = screens.strip.clone();
+        if changed {
+            self.settle_strip(pane_ix, cx);
+        }
         let end = tabs.len();
+        let mut ghosts = self.screens(pane_ix).motion.ghosts.clone();
         let mut children: Vec<AnyElement> = Vec::new();
         for (ix, tab) in tabs {
+            while let Some(position) = ghosts.iter().position(|ghost| ghost.before <= ix) {
+                let gone = ghosts.remove(position);
+                children.push(leaving_tab(pane_ix, &gone, &palette));
+            }
             let shown = Shown {
                 pane: pane_ix,
                 ix,
                 active: ix == active,
                 focused,
             };
-            children.push(self.tab(shown, &tab, &palette, cx));
+            let element = self.tab(shown, &tab, &palette, cx);
+            let slot = slot_selector(pane_ix, ix);
+            children.push(self.screens(pane_ix).motion.wrap(tab.id(), slot, element));
+        }
+        for gone in ghosts {
+            children.push(leaving_tab(pane_ix, &gone, &palette));
         }
         let rest = div()
             .id(("tab-strip-rest", pane_ix))
@@ -111,6 +132,22 @@ impl Shell {
             .child(tabs)
             .child(split)
             .into_any_element()
+    }
+
+    fn settle_strip(&mut self, pane_ix: usize, cx: &mut Context<Self>) {
+        let pane = self.screens(pane_ix).pane;
+        let timer = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(TAB_ENTER).await;
+            this.update(cx, |shell, cx| {
+                if let Some(screens) = shell.panes.iter_mut().find(|screens| screens.pane == pane) {
+                    screens.motion.ghosts.clear();
+                    screens.shown = None;
+                }
+                cx.notify();
+            })
+            .ok();
+        });
+        self.screens_mut(pane_ix).motion.timer = Some(timer);
     }
 
     fn open_tab_menu(
@@ -330,6 +367,49 @@ fn tab_selector(pane: usize, ix: usize) -> String {
         format!("tab-{ix}")
     } else {
         format!("pane-{pane}-tab-{ix}")
+    }
+}
+
+fn leaving_tab(pane: usize, leaving: &Ghost, palette: &Palette) -> AnyElement {
+    let content = div()
+        .flex()
+        .flex_none()
+        .h_full()
+        .text_color(palette.mute)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .h_full()
+                .child(div().h(RULE))
+                .child(
+                    div()
+                        .flex()
+                        .flex_1()
+                        .items_center()
+                        .child(tab_content(&leaving.title, false, palette))
+                        .child(div().w(TAB_CLOSE).mr(SPACE_4)),
+                )
+                .child(div().h(RULE).bg(palette.line)),
+        )
+        .child(div().w(RULE).h_full().bg(palette.line))
+        .into_any_element();
+    tab_motion::ghost(leaving, leaving_selector(pane, leaving.before), content)
+}
+
+fn slot_selector(pane: usize, ix: usize) -> String {
+    if pane == 0 {
+        format!("tab-slot-{ix}")
+    } else {
+        format!("pane-{pane}-tab-slot-{ix}")
+    }
+}
+
+fn leaving_selector(pane: usize, ix: usize) -> String {
+    if pane == 0 {
+        format!("tab-leaving-{ix}")
+    } else {
+        format!("pane-{pane}-tab-leaving-{ix}")
     }
 }
 
