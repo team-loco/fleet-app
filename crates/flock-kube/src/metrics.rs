@@ -196,7 +196,13 @@ pub fn parse_prometheus(body: &str) -> Result<Vec<Series>> {
             points: raw
                 .values
                 .into_iter()
-                .filter_map(|(at, value)| value.parse::<f64>().ok().map(|value| (at, value)))
+                .filter_map(|(at, value)| {
+                    value
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|value| value.is_finite() && at.is_finite())
+                        .map(|value| (at, value))
+                })
                 .collect(),
         })
         .collect();
@@ -320,7 +326,7 @@ mod tests {
         };
         assert_eq!(series.len(), 1);
         let points = series.first().map(|s| s.points.len());
-        assert_eq!(points, Some(2));
+        assert_eq!(points, Some(1));
         let error = parse_prometheus(r#"{"status":"error","error":"bad query"}"#);
         assert!(matches!(error, Err(Error::Prometheus(ref m)) if m == "bad query"));
     }

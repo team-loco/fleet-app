@@ -93,3 +93,4 @@ Spec column points at `design/`.
 | QFB | list-page QA fixes: on-demand section states, e2e:up across the rename, content-sized columns, Pods dock empty state (#204-#207) | claude | qa-fixes-lists | done |
 | QAF1 | QA Flux fixes: failing objects stay failing through retries, real suspend age, Resume as primary when suspended, short names keep whole names, diff hunk headers (#200–#203, #208) | claude | qa-fixes-flux | done |
 | NAVBTN | visible per-pane back/forward controls, history menus and mouse navigation (#191) | claude | back-forward-buttons | done |
+| CHART | Persist seven days of utilization history and render every chart window (#193) | claude | utilization-history | done |

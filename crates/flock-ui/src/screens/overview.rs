@@ -1,10 +1,11 @@
 use flock_core::events::Event;
 use flock_core::nodes::NodeSummary;
 use flock_core::overview::{
-    Capacity, PodPhases, TimeRange, Utilization, WorkloadHealth, percent, plural, thousands,
+    Capacity, PodPhases, TimeRange, Utilization, UtilizationSource, WorkloadHealth, percent,
+    plural, thousands,
 };
 use flock_core::time::age;
-use flock_core::{ClusterDetail, ClusterSummary, Page, Status};
+use flock_core::{ClusterDetail, ClusterId, ClusterSummary, Command, Page, Status};
 use gpui::{
     AnyElement, App, AppContext, Context, ElementId, Entity, EventEmitter, FontWeight, Hsla,
     InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
@@ -13,8 +14,9 @@ use gpui::{
 
 use super::ScreenEvent;
 use crate::kit::{
-    Button, CapacityMeter, ClickableSection, Column, LineChart, Link, MetaLine, SectionHeader,
-    SectionLabel, Segmented, Series, StackedBar, StatusText, Table, TableEvent, Tooltip,
+    Button, CapacityMeter, ClickableSection, Column, EmptyState, ErrorState, LineChart, Link,
+    MetaLine, SectionHeader, SectionLabel, Segmented, Series, StackedBar, StatusText, Table,
+    TableEvent, Tooltip,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, METER, Palette, RADIUS_SMALL, RULE, SPACE_1, SPACE_3, SPACE_4, SPACE_5,
@@ -29,6 +31,8 @@ const Y_LABELS: [&str; 5] = ["100%", "75%", "50%", "25%", "0"];
 const SEPARATOR: &str = " · ";
 const ALL_EVENTS: &str = "All events →";
 const UTILIZATION: &str = "Utilization";
+const RETRY: &str = "Retry";
+const SET_METRICS_SOURCE: &str = "Set metrics source";
 const CHART_WEIGHT: f32 = 2.;
 const REASON_WIDTH: Pixels = px(150.);
 const OBJECT_WEIGHT: f32 = 1.2;
@@ -42,6 +46,8 @@ const COUNT_WIDTH: Pixels = px(56.);
 #[derive(Clone, Debug, PartialEq)]
 struct OverviewData {
     meta: String,
+    cluster: ClusterId,
+    source: UtilizationSource,
     cpu: Capacity,
     memory: Capacity,
     pods: PodPhases,
@@ -71,6 +77,8 @@ impl OverviewData {
             .collect();
         Self {
             meta: meta.join(SEPARATOR),
+            cluster: cluster.id.clone(),
+            source: detail.overview.utilization_source.clone(),
             cpu: detail.cpu(),
             memory: detail.memory(),
             pods: detail.overview.pods,
@@ -292,27 +300,76 @@ impl OverviewScreen {
             .into_any_element()
     }
 
-    fn utilization(&self, data: &OverviewData, palette: &Palette) -> AnyElement {
-        let chart = data
+    fn utilization(
+        &self,
+        data: &OverviewData,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut chart = LineChart::new(CHART_MAX)
+            .y_labels(Y_LABELS.iter().map(|l| SharedString::from(*l)).collect())
+            .x_labels(
+                self.range
+                    .axis()
+                    .iter()
+                    .map(|l| SharedString::from(*l))
+                    .collect(),
+            )
+            .title(SectionLabel::new(UTILIZATION));
+        let available = data
             .utilization
             .iter()
             .find(|u| u.range == self.range)
-            .map(|u| {
-                LineChart::new(CHART_MAX)
-                    .series(Series::new("CPU", palette.acc, u.cpu.clone()).area(palette.accbg))
-                    .series(Series::new("Memory", palette.ai, u.memory.clone()))
-                    .threshold(u.cpu_requests, "CPU requests", palette.warn)
-                    .y_labels(Y_LABELS.iter().map(|l| SharedString::from(*l)).collect())
-                    .x_labels(
-                        self.range
-                            .axis()
-                            .iter()
-                            .map(|l| SharedString::from(*l))
-                            .collect(),
-                    )
-                    .title(SectionLabel::new(UTILIZATION))
-            });
-        div().flex().flex_col().children(chart).into_any_element()
+            .filter(|u| !u.cpu.is_empty() || !u.memory.is_empty());
+        let mut note = None;
+        if let Some(reason) = data.source.error() {
+            let retry = Button::new("metrics-retry", RETRY).on_click(cx.listener(|_, _, _, cx| {
+                cx.emit(ScreenEvent::Navigate(Page::ClusterOverview));
+            }));
+            chart = chart.message(ErrorState::new(reason, retry));
+        } else if let Some(u) = available {
+            chart = chart
+                .series(
+                    Series::new("CPU", palette.acc, u.cpu.clone())
+                        .positions(u.cpu_positions.clone())
+                        .area(palette.accbg),
+                )
+                .series(
+                    Series::new("Memory", palette.ai, u.memory.clone())
+                        .positions(u.memory_positions.clone()),
+                )
+                .threshold(u.cpu_requests, "CPU requests", palette.warn);
+            note = data.source.note();
+        } else {
+            let cluster = data.cluster.clone();
+            let settings = Button::new("metrics-settings", SET_METRICS_SOURCE)
+                .primary()
+                .on_click(cx.listener(move |_, _, _, cx| {
+                    cx.emit(ScreenEvent::Command(Command::ShowClusterSettings(
+                        cluster.clone(),
+                    )));
+                }));
+            let empty = EmptyState::new(UtilizationSource::empty_sentence(self.range))
+                .selector("metrics-empty")
+                .detail(data.source.empty_reason())
+                .action(settings);
+            chart = chart.message(empty);
+        }
+        let note = note.map(|note| {
+            div()
+                .debug_selector(|| "metrics-note".to_owned())
+                .text_size(TEXT_CONTROL)
+                .text_color(palette.mute)
+                .child(note)
+        });
+        div()
+            .debug_selector(|| "utilization-chart".to_owned())
+            .flex()
+            .flex_col()
+            .gap(SPACE_4)
+            .child(chart)
+            .children(note)
+            .into_any_element()
     }
 
     fn workloads(data: &OverviewData, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
@@ -378,7 +435,7 @@ impl Render for OverviewScreen {
                     .py(SPACE_7)
                     .border_r(RULE)
                     .border_color(palette.line)
-                    .child(self.utilization(&data, &palette)),
+                    .child(self.utilization(&data, &palette, cx)),
             )
             .child(
                 div()

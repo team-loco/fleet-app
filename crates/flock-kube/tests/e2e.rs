@@ -1,4 +1,5 @@
 use flock_core::filter::TextFilter;
+use flock_core::overview::{TimeRange, UtilizationSource};
 use flock_core::resources::{Resource, filter_resources};
 use flock_core::{Backend, ClusterId, Command, ContextRef, NewCluster, Page, ResourceKind, Update};
 use flock_kube::LiveBackend;
@@ -420,5 +421,108 @@ async fn filtering_the_cluster_wide_store_matches_a_namespaced_list() {
         assert_eq!(names_in(&deployments, namespace), api.await, "{namespace}");
         let api = namespaced_names::<k8s_openapi::api::core::v1::Service>(&client, namespace);
         assert_eq!(names_in(&services, namespace), api.await, "{namespace}");
+    }
+}
+
+#[test]
+fn live_utilization_has_hour_samples_and_six_hour_local_history() {
+    if !enabled() {
+        return;
+    }
+    let Some(context) = kind_context() else {
+        panic!("kind-fleet-a context required");
+    };
+    let home = kind_only_home(std::slice::from_ref(&context));
+    let sources = DiscoverySources {
+        kubeconfig_env: None,
+        home: Some(home.path().to_path_buf()),
+        folders: Vec::new(),
+    };
+    let mut store = ClusterStore::empty(&home.path().join(SUPPORT_DIR));
+    let added = NewCluster {
+        context: ContextRef {
+            file: home.path().join(".kube/config"),
+            context: CONTEXT.to_owned(),
+        },
+        name: CONTEXT.to_owned(),
+    };
+    assert!(store.add(&[added]).is_ok());
+    let backend = LiveBackend::new(KubeSettings::default(), sources, store);
+    let (updates_tx, updates) = async_channel::unbounded();
+    let (commands, commands_rx) = async_channel::unbounded();
+    Box::new(backend).start(updates_tx, commands_rx);
+    assert!(
+        commands
+            .send_blocking(Command::SelectCluster(Some(ClusterId::new(CONTEXT))))
+            .is_ok()
+    );
+    assert!(
+        commands
+            .send_blocking(Command::SelectPage(Page::ClusterOverview))
+            .is_ok()
+    );
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no local metrics history"
+        );
+        let Ok(Update::Snapshot(snapshot)) = updates.recv_blocking() else {
+            continue;
+        };
+        let Some(detail) = snapshot.detail(&ClusterId::new(CONTEXT)) else {
+            continue;
+        };
+        let hour = detail.overview.utilization(TimeRange::Hour);
+        if hour.is_none_or(|hour| hour.cpu.is_empty()) {
+            continue;
+        }
+        assert_eq!(snapshot.clusters.len(), 1);
+        assert!(matches!(
+            detail.overview.utilization_source,
+            UtilizationSource::Local { since: Some(_) }
+        ));
+        assert!(
+            detail
+                .overview
+                .utilization(TimeRange::SixHours)
+                .is_some_and(|range| !range.cpu.is_empty())
+        );
+        assert!(
+            detail
+                .overview
+                .utilization_source
+                .note()
+                .is_some_and(|note| note.starts_with("Collected by Flock since "))
+        );
+        break;
+    }
+    assert!(
+        commands
+            .send_blocking(Command::Disconnect(ClusterId::new(CONTEXT)))
+            .is_ok()
+    );
+    let deadline = std::time::Instant::now() + WAIT;
+    let directory = flock_kube::metrics_history::cache_dir(home.path());
+    let path = flock_kube::metrics_history::path(&directory, &ClusterId::new(CONTEXT));
+    loop {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "history not persisted on disconnect"
+        );
+        let Ok(Update::Snapshot(snapshot)) = updates.recv_blocking() else {
+            continue;
+        };
+        if snapshot
+            .cluster(&ClusterId::new(CONTEXT))
+            .is_some_and(|cluster| cluster.state == "Disconnected")
+        {
+            assert!(
+                flock_kube::metrics_history::load(&path, jiff::Timestamp::now())
+                    .latest()
+                    .is_some()
+            );
+            break;
+        }
     }
 }

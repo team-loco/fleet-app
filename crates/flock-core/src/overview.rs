@@ -95,6 +95,8 @@ pub struct Utilization {
     pub cpu: Vec<f32>,
     pub memory: Vec<f32>,
     pub cpu_requests: f32,
+    pub cpu_positions: Vec<f32>,
+    pub memory_positions: Vec<f32>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -103,9 +105,59 @@ pub struct Commitment {
     pub limits: f32,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum UtilizationSource {
+    Prometheus,
+    Local { since: Option<String> },
+    Error(String),
+}
+
+impl Default for UtilizationSource {
+    fn default() -> Self {
+        Self::Local { since: None }
+    }
+}
+
+impl UtilizationSource {
+    pub fn note(&self) -> Option<String> {
+        match self {
+            Self::Local { since: Some(since) } => Some(format!("Collected by Flock since {since}")),
+            Self::Local { since: None } => None,
+            Self::Prometheus => None,
+            Self::Error(_) => None,
+        }
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Error(reason) => Some(reason),
+            Self::Prometheus => None,
+            Self::Local { .. } => None,
+        }
+    }
+
+    pub fn empty_sentence(range: TimeRange) -> String {
+        format!("No history for the last {}", range.label())
+    }
+
+    pub fn empty_reason(&self) -> String {
+        match self {
+            Self::Local { since: Some(since) } => {
+                format!("This cluster has no Prometheus and Flock has collected since {since}.")
+            }
+            Self::Local { since: None } => {
+                "This cluster has no Prometheus and Flock has not collected any samples yet.".into()
+            }
+            Self::Prometheus => "Prometheus returned no samples for this window.".into(),
+            Self::Error(reason) => format!("Prometheus failed: {reason}"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Overview {
     pub metrics_source: String,
+    pub utilization_source: UtilizationSource,
     pub cpu: Commitment,
     pub memory: Commitment,
     pub pods: PodPhases,
@@ -205,6 +257,37 @@ pub const fn verb(count: usize, one: &'static str, many: &'static str) -> &'stat
 mod tests {
     use super::*;
     use crate::resources::tests::resource;
+
+    #[test]
+    fn history_messages_explain_source_window_and_failure() {
+        let since = UtilizationSource::Local {
+            since: Some("Oct 14, 09:05".into()),
+        };
+        assert_eq!(
+            since.note().as_deref(),
+            Some("Collected by Flock since Oct 14, 09:05")
+        );
+        assert_eq!(
+            UtilizationSource::empty_sentence(TimeRange::SixHours),
+            "No history for the last 6h"
+        );
+        assert_eq!(
+            since.empty_reason(),
+            "This cluster has no Prometheus and Flock has collected since Oct 14, 09:05."
+        );
+        let fresh = UtilizationSource::Local { since: None };
+        assert_eq!(fresh.note(), None);
+        assert!(
+            fresh
+                .empty_reason()
+                .contains("not collected any samples yet")
+        );
+        let failed = UtilizationSource::Error("forbidden".into());
+        assert_eq!(failed.error(), Some("forbidden"));
+        assert_eq!(failed.note(), None);
+        assert_eq!(UtilizationSource::Prometheus.note(), None);
+        assert_eq!(since.error(), None);
+    }
 
     #[test]
     fn capacity_formats_amount_and_fraction() {

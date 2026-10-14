@@ -26,6 +26,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("exec: {0}")]
     Exec(String),
+    #[error("Metrics history: {0}")]
+    MetricsHistory(&'static str),
     #[error("Prometheus: {0}")]
     Prometheus(String),
     #[error("timed out after {0:?}")]

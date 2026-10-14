@@ -2179,3 +2179,39 @@ fn a_list_header_has_no_count_while_its_rows_are_loading() -> anyhow::Result<()>
     assert!(loading.bounds("page-note").is_none());
     Ok(())
 }
+
+#[test]
+fn every_utilization_window_keeps_the_chart_and_local_collection_note() -> anyhow::Result<()> {
+    let mut ui = Ui::with_state(Screen::Cluster, flock_shots::StateFixture::MetricsLocal)?;
+    for selector in ["range-0", "range-1", "range-2", "range-3"] {
+        ui.click(selector)?;
+        assert!(ui.bounds("utilization-chart").is_some());
+        assert!(ui.bounds("metrics-note").is_some(), "{selector}");
+        assert!(ui.bounds("metrics-empty").is_none(), "{selector}");
+    }
+    Ok(())
+}
+
+#[test]
+fn empty_utilization_opens_the_selected_clusters_metrics_settings() -> anyhow::Result<()> {
+    let mut ui = Ui::with_state(Screen::Cluster, flock_shots::StateFixture::MetricsEmpty)?;
+    ui.click("range-1")?;
+    assert!(ui.bounds("utilization-chart").is_some());
+    assert!(ui.bounds("metrics-empty").is_some());
+    assert!(ui.bounds("metrics-note").is_none());
+    ui.click("metrics-settings")?;
+    assert_eq!(ui.state().location().page, Page::ClusterSettings);
+    Ok(())
+}
+
+#[test]
+fn prometheus_failure_keeps_the_chart_and_offers_retry() -> anyhow::Result<()> {
+    let mut ui = Ui::with_state(Screen::Cluster, flock_shots::StateFixture::MetricsError)?;
+    ui.click("range-3")?;
+    assert!(ui.bounds("utilization-chart").is_some());
+    assert!(ui.bounds("error-state").is_some());
+    assert!(ui.bounds("metrics-empty").is_none());
+    ui.click("metrics-retry")?;
+    assert_eq!(ui.state().location().page, Page::ClusterOverview);
+    Ok(())
+}

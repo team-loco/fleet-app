@@ -15,7 +15,6 @@ pub struct KubeSettings {
     pub metrics_interval: Duration,
     pub prometheus_interval: Duration,
     pub snapshot_interval: Duration,
-    pub usage_history: Duration,
     pub event_limit: usize,
     pub workload_refresh: Duration,
 }
@@ -31,12 +30,6 @@ impl KubeSettings {
         self.metrics_interval = refresh.metrics.duration();
         self.prometheus_interval = refresh.prometheus.duration();
         self.snapshot_interval = refresh.snapshots.duration();
-    }
-
-    pub fn usage_samples(&self) -> usize {
-        let interval = self.metrics_interval.as_secs().max(1);
-        let samples = self.usage_history.as_secs() / interval;
-        usize::try_from(samples).unwrap_or(usize::MAX).max(1)
     }
 }
 
@@ -55,7 +48,6 @@ impl Default for KubeSettings {
             metrics_interval: refresh.metrics.duration(),
             prometheus_interval: refresh.prometheus.duration(),
             snapshot_interval: refresh.snapshots.duration(),
-            usage_history: Duration::from_secs(3600),
             event_limit: 1000,
             workload_refresh: Duration::from_secs(2),
         }

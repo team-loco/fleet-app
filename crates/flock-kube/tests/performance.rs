@@ -87,7 +87,6 @@ const STORM_PODS: usize = LIVE_PODS - STORM_FIRST_POD;
 const SECONDS_PER_MINUTE: u64 = 60;
 const PERCENT: f64 = 100.;
 const EVENT_LIMIT: usize = 200;
-const USAGE_SAMPLES: usize = 60;
 
 fn resident_kib() -> u64 {
     let pid = std::process::id().to_string();
@@ -343,7 +342,7 @@ async fn benchmark_stores(context: &KubeContext, settings: &KubeSettings, cluste
         "watcher population RSS delta={} KiB (includes client/runtime, not exact heap size)",
         rss_stores.saturating_sub(rss_before)
     );
-    let extras = Extras::new(USAGE_SAMPLES);
+    let extras = Extras::default();
     for page in [
         Page::ClusterOverview,
         Page::Pods,
