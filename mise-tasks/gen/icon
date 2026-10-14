@@ -6,15 +6,7 @@ root="$(git rev-parse --show-toplevel)"
 resources="$root/apps/fleet/resources"
 scratch="$(mktemp -d)"
 iconset="$scratch/Fleet.iconset"
-canvas_size=1024
-retina_scale=2
 trap 'rm -rf "$scratch"' EXIT
 mkdir -p "$resources" "$iconset"
-swift "$root/mise-tasks/gen/icon.swift" "$root/assets/fleet-logo.png" "$scratch/Fleet.png"
-sips -z "$canvas_size" "$canvas_size" "$scratch/Fleet.png" --out "$resources/Fleet.png" >/dev/null
-for size in 16 32 128 256 512; do
-  sips -z "$size" "$size" "$resources/Fleet.png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
-  pixels=$((size * retina_scale))
-  sips -z "$pixels" "$pixels" "$resources/Fleet.png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
-done
+uv run --with pillow --with numpy python "$root/mise-tasks/gen/icon.py" "$root/assets/fleet-logo.png" "$resources/Fleet.png" "$iconset"
 iconutil -c icns "$iconset" -o "$resources/Fleet.icns"
