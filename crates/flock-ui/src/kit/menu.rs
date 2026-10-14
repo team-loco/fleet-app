@@ -168,7 +168,8 @@ impl ActionMenu {
         self.generation += 1;
         self.highlighted = None;
         self.restore = window.focused(cx);
-        window.focus(&self.focus, cx);
+        let focus = self.focus.clone();
+        window.defer(cx, move |window, cx| window.focus(&focus, cx));
         cx.notify();
     }
 

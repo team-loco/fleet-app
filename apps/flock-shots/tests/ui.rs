@@ -1995,3 +1995,26 @@ fn reduce_motion_shows_the_final_strip_immediately() -> anyhow::Result<()> {
     assert!(ui.bounds("tab-1").is_none());
     Ok(())
 }
+
+#[test]
+fn a_right_clicked_row_menu_takes_the_keyboard() -> anyhow::Result<()> {
+    for (screen, row, item) in [
+        (Screen::Nodes, "nodes-row-0", "nodes-row-menu-item-0"),
+        (Screen::Pods, "pods-row-0", "pods-row-menu-item-0"),
+        (
+            Screen::Resources,
+            "resources-Deployment-row-0",
+            "resources-Deployment-row-menu-item-0",
+        ),
+    ] {
+        let mut ui = Ui::open(screen)?;
+        ui.right_click(row)?;
+        assert!(ui.bounds(item).is_some(), "{screen:?}: no row menu");
+        ui.press("escape")?;
+        assert!(
+            ui.bounds(item).is_none(),
+            "{screen:?}: escape kept the menu"
+        );
+    }
+    Ok(())
+}
