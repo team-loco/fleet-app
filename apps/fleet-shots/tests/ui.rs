@@ -1070,7 +1070,12 @@ fn the_workload_dock_opens_a_pods_logs_in_a_tab() -> anyhow::Result<()> {
     assert!(location.container.is_some());
     assert_eq!(
         tab_pages(&ui),
-        [Page::Deployments, Page::Logs, Page::Kustomizations, Page::Deployments]
+        [
+            Page::Deployments,
+            Page::Logs,
+            Page::Kustomizations,
+            Page::Deployments
+        ]
     );
     assert_eq!(active_tab(&ui), 1);
     assert!(ui.bounds("tab-logs-follow").is_some());
